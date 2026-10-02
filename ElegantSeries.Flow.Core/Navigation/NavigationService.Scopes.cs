@@ -155,7 +155,7 @@ public sealed partial class NavigationService
             {
                 var capturedRegion = region;
                 var capturedViewModel = target.ViewModel;
-                pendingEvents.Add(() => ViewModelDisposed?.Invoke(capturedRegion, capturedViewModel));
+                pendingEvents.Add(() => ViewModelReleased?.Invoke(capturedRegion, capturedViewModel));
             }
         }
     }
@@ -177,7 +177,7 @@ public sealed partial class NavigationService
             {
                 var capturedRegion = region;
                 var capturedViewModel = target.ViewModel;
-                pendingEvents.Add(() => ViewModelDisposed?.Invoke(capturedRegion, capturedViewModel));
+                pendingEvents.Add(() => ViewModelReleased?.Invoke(capturedRegion, capturedViewModel));
             }
         }
     }

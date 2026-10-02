@@ -44,7 +44,7 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// Collected exceptions are rethrown afterwards — a single exception is rethrown as-is,
 /// several are wrapped in an <see cref="AggregateException"/>. <i>Within</i> one page scope,
 /// the DI container stops at the first throwing disposable (platform behavior); this is
-/// documented on <see cref="INavigationService.ViewModelDisposed"/> and cannot be worked
+/// documented on <see cref="INavigationService.ViewModelReleased"/> and cannot be worked
 /// around by the navigation service.
 /// </para>
 /// </remarks>
@@ -90,7 +90,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
     public event Action<string, INavigationViewModel>? RegionNavigated;
 
     /// <inheritdoc />
-    public event Action<string, INavigationViewModel>? ViewModelDisposed;
+    public event Action<string, INavigationViewModel>? ViewModelReleased;
 
     /// <inheritdoc />
     public event Action<string>? RegionCacheCleared;

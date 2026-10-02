@@ -186,7 +186,7 @@ mainstream frameworks (cf. Prism's `IsNavigationTarget`). Only an instance livin
 *different* region's stack throws `InvalidOperationException` (a ViewModel cannot be
 active in two regions at once).
 
-`ViewModelDisposed` means the service **released ownership** (the page left navigation
+`ViewModelReleased` means the service **released ownership** (the page left navigation
 state and its scope is being disposed), not "every disposable was released": the DI
 container stops a scope at the first throwing disposable. The event also fires for
 Singleton ViewModels when their page is torn down — the page scope is disposed, but the
@@ -247,7 +247,7 @@ in platform-specific layers.
 | `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentMode(region?)` | Queries |
 | `ClearCache(region?)` / `ClearCacheAsync(region?)` | Clear one region's KeepAlive cache |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | Clear all KeepAlive caches |
-| `RegionNavigated` / `ViewModelDisposed` / `RegionCacheCleared` | Events |
+| `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` | Events |
 | `AddFlowNavigation()` / `AddScopedFlowNavigation()` | DI registration |
 
 ## Contributing

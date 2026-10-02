@@ -300,7 +300,7 @@ public class NavigationServiceTests
     public async Task GoBackAsync_ShouldReturnToPreviousViewModel_AndDisposeCurrent()
     {
         INavigationViewModel? disposedVm = null;
-        _navigationService.ViewModelDisposed += (_, vm) => disposedVm = vm;
+        _navigationService.ViewModelReleased += (_, vm) => disposedVm = vm;
 
         await _navigationService.NavigateToAsync<TestHomeViewModel>();
         await _navigationService.NavigateToAsync<TestDetailViewModel, string>("Arg");
@@ -628,7 +628,7 @@ public class NavigationServiceTests
         INavigationViewModel? disposedVm = null;
 
         _navigationService.RegionCacheCleared += r => clearedRegion = r;
-        _navigationService.ViewModelDisposed += (_, vm) => disposedVm = vm;
+        _navigationService.ViewModelReleased += (_, vm) => disposedVm = vm;
 
         await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
         _navigationService.ClearCache("MainRegion");
@@ -650,7 +650,7 @@ public class NavigationServiceTests
         int disposedCount = 0;
 
         _navigationService.RegionCacheCleared += r => clearedRegions.Add(r);
-        _navigationService.ViewModelDisposed += (_, _) => disposedCount++;
+        _navigationService.ViewModelReleased += (_, _) => disposedCount++;
 
         await _navigationService.NavigateToAsync<KeepAliveViewModel>("Region1", NavigationMode.KeepAlive);
         await _navigationService.NavigateToAsync<KeepAliveViewModel>("Region2", NavigationMode.KeepAlive);
@@ -682,7 +682,7 @@ public class NavigationServiceTests
         await navService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
 
         bool disposedEventTriggered = false;
-        navService.ViewModelDisposed += (_, _) => disposedEventTriggered = true;
+        navService.ViewModelReleased += (_, _) => disposedEventTriggered = true;
 
         navService.Dispose();
         Assert.True(disposedEventTriggered);
@@ -841,13 +841,13 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task ClearCacheAsync_ShouldRaiseRegionCacheCleared_AndViewModelDisposedEvents()
+    public async Task ClearCacheAsync_ShouldRaiseRegionCacheCleared_AndViewModelReleasedEvents()
     {
         string? clearedRegion = null;
         INavigationViewModel? disposedVm = null;
 
         _navigationService.RegionCacheCleared += r => clearedRegion = r;
-        _navigationService.ViewModelDisposed += (_, vm) => disposedVm = vm;
+        _navigationService.ViewModelReleased += (_, vm) => disposedVm = vm;
 
         await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
         await _navigationService.ClearCacheAsync("MainRegion");
@@ -939,11 +939,11 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task NavigateAway_WhenPageScopeDisposalThrows_ViewModelDisposedStillFires_PinOwnershipReleased()
+    public async Task NavigateAway_WhenPageScopeDisposalThrows_ViewModelReleasedStillFires_PinOwnershipReleased()
     {
         INavigationViewModel? releasedVm = null;
         string? releasedRegion = null;
-        _navigationService.ViewModelDisposed += (region, vm) => { releasedRegion = region; releasedVm = vm; };
+        _navigationService.ViewModelReleased += (region, vm) => { releasedRegion = region; releasedVm = vm; };
 
         await _navigationService.NavigateToAsync<ThrowingKeepAliveViewModel>("EventRegion");
         var throwing = (ThrowingKeepAliveViewModel)_navigationService.GetCurrentViewModel("EventRegion")!;
@@ -1581,7 +1581,7 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task ViewModelDisposed_FiresForSingletonPageTeardown_ButInstanceSurvives()
+    public async Task ViewModelReleased_FiresForSingletonPageTeardown_ButInstanceSurvives()
     {
         var services = new ServiceCollection();
         services.AddFlowNavigation();
@@ -1591,12 +1591,12 @@ public class NavigationServiceTests
         var navigationService = (NavigationService)serviceProvider.GetRequiredService<INavigationService>();
 
         INavigationViewModel? disposedVm = null;
-        navigationService.ViewModelDisposed += (_, vm) => disposedVm = vm;
+        navigationService.ViewModelReleased += (_, vm) => disposedVm = vm;
 
         await navigationService.NavigateToAsync<SingletonViewModel>();
         var singleton = (SingletonViewModel)navigationService.GetCurrentViewModel()!;
         // Replace destroys the singleton's page (a merely covered page in New mode stays
-        // alive on the back stack and must NOT raise ViewModelDisposed).
+        // alive on the back stack and must NOT raise ViewModelReleased).
         await navigationService.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.Replace);
 
         // Ownership was released (event fired) but the root-owned instance survives.

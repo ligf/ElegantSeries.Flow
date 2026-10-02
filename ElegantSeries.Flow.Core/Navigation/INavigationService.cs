@@ -105,7 +105,7 @@ public interface INavigationService
     /// the service keeps the subscriber alive.
     /// </para>
     /// </remarks>
-    event Action<string, INavigationViewModel>? ViewModelDisposed;
+    event Action<string, INavigationViewModel>? ViewModelReleased;
 
     /// <summary>
     /// Raised when a region's KeepAlive cache is cleared.

@@ -109,7 +109,7 @@ public sealed partial class NavigationService
             foreach (var region in plan.RegionsToNotify)
             {
                 var capturedRegion = region;
-                work.Events.Add(() => ViewModelDisposed?.Invoke(capturedRegion, entry.ViewModel));
+                work.Events.Add(() => ViewModelReleased?.Invoke(capturedRegion, entry.ViewModel));
             }
         });
     }
