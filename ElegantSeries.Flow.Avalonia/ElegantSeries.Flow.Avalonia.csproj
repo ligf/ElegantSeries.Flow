@@ -1,20 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
-    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsAotCompatible>true</IsAotCompatible>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
-    <!-- NuGet package metadata (aligned with the ElegantSeries.Flow core package) -->
-    <PackageId>ElegantSeries.Flow.WPF</PackageId>
+    <!-- NuGet package metadata (aligned with ElegantSeries.Flow.Core) -->
+    <PackageId>ElegantSeries.Flow.Avalonia</PackageId>
     <Version>0.1.1</Version>
     <Authors>ligf</Authors>
-    <Description>WPF UI integration for the ElegantSeries.Flow MVVM navigation library: an AOT-friendly view locator, a typed BaseView base class, and a region-aware NavigationHost control.</Description>
-    <PackageTags>navigation;mvvm;wpf;aot;trimming;viewmodel</PackageTags>
+    <Description>Avalonia UI adapter for ElegantSeries.Flow: a zero-reflection view locator, a typed BaseView, and a region NavigationHost that binds to INavigationService.</Description>
+    <PackageTags>navigation;mvvm;avalonia;viewmodel;aot;trimming</PackageTags>
     <PackageProjectUrl>https://github.com/ligf/ElegantSeries.Flow</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ligf/ElegantSeries.Flow</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -34,14 +32,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!--
-      Local development uses a project reference.
-      Before publishing to NuGet, replace with:
-        <PackageReference Include="ElegantSeries.Flow" Version="0.1.1" />
-    -->
-    <ProjectReference Include="../ElegantSeries.Flow.Core/ElegantSeries.Flow.Core.csproj" />
+    <PackageReference Include="Avalonia" Version="12.1.3" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.102" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Local development only. When publishing, replace with:
+         <PackageReference Include="ElegantSeries.Flow" Version="0.1.1" /> -->
+    <ProjectReference Include="../ElegantSeries.Flow.Core/ElegantSeries.Flow.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
