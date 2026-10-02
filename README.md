@@ -66,13 +66,14 @@ ViewModels' lifetimes are independent of this choice (see
 
 **Mixed setup** — one global stack plus isolated windows: register the singleton
 for the shared stack, and construct per-window services manually from each
-window's scope (they are not registered in DI):
+window's scope (they are not registered in DI). The scope must live as long as
+the window — dispose it when the window closes, not earlier:
 
 ```csharp
 services.AddFlowNavigation(); // global stack
 
 // Per-window isolated stack:
-using var windowScope = rootProvider.CreateScope();
+var windowScope = rootProvider.CreateScope(); // dispose when the window closes
 var windowNavigation = new NavigationService(windowScope.ServiceProvider);
 ```
 
