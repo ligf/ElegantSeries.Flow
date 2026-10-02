@@ -28,5 +28,10 @@ jobs:
       - name: Build
         run: dotnet build ElegantSeries.Flow.slnx -c Release --nologo
 
-      - name: Test
-        run: dotnet test ElegantSeries.Flow.slnx -c Release --no-build
+      - name: Test (Linux)
+        if: runner.os == 'Linux'
+        run: dotnet test ElegantSeries.Flow.slnx -c Release --no-build -f net10.0
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        run: dotnet test ElegantSeries.Flow.slnx -c Release --no-build        
