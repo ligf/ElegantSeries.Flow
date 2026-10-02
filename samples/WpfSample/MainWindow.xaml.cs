@@ -24,22 +24,12 @@ public partial class MainWindow : Window
 
         // Navigate after the hosts are attached so the first pages are shown.
         // Failures are observed instead of fire-and-forget.
-        Observe(navigation.NavigateToAsync<MenuViewModel>("Sidebar"));
-        Observe(navigation.NavigateToAsync<HomeViewModel>("MainRegion"));
+        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<MenuViewModel>("Sidebar"), ReportError);
+        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<HomeViewModel>("MainRegion"), ReportError);
     }
 
-    private async void Observe(Task<bool> navigation)
-    {
-        try
-        {
-            await navigation;
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Navigation failed: {ex.Message}", "MainWindow",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-    }
+    private void ReportError(string message) =>
+        MessageBox.Show(message, "MainWindow", MessageBoxButton.OK, MessageBoxImage.Warning);
 
     protected override void OnClosed(EventArgs e)
     {

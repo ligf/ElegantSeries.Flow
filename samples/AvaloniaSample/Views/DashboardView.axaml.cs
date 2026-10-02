@@ -32,20 +32,29 @@ public partial class DashboardView : ElegantSeries.Flow.Avalonia.Views.BaseView<
             host.ViewLocator = views;
         }
 
-        // Hosts do not replay missed events, so quadrants are (re-)navigated
-        // every time the view attaches: refreshIfActive re-activates the
-        // already-active page (raising RegionNavigated for the fresh host)
-        // instead of pushing a duplicate. Exceptions are observed.
-        try
+        // Hosts do not replay missed events, so quadrants are navigated after
+        // the hosts attach: refreshIfActive re-activates the already-active
+        // page (raising RegionNavigated for the fresh hosts) instead of
+        // pushing a duplicate. Each navigation creates a new DashboardView,
+        // so re-attaching the same instance is not supported: its hosts are
+        // disposed on detach and a disposed host cannot be revived.
+        // Each quadrant navigates independently: one failure must not block
+        // the others.
+        await TryNavigate("Q1", () => navigation.NavigateToAsync<HomeViewModel>("Q1", refreshIfActive: true));
+        await TryNavigate("Q2", () => navigation.NavigateToAsync<CounterViewModel>("Q2", NavigationMode.KeepAlive, refreshIfActive: true));
+        await TryNavigate("Q3", () => navigation.NavigateToAsync<DetailViewModel, string>("Top-right detail", "Q3", refreshIfActive: true));
+        await TryNavigate("Q4", () => navigation.NavigateToAsync<HomeViewModel>("Q4", refreshIfActive: true));
+
+        async Task TryNavigate(string region, Func<Task<bool>> navigate)
         {
-            await navigation.NavigateToAsync<HomeViewModel>("Q1", refreshIfActive: true);
-            await navigation.NavigateToAsync<CounterViewModel>("Q2", NavigationMode.KeepAlive, refreshIfActive: true);
-            await navigation.NavigateToAsync<DetailViewModel, string>("Top-right detail", "Q3", refreshIfActive: true);
-            await navigation.NavigateToAsync<HomeViewModel>("Q4", refreshIfActive: true);
-        }
-        catch (Exception ex)
-        {
-            ErrorText.Text = $"Quadrant navigation failed: {ex.Message}";
+            try
+            {
+                await navigate();
+            }
+            catch (Exception ex)
+            {
+                ErrorText.Text += $"[{region}: {ex.Message}] ";
+            }
         }
     }
 
