@@ -1,4 +1,5 @@
 using AvaloniaSample.ViewModels;
+using ElegantSeries.Flow.Avalonia.Hosting;
 using ElegantSeries.Flow.Avalonia.Locating;
 using ElegantSeries.Flow.Core.Navigation;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,9 +8,12 @@ namespace AvaloniaSample.Views;
 
 public partial class DashboardView : ElegantSeries.Flow.Avalonia.Views.BaseView<DashboardViewModel>
 {
+    private readonly NavigationHost[] _hosts;
+
     public DashboardView()
     {
         InitializeComponent();
+        _hosts = [Q1Host, Q2Host, Q3Host, Q4Host];
         AttachedToVisualTree += OnAttached;
         DetachedFromVisualTree += OnDetached;
     }
@@ -22,25 +26,22 @@ public partial class DashboardView : ElegantSeries.Flow.Avalonia.Views.BaseView<
             ?? App.Services.GetRequiredService<INavigationService>();
         var views = App.Services.GetRequiredService<IViewLocator>();
 
-        foreach (var host in new[] { Q1Host, Q2Host, Q3Host, Q4Host })
+        foreach (var host in _hosts)
         {
             host.NavigationService = navigation;
             host.ViewLocator = views;
         }
 
-        // Navigate quadrants only after the nested hosts are attached (they
-        // do not replay missed events), and only into empty regions.
-        // Exceptions are observed instead of fire-and-forget.
+        // Hosts do not replay missed events, so quadrants are (re-)navigated
+        // every time the view attaches: refreshIfActive re-activates the
+        // already-active page (raising RegionNavigated for the fresh host)
+        // instead of pushing a duplicate. Exceptions are observed.
         try
         {
-            if (navigation.GetCurrentViewModel("Q1") is null)
-                await navigation.NavigateToAsync<HomeViewModel>("Q1");
-            if (navigation.GetCurrentViewModel("Q2") is null)
-                await navigation.NavigateToAsync<CounterViewModel>("Q2", NavigationMode.KeepAlive);
-            if (navigation.GetCurrentViewModel("Q3") is null)
-                await navigation.NavigateToAsync<DetailViewModel, string>("Top-right detail", "Q3");
-            if (navigation.GetCurrentViewModel("Q4") is null)
-                await navigation.NavigateToAsync<HomeViewModel>("Q4");
+            await navigation.NavigateToAsync<HomeViewModel>("Q1", refreshIfActive: true);
+            await navigation.NavigateToAsync<CounterViewModel>("Q2", NavigationMode.KeepAlive, refreshIfActive: true);
+            await navigation.NavigateToAsync<DetailViewModel, string>("Top-right detail", "Q3", refreshIfActive: true);
+            await navigation.NavigateToAsync<HomeViewModel>("Q4", refreshIfActive: true);
         }
         catch (Exception ex)
         {
@@ -52,7 +53,7 @@ public partial class DashboardView : ElegantSeries.Flow.Avalonia.Views.BaseView<
     {
         AttachedToVisualTree -= OnAttached;
         DetachedFromVisualTree -= OnDetached;
-        foreach (var host in new[] { Q1Host, Q2Host, Q3Host, Q4Host })
+        foreach (var host in _hosts)
             host.Dispose();
     }
 }

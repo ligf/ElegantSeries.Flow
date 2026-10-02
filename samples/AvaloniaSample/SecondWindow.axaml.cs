@@ -29,7 +29,21 @@ public partial class SecondWindow : Window
         WindowHost.NavigationService = _navigation;
         WindowHost.ViewLocator = views;
 
-        _ = _navigation.NavigateToAsync<HomeViewModel>();
+        Observe(_navigation.NavigateToAsync<HomeViewModel>());
+    }
+
+    // Surfaces failures of the initial navigation instead of leaving an
+    // unobserved fire-and-forget task.
+    private async void Observe(Task<bool> navigation)
+    {
+        try
+        {
+            await navigation;
+        }
+        catch (Exception ex)
+        {
+            ErrorText.Text = $"Navigation failed: {ex.Message}";
+        }
     }
 
     protected override void OnClosed(EventArgs e)
