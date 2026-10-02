@@ -1,8 +1,9 @@
 # Samples
 
 Two navigation samples (WPF + Avalonia, same feature set). They are standalone
-projects (not part of `ElegantSeries.Flow.slnx` and not built by CI) — open the
-folder you need in your IDE and run.
+projects (not part of the main `ElegantSeries.Flow.slnx` and not built by CI) —
+open [ElegantSeries.Flow.Samples.slnx](ElegantSeries.Flow.Samples.slnx) in your
+IDE to work with both, or open the folder you need and run.
 
 | Sample | Framework | How to run |
 |--------|-----------|------------|

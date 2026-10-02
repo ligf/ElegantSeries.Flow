@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="WpfSample/WpfSample.csproj" />
+  <Project Path="AvaloniaSample/AvaloniaSample.csproj" />
+</Solution>
