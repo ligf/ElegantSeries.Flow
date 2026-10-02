@@ -1,4 +1,6 @@
 <Solution>
   <Project Path="ElegantSeries.Flow.Core/ElegantSeries.Flow.Core.csproj" />
   <Project Path="ElegantSeries.Flow.Core.Tests/ElegantSeries.Flow.Core.Tests.csproj" />
+  <Project Path="ElegantSeries.Flow.WPF/ElegantSeries.Flow.WPF.csproj" />
+  <Project Path="ElegantSeries.Flow.WPF.Tests/ElegantSeries.Flow.WPF.Tests.csproj" />
 </Solution>

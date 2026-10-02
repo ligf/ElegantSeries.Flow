@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      Dual-target test strategy (see README.md in this project):
+      - net10.0: pure-logic tests. The WPF assembly cannot even start on Linux
+        (Microsoft.WindowsDesktop.App is Windows-only), so the UI-agnostic
+        library sources are compiled into the test assembly directly.
+      - net10.0-windows: full WPF tests. Compile-verified on Linux via
+        EnableWindowsTargeting; executed on Windows CI.
+    -->
+    <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>
+    <UseWPF Condition="'$(TargetFramework)' == 'net10.0-windows'">true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="10.1.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="xunit.v3" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- net10.0 leg: logic tests, runnable on Linux. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Compile Include="..\ElegantSeries.Flow.WPF\ViewRegistry.cs" Link="SharedSources\ViewRegistry.cs" />
+    <Compile Include="..\ElegantSeries.Flow.WPF\NavigationHostController.cs" Link="SharedSources\NavigationHostController.cs" />
+    <Compile Include="..\ElegantSeries.Flow.WPF\IDispatcher.cs" Link="SharedSources\IDispatcher.cs" />
+    <Compile Include="Shared\TestDoubles.cs" />
+    <Compile Include="Logic\*.cs" />
+    <ProjectReference Include="..\ElegantSeries.Flow.Core\ElegantSeries.Flow.Core.csproj" />
+  </ItemGroup>
+
+  <!-- net10.0-windows leg: WPF tests, executed on Windows CI. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <Compile Include="Shared\TestDoubles.cs" />
+    <Compile Include="Windows\*.cs" />
+    <ProjectReference Include="..\ElegantSeries.Flow.WPF\ElegantSeries.Flow.WPF.csproj" />
+    <ProjectReference Include="..\ElegantSeries.Flow.Core\ElegantSeries.Flow.Core.csproj" />
+  </ItemGroup>
+
+</Project>
