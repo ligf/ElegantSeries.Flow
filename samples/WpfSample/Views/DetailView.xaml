@@ -2,8 +2,12 @@
              x:TypeArguments="vm:DetailViewModel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
-             xmlns:vm="clr-namespace:WpfSample.ViewModels">
+             xmlns:vm="clr-namespace:WpfSample.ViewModels"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:DetailViewModel, IsDesignTimeCreatable=False}">
     <StackPanel Margin="24" VerticalAlignment="Center">
         <TextBlock Text="Detail" FontSize="28" Margin="0,0,0,8" />
         <TextBlock Text="{Binding Message}" Margin="0,0,0,16" />
