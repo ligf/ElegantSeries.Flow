@@ -5,4 +5,6 @@
   <Project Path="tests/ElegantSeries.Flow.Core.Tests/ElegantSeries.Flow.Core.Tests.csproj" />
   <Project Path="tests/ElegantSeries.Flow.WPF.Tests/ElegantSeries.Flow.WPF.Tests.csproj" />
   <Project Path="tests/ElegantSeries.Flow.Avalonia.Tests/ElegantSeries.Flow.Avalonia.Tests.csproj" />
+  <Project Path="samples/WpfSample/WpfSample.csproj" />
+  <Project Path="samples/AvaloniaSample/AvaloniaSample.csproj" />
 </Solution>
