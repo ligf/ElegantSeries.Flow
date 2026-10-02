@@ -1,1 +1,1 @@
-{"sdk":{"rollForward":"latestMinor","version":"10.0.401"},"test":{"runner":"Microsoft.Testing.Platform"}}
+{"test":{"runner":"Microsoft.Testing.Platform"}}
