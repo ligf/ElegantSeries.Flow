@@ -101,6 +101,45 @@ active ViewModel to a View. The typical pattern is a `ContentControl`-style host
 ViewModel→View mapping, decorate ViewModels with `[AotRoute(typeof(DetailView))]` from
 the `ElegantSeries.Flow.Core.Routing` namespace.
 
+## UI integration
+
+Ready-made hosts for desktop UI frameworks — same API surface, per-platform namespaces:
+
+| Package | Targets | Host control | View base class |
+|---------|---------|--------------|-----------------|
+| `ElegantSeries.Flow.WPF` | `net10.0-windows` | `NavigationHost` (`ElegantSeries.Flow.WPF.Hosting`) | `BaseView<TViewModel>` (`ElegantSeries.Flow.WPF.Views`) |
+| `ElegantSeries.Flow.Avalonia` | `net10.0` | `NavigationHost` (`ElegantSeries.Flow.Avalonia.Hosting`) | `BaseView<TViewModel>` (`ElegantSeries.Flow.Avalonia.Views`) |
+
+```bash
+dotnet add package ElegantSeries.Flow.WPF        # WPF apps
+dotnet add package ElegantSeries.Flow.Avalonia   # Avalonia apps
+```
+
+```csharp
+// 1. Register views (AOT-safe: no runtime reflection)
+services.AddFlowViews(locator =>
+{
+    locator.Register<HomeView, HomeViewModel>();
+    locator.Register<DetailView, DetailViewModel>();
+});
+
+// 2. Attach the host (typically in the window's code-behind)
+navigationHost.Attach(navigationService);
+```
+
+```xml
+<!-- 3. Drop the host in XAML -->
+<flow:NavigationHost x:Name="navigationHost" RegionName="MainRegion" />
+```
+
+Both hosts listen to `RegionNavigated`, resolve the View via the registered `IViewLocator`
+(`ElegantSeries.Flow.WPF.Locating` / `ElegantSeries.Flow.Avalonia.Locating`), marshal to the
+UI thread through `IDispatcher` (`...Threading`), and set it as content. ViewModels must
+implement `INavigationViewModel` (or derive from `BaseViewModel` / `NavigationViewModelBase`).
+
+See [ElegantSeries.Flow.WPF](src/ElegantSeries.Flow.WPF/README.md) and
+[ElegantSeries.Flow.Avalonia](src/ElegantSeries.Flow.Avalonia/README.md) for full usage.
+
 ## Navigation modes
 
 | Mode | Behavior |

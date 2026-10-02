@@ -1,0 +1,19 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Core.ViewModels;
+
+namespace WpfSample.ViewModels;
+
+public sealed partial class DetailViewModel : BaseViewModel, INavigationAware<string>
+{
+    [ObservableProperty]
+    private string _message = string.Empty;
+
+    public void OnNavigatedTo(string parameter) => Message = parameter;
+
+    public void OnNavigatedFrom() { }
+
+    [RelayCommand]
+    private Task GoBackAsync() => base.GoBackAsync();
+}
