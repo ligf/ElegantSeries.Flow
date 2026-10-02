@@ -168,7 +168,9 @@ UI thread through `IDispatcher` (`...Threading`), and set it as content. ViewMod
 implement `INavigationViewModel` (or derive from `BaseViewModel` / `NavigationViewModelBase`).
 
 See [ElegantSeries.Flow.WPF](src/ElegantSeries.Flow.WPF/README.md) and
-[ElegantSeries.Flow.Avalonia](src/ElegantSeries.Flow.Avalonia/README.md) for full usage.
+[ElegantSeries.Flow.Avalonia](src/ElegantSeries.Flow.Avalonia/README.md) for full usage,
+and [samples](samples/) for runnable WPF/Avalonia demos (multi-region layout,
+typed parameters, KeepAlive, singleton ViewModel).
 
 ## Navigation modes
 
