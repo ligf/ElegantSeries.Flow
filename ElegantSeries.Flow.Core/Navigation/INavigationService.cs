@@ -35,8 +35,10 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// <b>Cancellation:</b> <c>NavigateToAsync</c> / <c>GoBackAsync</c> accept a
 /// <see cref="CancellationToken"/> that is honored until the region stack is updated.
 /// Cancellation before that point releases the created page scope (if any) and throws
-/// <see cref="OperationCanceledException"/>. Once the stack has been updated the
-/// transition runs to completion and the token is ignored.
+/// <see cref="OperationCanceledException"/>. The from-guard runs before the page scope
+/// is created, so cancellation during the guard never leaves a scope behind; every
+/// cancellation point after scope creation releases it. Once the stack has been updated
+/// the transition runs to completion and the token is ignored.
 /// </para>
 /// <para>
 /// <b>Transition order</b> (fixed): <c>OnNavigatedFrom</c> →
@@ -76,7 +78,8 @@ public interface INavigationService
     event Action<string, INavigationViewModel>? RegionNavigated;
 
     /// <summary>
-    /// Raised when the navigation service releases ownership of a page's ViewModel.
+    /// Raised when the navigation service releases ownership of a page's ViewModel
+    /// (end of page ownership — not necessarily "the instance was disposed"; see remarks).
     /// </summary>
     /// <remarks>
     /// <para>Parameters: region name, released ViewModel.</para>
