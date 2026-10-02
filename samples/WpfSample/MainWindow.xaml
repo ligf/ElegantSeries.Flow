@@ -1,0 +1,7 @@
+<Window x:Class="WpfSample.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Hosting;assembly=ElegantSeries.Flow.WPF"
+        Title="WpfSample" Height="300" Width="400">
+    <flow:NavigationHost x:Name="MainHost" RegionName="MainRegion" />
+</Window>

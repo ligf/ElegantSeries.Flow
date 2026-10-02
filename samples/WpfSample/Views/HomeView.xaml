@@ -1,0 +1,12 @@
+<flow:BaseView x:Class="WpfSample.Views.HomeView"
+             x:TypeArguments="vm:HomeViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:WpfSample.ViewModels">
+    <StackPanel Margin="24" VerticalAlignment="Center">
+        <TextBlock Text="{Binding Title}" FontSize="28" Margin="0,0,0,16" />
+        <Button Content="Go to Detail" Command="{Binding GoToDetailCommand}"
+                Width="160" HorizontalAlignment="Left" />
+    </StackPanel>
+</flow:BaseView>
