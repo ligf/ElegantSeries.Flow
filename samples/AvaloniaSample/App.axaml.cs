@@ -30,6 +30,9 @@ public partial class App : Application
         services.AddTransient<HomeViewModel>();
         services.AddTransient<DetailViewModel>();
         services.AddTransient<CounterViewModel>();
+        services.AddTransient<DashboardViewModel>();
+        services.AddTransient<GuardedViewModel>();
+        services.AddTransient<FeaturesViewModel>();
 
         // AOT-safe view registration: no runtime reflection.
         services.AddFlowViews(views =>
@@ -38,6 +41,9 @@ public partial class App : Application
             views.Register<HomeView, HomeViewModel>();
             views.Register<DetailView, DetailViewModel>();
             views.Register<CounterView, CounterViewModel>();
+            views.Register<DashboardView, DashboardViewModel>();
+            views.Register<GuardedView, GuardedViewModel>();
+            views.Register<FeaturesView, FeaturesViewModel>();
         });
 
         Services = services.BuildServiceProvider();
