@@ -14,7 +14,7 @@ It contains no navigation logic itself — it binds the platform-agnostic
 | `IDispatcher` / `AvaloniaDispatcher` | UI-thread marshalling abstraction (testable) |
 | `FlowViewServiceExtensions` | `services.AddFlowViews(...)` DI registration |
 
-Requires `ElegantSeries.Flow` **>= 0.1.0** (this package is version 0.1.0).
+Requires `ElegantSeries.Flow` **>= 0.1.1** (this package is version 0.1.1).
 
 ## Usage
 
@@ -110,7 +110,7 @@ parameters and a dictionary keyed by `viewModel.GetType()` — no
 
 | This package | Requires |
 |---|---|
-| 0.1.0 | ElegantSeries.Flow >= 0.1.0, Avalonia 12.x |
+| 0.1.1 | ElegantSeries.Flow >= 0.1.1, Avalonia 12.x |
 
 ## License
 
