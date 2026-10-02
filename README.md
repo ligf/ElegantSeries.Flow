@@ -117,13 +117,40 @@ public interface INavigationGuard
 }
 ```
 
-Lifecycle callbacks and `Dispose` calls always run **outside** internal locks, so they may
+Lifecycle callbacks and page-scope disposals always run **outside** internal locks, so they may
 safely call back into `INavigationService` without deadlocking.
+
+### Page-level service scopes (v2.0)
+
+Every page gets its own `IServiceScope`. The ViewModel is resolved from that scope, and
+leaving the page disposes the scope — the DI container then releases the ViewModel and
+its whole Transient/Scoped dependency graph. The navigation service never disposes
+ViewModels directly.
+
+| Registration | Navigation behavior | When the page is left |
+|---|---|---|
+| `Transient` | A new instance per page scope | The scope disposes the ViewModel and its dependency graph |
+| `Scoped` | One instance per page scope | The scope disposes it |
+| `Singleton` | Shared from the root container | The page scope never disposes it |
+
+A freshly resolved ViewModel *instance* cannot appear twice on navigation stacks:
+navigating to a type whose instance is already the active page is a no-op returning
+`true`; navigating to a fresh instance that lives elsewhere on a stack throws
+`InvalidOperationException` (typically a Singleton ViewModel navigated to twice —
+navigate back to it instead). Exception: re-navigating to a *cached* KeepAlive page
+reuses the cached instance and may push it again (v1.x compatible); the shared page
+scope is disposed only after its last stack/cache reference disappears.
+
+`ViewModelDisposed` means the service **released ownership** (the page left navigation
+state and its scope is being disposed), not "every disposable was released": the DI
+container stops a scope at the first throwing disposable. Singleton ViewModels are never
+disposed by page scopes.
 
 ## KeepAlive cache
 
-`NavigationMode.KeepAlive` keeps the ViewModel in a per-region cache keyed by
-`(region, ViewModel type)`. Navigating to the same type reuses the cached instance.
+`NavigationMode.KeepAlive` keeps the page (ViewModel + its page scope) in a per-region
+cache keyed by `(region, ViewModel type)`. Navigating to the same type reuses the cached
+page and its scope — no new scope is created.
 
 ```csharp
 await navigation.NavigateToAsync<SettingsViewModel>(mode: NavigationMode.KeepAlive);
@@ -132,19 +159,24 @@ navigation.ClearCache("MainRegion");   // or await navigation.ClearCacheAsync("M
 navigation.ClearAllCache();            // or await navigation.ClearAllCacheAsync();
 ```
 
-ViewModels that are still referenced by a navigation stack are **not** disposed immediately;
-their disposal is deferred until the last reference disappears. Disposal prefers
-`IAsyncDisposable` on the async paths; the synchronous paths only call `IDisposable`
-(ViewModels implementing only `IAsyncDisposable` are skipped there — use the async
-variants for full cleanup).
+One `(region, type)` key holds at most one cached page. Page scopes still referenced by a
+navigation stack are **not** disposed immediately; their disposal is deferred until the
+last stack/cache reference disappears. Disposal prefers `IAsyncDisposable` on the async
+paths. The synchronous paths dispose scopes via `IDisposable.Dispose` — if a page scope
+contains a service that only implements `IAsyncDisposable`, the DI container throws
+`InvalidOperationException` (use the async variants when pages need async cleanup).
 
 ### Disposal error semantics
 
-Cache clearing and service disposal are **best-effort**: every ViewModel is attempted even
-if one of them throws, so a single faulty `Dispose` can never leak the remaining
-ViewModels. After cleanup and events finish, collected exceptions are rethrown —
-a single exception is rethrown preserving its original stack trace, several are wrapped
-in an `AggregateException`.
+Teardown is **best-effort across pages**: every page scope is attempted even if one of
+them throws, so a single faulty `Dispose` can never leak the remaining pages. After
+cleanup and events finish, collected exceptions are rethrown — a single exception is
+rethrown preserving its original stack trace, several are wrapped in an
+`AggregateException`.
+
+**Caveat:** *within* one page scope the DI container stops disposing remaining services
+after the first throwing disposable (platform behavior, sync and async alike). Only
+cross-page isolation is provided by the navigation service.
 
 ## Thread safety
 

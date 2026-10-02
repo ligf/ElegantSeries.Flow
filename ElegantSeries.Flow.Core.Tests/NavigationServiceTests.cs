@@ -203,6 +203,11 @@ public class NavigationServiceTests
         services.AddTransient<KeepAliveViewModel>();
         services.AddTransient<ThrowingKeepAliveViewModel>();
         services.AddTransient<ThrowingAsyncDisposeViewModel>();
+        services.AddTransient<DisposableService>();
+        services.AddTransient<ServiceDependentViewModel>();
+        services.AddTransient<ScopedViewModel>();
+        services.AddTransient<ThrowingDependencyViewModel>();
+        services.AddSingleton<SingletonViewModel>();
 
         _serviceProvider = services.BuildServiceProvider();
         _navigationService = _serviceProvider.GetRequiredService<INavigationService>();
@@ -387,7 +392,39 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task ClearCache_WhenInstanceIsCachedInAnotherRegion_ShouldDeferDisposal()
+    public async Task KeepAlive_WhenCachedInstancePushedTwice_ShouldShareScope_AndDisposeExactlyOnce()
+    {
+        // v1.x compatible: re-navigating to a cached KeepAlive page reuses the cached
+        // instance even when it is already on the stack; both entries share one page scope.
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        var keepAlive = (KeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        await _navigationService.NavigateToAsync<TestDetailViewModel>();
+        await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        Assert.Same(keepAlive, _navigationService.GetCurrentViewModel());
+
+        // Pop the second push: the shared scope survives (still referenced by the first entry).
+        Assert.True(await _navigationService.GoBackAsync());
+        Assert.False(keepAlive.Disposed);
+
+        // Pop the Detail page (a normal page: disposed with its own scope).
+        Assert.True(await _navigationService.GoBackAsync());
+        Assert.Same(keepAlive, _navigationService.GetCurrentViewModel());
+        Assert.False(keepAlive.Disposed);
+
+        // Pop the first push: the entry is still cached, so the scope still survives.
+        Assert.True(await _navigationService.GoBackAsync());
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.False(keepAlive.Disposed);
+
+        // Clearing the cache releases the last reference: disposed exactly once.
+        await _navigationService.ClearCacheAsync("MainRegion");
+        Assert.True(keepAlive.Disposed);
+        Assert.Equal(1, keepAlive.DisposeCallCount);
+    }
+
+    [Fact]
+    public async Task ClearCache_WhenSingletonCachedInTwoRegions_ShouldNeverDisposeIt()
     {
         var services = new ServiceCollection();
         services.AddFlowNavigation();
@@ -404,21 +441,25 @@ public class NavigationServiceTests
         await navigationService.NavigateToAsync<TestHomeViewModel>("Region2");
         await navigationService.NavigateToAsync<KeepAliveViewModel>("Region2", NavigationMode.KeepAlive);
         Assert.Same(keepAlive, navigationService.GetCurrentViewModel("Region2"));
-        await navigationService.GoBackAsync("Region2");
 
         await navigationService.ClearCacheAsync("Region1");
+
+        // A singleton belongs to the root container. Clearing a region cache must never
+        // dispose it, even when its page scope is torn down.
         Assert.False(keepAlive.Disposed);
 
-        await navigationService.ClearCacheAsync("Region2");
-        Assert.True(keepAlive.Disposed);
-        Assert.Equal(1, keepAlive.DisposeCallCount);
+        await navigationService.GoBackAsync("Region2");
+        await navigationService.NavigateToAsync<KeepAliveViewModel>("Region2", NavigationMode.KeepAlive);
+        Assert.Same(keepAlive, navigationService.GetCurrentViewModel("Region2"));
+        Assert.False(keepAlive.Disposed);
 
         await navigationService.DisposeAsync();
+        Assert.False(keepAlive.Disposed);
         await serviceProvider.DisposeAsync();
     }
 
     [Fact]
-    public async Task NavigateToAsync_WhenStackChangesDuringGuard_ShouldDisposeAbandonedTransientViewModel()
+    public async Task NavigateToAsync_WhenStackChangesDuringGuard_ShouldDisposeAbandonedPageScope()
     {
         TrackedDisposeViewModel.DisposeCount = 0;
 
@@ -833,6 +874,28 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task NavigateAway_WhenPageScopeDisposalThrows_ViewModelDisposedStillFires_PinOwnershipReleased()
+    {
+        BaseViewModel? releasedVm = null;
+        string? releasedRegion = null;
+        _navigationService.ViewModelDisposed += (region, vm) => { releasedRegion = region; releasedVm = vm; };
+
+        await _navigationService.NavigateToAsync<ThrowingKeepAliveViewModel>("EventRegion");
+        var throwing = (ThrowingKeepAliveViewModel)_navigationService.GetCurrentViewModel("EventRegion")!;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _navigationService.NavigateToAsync<TestHomeViewModel>("EventRegion", NavigationMode.Replace));
+        Assert.Equal("Sync dispose failed.", ex.Message);
+
+        // Ownership was released even though the scope disposal threw; the error still
+        // propagates to the caller, and navigation itself completed.
+        Assert.Same(throwing, releasedVm);
+        Assert.Equal("EventRegion", releasedRegion);
+        Assert.True(throwing.DisposeAttempted);
+        Assert.True(_navigationService.IsActive<TestHomeViewModel>("EventRegion"));
+    }
+
+    [Fact]
     public async Task ClearCacheAsync_WhenOneViewModelThrows_ShouldStillDisposeRemaining()
     {
         var throwing = await CacheThrowingViewModelAsync("CacheRegion");
@@ -913,4 +976,399 @@ public class NavigationServiceTests
         Assert.True(throwing.DisposeAttempted);
         Assert.True(stacked.Disposed);
     }
+    #region Page-level service scope (v2.0)
+
+    [Fact]
+    public async Task NavigateToAsync_WhenNavigatingToSameViewModel_ShouldReturnTrue_WithoutPushing()
+    {
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        var result = await _navigationService.NavigateToAsync<TestHomeViewModel>();
+
+        Assert.True(result);
+        Assert.False(_navigationService.CanGoBack());
+    }
+
+    [Fact]
+    public async Task SingletonViewModel_WhenNavigatedAway_ShouldNeverBeDisposed()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowNavigation();
+        services.AddSingleton<SingletonViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var serviceProvider = services.BuildServiceProvider();
+        var navigationService = (NavigationService)serviceProvider.GetRequiredService<INavigationService>();
+
+        await navigationService.NavigateToAsync<SingletonViewModel>();
+        var singleton = (SingletonViewModel)navigationService.GetCurrentViewModel()!;
+        await navigationService.NavigateToAsync<TestHomeViewModel>();
+
+        Assert.False(singleton.Disposed);
+        Assert.True(await navigationService.GoBackAsync());
+        Assert.Same(singleton, navigationService.GetCurrentViewModel());
+        Assert.False(singleton.Disposed);
+
+        // Root-owned: neither a page scope nor the service may dispose it.
+        await navigationService.DisposeAsync();
+        Assert.False(singleton.Disposed);
+        await serviceProvider.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenSingletonAlreadyOnStack_ShouldThrowInvalidOperationException_AndReleaseAbandonedScope()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowNavigation();
+        services.AddSingleton<SingletonViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var inner = services.BuildServiceProvider();
+        var tracking = new TrackingScopeFactory(inner.GetRequiredService<IServiceScopeFactory>());
+        var navigationService = new NavigationService(new TestServiceProvider(inner, tracking));
+
+        await navigationService.NavigateToAsync<SingletonViewModel>();
+        await navigationService.NavigateToAsync<TestHomeViewModel>();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => navigationService.NavigateToAsync<SingletonViewModel>());
+        Assert.Contains("already present on a navigation stack", ex.Message);
+
+        // The failed navigation must not disturb existing state.
+        Assert.True(navigationService.IsActive<TestHomeViewModel>());
+
+        // Three scopes were created (singleton page, home page, abandoned duplicate);
+        // only the abandoned one was released, so no scope leaks.
+        Assert.Equal(3, tracking.CreatedScopes);
+        Assert.Equal(1, tracking.DisposedScopes);
+
+        await navigationService.DisposeAsync();
+        Assert.Equal(3, tracking.DisposedScopes);
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenTargetIsAlreadyActive_ShouldBeNoOp_AndReleaseAbandonedScope()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowNavigation();
+        services.AddTransient<TestHomeViewModel>();
+        var inner = services.BuildServiceProvider();
+        var tracking = new TrackingScopeFactory(inner.GetRequiredService<IServiceScopeFactory>());
+        var navigationService = new NavigationService(new TestServiceProvider(inner, tracking));
+
+        Assert.True(await navigationService.NavigateToAsync<TestHomeViewModel>());
+        var first = navigationService.GetCurrentViewModel();
+        Assert.True(await navigationService.NavigateToAsync<TestHomeViewModel>());
+        var second = navigationService.GetCurrentViewModel();
+
+        Assert.Same(first, second);
+        Assert.False(navigationService.CanGoBack());
+        // One scope for the page, one abandoned scope for the no-op duplicate.
+        Assert.Equal(2, tracking.CreatedScopes);
+        Assert.Equal(1, tracking.DisposedScopes);
+
+        await navigationService.DisposeAsync();
+        Assert.Equal(2, tracking.DisposedScopes);
+    }
+
+    [Fact]
+    public async Task TransientDependencyGraph_ShouldBeDisposedWhenPageIsPopped()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowNavigation();
+        services.AddTransient<DisposableService>();
+        services.AddTransient<ServiceDependentViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var serviceProvider = services.BuildServiceProvider();
+        var navigationService = (NavigationService)serviceProvider.GetRequiredService<INavigationService>();
+
+        await navigationService.NavigateToAsync<ServiceDependentViewModel>();
+        var viewModel = (ServiceDependentViewModel)navigationService.GetCurrentViewModel()!;
+        Assert.False(viewModel.Service.Disposed);
+
+        await navigationService.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.Replace);
+
+        // The page scope owns the whole dependency graph, so the injected service
+        // is released together with the page's ViewModel.
+        Assert.True(viewModel.Disposed);
+        Assert.True(viewModel.Service.Disposed);
+
+        await navigationService.DisposeAsync();
+        await serviceProvider.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ScopedViewModel_ShouldHaveOneInstancePerPage_WithIndependentDisposal()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowNavigation();
+        services.AddScoped<ScopedViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var serviceProvider = services.BuildServiceProvider();
+        var navigationService = (NavigationService)serviceProvider.GetRequiredService<INavigationService>();
+
+        await navigationService.NavigateToAsync<ScopedViewModel>();
+        var first = (ScopedViewModel)navigationService.GetCurrentViewModel()!;
+        await navigationService.NavigateToAsync<TestHomeViewModel>();
+        await navigationService.NavigateToAsync<ScopedViewModel>();
+        var second = (ScopedViewModel)navigationService.GetCurrentViewModel()!;
+
+        // Each page gets its own scope, so each Scoped registration resolves once per page.
+        Assert.NotEqual(first.InstanceId, second.InstanceId);
+
+        Assert.True(await navigationService.GoBackAsync());
+        Assert.True(second.Disposed);
+        Assert.False(first.Disposed);
+        Assert.True(navigationService.IsActive<TestHomeViewModel>());
+
+        Assert.True(await navigationService.GoBackAsync());
+        Assert.Same(first, navigationService.GetCurrentViewModel());
+
+        await navigationService.DisposeAsync();
+        Assert.True(first.Disposed);
+        await serviceProvider.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task PageScopeDisposal_WhenViewModelThrows_ShouldAbortThatScope_ButIsolateAcrossPages()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowNavigation();
+        services.AddTransient<DisposableService>();
+        services.AddTransient<ThrowingDependencyViewModel>();
+        services.AddTransient<KeepAliveViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var serviceProvider = services.BuildServiceProvider();
+        var navigationService = (NavigationService)serviceProvider.GetRequiredService<INavigationService>();
+
+        await navigationService.NavigateToAsync<ThrowingDependencyViewModel>();
+        var throwing = (ThrowingDependencyViewModel)navigationService.GetCurrentViewModel()!;
+        await navigationService.NavigateToAsync<KeepAliveViewModel>();
+        var healthy = (KeepAliveViewModel)navigationService.GetCurrentViewModel()!;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            navigationService.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.ClearStack));
+
+        Assert.Equal("VM dispose failed.", ex.Message);
+        Assert.True(throwing.DisposeAttempted);
+        // Pinned platform behavior: IServiceScope.Dispose stops at the first throwing
+        // disposable, so the dependency created before the ViewModel is never released.
+        Assert.False(throwing.Service.Disposed);
+        // Cross-page isolation: the healthy page's scope was still disposed.
+        Assert.True(healthy.Disposed);
+
+        await serviceProvider.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ClearCache_WithSingletonKeepAlive_ShouldNotDisposeSingleton_AndAllowRenavigation()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowNavigation();
+        services.AddSingleton<KeepAliveViewModel>();
+        var serviceProvider = services.BuildServiceProvider();
+        var navigationService = (NavigationService)serviceProvider.GetRequiredService<INavigationService>();
+
+        await navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        var first = (KeepAliveViewModel)navigationService.GetCurrentViewModel()!;
+
+        await navigationService.ClearCacheAsync("MainRegion");
+        Assert.False(first.Disposed);
+
+        // Renavigation creates a fresh page scope around the same singleton instance.
+        await navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        Assert.Same(first, navigationService.GetCurrentViewModel());
+        Assert.False(first.Disposed);
+
+        await navigationService.DisposeAsync();
+        Assert.False(first.Disposed);
+        await serviceProvider.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ClearCache_Sync_WithAsyncOnlyViewModel_ShouldThrowInvalidOperationException_PinPlatformBehavior()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowNavigation();
+        services.AddTransient<TestDetailViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var serviceProvider = services.BuildServiceProvider();
+        var navigationService = (NavigationService)serviceProvider.GetRequiredService<INavigationService>();
+
+        await navigationService.NavigateToAsync<TestHomeViewModel>();
+        await navigationService.NavigateToAsync<TestDetailViewModel, string>("Arg", "MainRegion", NavigationMode.KeepAlive);
+        await navigationService.GoBackAsync();
+
+        // TestDetailViewModel only implements IAsyncDisposable and now sits in the
+        // KeepAlive cache. The DI container refuses synchronous disposal of such
+        // scopes; the platform exception surfaces as-is so the caller knows to use
+        // the asynchronous APIs.
+        var ex = Assert.Throws<InvalidOperationException>(() => navigationService.ClearCache("MainRegion"));
+        Assert.Contains("IAsyncDisposable", ex.Message);
+
+        // The asynchronous path handles the same page cleanly.
+        await navigationService.ClearCacheAsync("MainRegion");
+
+        await navigationService.DisposeAsync();
+        await serviceProvider.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ConcurrentNavigationsAndClearCache_ShouldNotLeakScopes_OrThrow()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowNavigation();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        services.AddTransient<KeepAliveViewModel>();
+        var inner = services.BuildServiceProvider();
+        var tracking = new TrackingScopeFactory(inner.GetRequiredService<IServiceScopeFactory>());
+        var navigationService = new NavigationService(new TestServiceProvider(inner, tracking));
+
+        var tasks = new List<Task>();
+        for (int worker = 0; worker < 8; worker++)
+        {
+            int capturedWorker = worker;
+            tasks.Add(Task.Run(async () =>
+            {
+                string region = capturedWorker % 2 == 0 ? "R1" : "R2";
+                for (int i = 0; i < 50; i++)
+                {
+                    switch ((i + capturedWorker) % 4)
+                    {
+                        case 0:
+                            await navigationService.NavigateToAsync<TestHomeViewModel>(region);
+                            break;
+                        case 1:
+                            await navigationService.NavigateToAsync<TestDetailViewModel>(region);
+                            break;
+                        case 2:
+                            await navigationService.NavigateToAsync<KeepAliveViewModel>(region, NavigationMode.KeepAlive);
+                            break;
+                        default:
+                            await navigationService.ClearCacheAsync(region);
+                            break;
+                    }
+
+                    await navigationService.GoBackAsync(region);
+                }
+            }));
+        }
+
+        await Task.WhenAll(tasks);
+        await navigationService.DisposeAsync();
+
+        // Every page scope ever created was released exactly once: nothing leaked,
+        // even with ClearCache racing navigation (stale cache entries are re-validated).
+        Assert.Equal(tracking.CreatedScopes, tracking.DisposedScopes);
+        Assert.True(tracking.CreatedScopes > 0);
+    }
+
+    #endregion
+
+    #region v2.0 test doubles
+
+    private sealed class SingletonViewModel : BaseViewModel, IDisposable
+    {
+        public bool Disposed { get; private set; }
+        public void Dispose() => Disposed = true;
+    }
+
+    private sealed class DisposableService : IDisposable
+    {
+        public bool Disposed { get; private set; }
+        public void Dispose() => Disposed = true;
+    }
+
+    private sealed class ServiceDependentViewModel : BaseViewModel, IDisposable
+    {
+        public DisposableService Service { get; }
+        public bool Disposed { get; private set; }
+
+        public ServiceDependentViewModel(DisposableService service)
+        {
+            Service = service;
+        }
+
+        public void Dispose() => Disposed = true;
+    }
+
+    private sealed class ScopedViewModel : BaseViewModel, IDisposable
+    {
+        public Guid InstanceId { get; } = Guid.NewGuid();
+        public bool Disposed { get; private set; }
+        public void Dispose() => Disposed = true;
+    }
+
+    private sealed class ThrowingDependencyViewModel : BaseViewModel, IDisposable
+    {
+        public DisposableService Service { get; }
+        public bool DisposeAttempted { get; private set; }
+
+        public ThrowingDependencyViewModel(DisposableService service)
+        {
+            Service = service;
+        }
+
+        public void Dispose()
+        {
+            DisposeAttempted = true;
+            throw new InvalidOperationException("VM dispose failed.");
+        }
+    }
+
+    /// <summary>
+    /// Wraps an <see cref="IServiceScopeFactory"/> and counts created and disposed page scopes.
+    /// </summary>
+    private sealed class TrackingScopeFactory(IServiceScopeFactory inner) : IServiceScopeFactory
+    {
+        private readonly IServiceScopeFactory _inner = inner;
+        public int CreatedScopes;
+        public int DisposedScopes;
+
+        public IServiceScope CreateScope()
+        {
+            Interlocked.Increment(ref CreatedScopes);
+            return new TrackingScope(_inner.CreateScope(), this);
+        }
+
+        private sealed class TrackingScope(IServiceScope inner, TrackingScopeFactory factory) : IServiceScope, IAsyncDisposable
+        {
+            private readonly IServiceScope _inner = inner;
+            private readonly TrackingScopeFactory _factory = factory;
+
+            public IServiceProvider ServiceProvider => _inner.ServiceProvider;
+
+            public void Dispose()
+            {
+                _inner.Dispose();
+                Interlocked.Increment(ref _factory.DisposedScopes);
+            }
+
+            public async ValueTask DisposeAsync()
+            {
+                if (_inner is IAsyncDisposable asyncDisposable)
+                {
+                    await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                }
+                else
+                {
+                    _inner.Dispose();
+                }
+
+                Interlocked.Increment(ref _factory.DisposedScopes);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Forwards <see cref="IServiceProvider"/> lookups to an inner provider, but substitutes
+    /// a custom <see cref="IServiceScopeFactory"/>.
+    /// </summary>
+    private sealed class TestServiceProvider(IServiceProvider inner, IServiceScopeFactory scopeFactory) : IServiceProvider
+    {
+        private readonly IServiceProvider _inner = inner;
+        private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
+
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(IServiceScopeFactory) ? _scopeFactory : _inner.GetService(serviceType);
+    }
+
+    #endregion
 }

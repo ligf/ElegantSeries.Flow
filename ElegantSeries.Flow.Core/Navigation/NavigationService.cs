@@ -6,12 +6,30 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ElegantSeries.Flow.Core.Navigation;
 
 /// <summary>
-/// Default <see cref="INavigationService"/> implementation.
+/// Default <see cref="INavigationService"/> implementation (v2.0: page-level lifetime scopes).
 /// </summary>
 /// <remarks>
 /// <para>
-/// Manages one navigation stack per region, an opt-in KeepAlive ViewModel cache,
-/// and the full ViewModel lifecycle (activation callbacks and disposal).
+/// Manages one navigation stack per region, an opt-in KeepAlive page cache, and the full
+/// ViewModel lifecycle (activation callbacks and disposal).
+/// </para>
+/// <para>
+/// <b>Lifetime model (v2.0).</b> Every navigation creates one <see cref="IServiceScope"/>
+/// (a "page scope") and resolves the ViewModel from it. When the page leaves the navigation
+/// service's ownership, the service disposes the page scope and the DI container releases
+/// the ViewModel <i>and its whole dependency graph</i>. Registration lifetimes behave as follows:
+/// </para>
+/// <list type="table">
+/// <item><term>Transient / Scoped</term><description>A fresh instance per page; disposed with the page scope.</description></item>
+/// <item><term>Singleton</term><description>Shared instance; never disposed by a page scope (it is owned by the root container).</description></item>
+/// </list>
+/// <para>
+/// Because disposal is delegated to the container, the navigation service never calls
+/// <c>Dispose</c> on a ViewModel directly. A <see cref="BaseViewModel"/> instance is rejected
+/// with <see cref="InvalidOperationException"/> if a freshly resolved instance is already
+/// present on any navigation stack: pushing the same instance twice would corrupt
+/// back-navigation and lifecycle semantics. Navigating to the already-active instance is a
+/// no-op that returns <see langword="true"/>.
 /// </para>
 /// <para>
 /// Thread safety: every public member is safe to call from any thread. Navigation
@@ -20,37 +38,46 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// both locks.
 /// </para>
 /// <para>
-/// Disposal is best-effort: when several ViewModels are disposed together (cache
-/// clear or service disposal), every ViewModel is attempted even if one of them
-/// throws. Collected exceptions are rethrown afterwards — a single exception is
-/// rethrown as-is, several are wrapped in an <see cref="AggregateException"/>.
+/// Disposal is best-effort <i>across</i> pages: when several page scopes are disposed together
+/// (cache clear or service disposal), every scope is attempted even if one of them throws.
+/// Collected exceptions are rethrown afterwards — a single exception is rethrown as-is,
+/// several are wrapped in an <see cref="AggregateException"/>. <i>Within</i> one page scope,
+/// the DI container stops at the first throwing disposable (platform behavior); this is
+/// documented on <see cref="INavigationService.ViewModelDisposed"/> and cannot be worked
+/// around by the navigation service.
 /// </para>
 /// </remarks>
 public sealed class NavigationService(IServiceProvider serviceProvider) : INavigationService, IDisposable, IAsyncDisposable
 {
     // ────────────────────────────── Fields ──────────────────────────────
 
-    private readonly IServiceProvider _serviceProvider = serviceProvider
-        ?? throw new ArgumentNullException(nameof(serviceProvider));
+    /// <summary>
+    /// Creates one child scope per navigated page. Resolved once from the provided
+    /// <see cref="IServiceProvider"/>, which must come from Microsoft.Extensions.DependencyInjection
+    /// (or any container exposing <see cref="IServiceScopeFactory"/>).
+    /// </summary>
+    private readonly IServiceScopeFactory _scopeFactory =
+        (serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider)))
+        .GetRequiredService<IServiceScopeFactory>();
 
     /// <summary>Navigation stacks keyed by region name. Guarded by <see cref="_stateLock"/>.</summary>
     private readonly Dictionary<string, Stack<NavigationEntry>> _regionStacks = [];
 
-    /// <summary>KeepAlive ViewModels keyed by (region, ViewModel type). Guarded by <see cref="_stateLock"/>.</summary>
-    private readonly Dictionary<(string Region, Type ViewModelType), BaseViewModel> _keepAliveCache = [];
+    /// <summary>KeepAlive pages keyed by (region, ViewModel type). Guarded by <see cref="_stateLock"/>.</summary>
+    private readonly Dictionary<(string Region, Type ViewModelType), NavigationEntry> _keepAliveCache = [];
 
     /// <summary>
-    /// ViewModels removed from the cache while still referenced elsewhere.
+    /// Page scopes removed from the cache while still referenced elsewhere.
     /// They are disposed once their last reference disappears. Guarded by <see cref="_stateLock"/>.
     /// </summary>
-    private readonly Dictionary<BaseViewModel, HashSet<string>> _pendingKeepAliveDisposals = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<IServiceScope, PendingDisposal> _pendingScopeDisposals = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>Serializes navigation transitions and disposal.</summary>
     private readonly SemaphoreSlim _navigationLock = new(1, 1);
 
     /// <summary>
     /// Guards <see cref="_regionStacks"/>, <see cref="_keepAliveCache"/> and
-    /// <see cref="_pendingKeepAliveDisposals"/>.
+    /// <see cref="_pendingScopeDisposals"/>.
     /// </summary>
     private readonly Lock _stateLock = new();
 
@@ -138,9 +165,7 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
 
             // Queue the work items while holding _navigationLock but not _stateLock,
             // mirroring the NavigateInternalAsync path.
-            DetachNavigation(current.ViewModel);
-            var plan = BuildDeactivatePlan(current, destroy: current.Mode != NavigationMode.KeepAlive);
-            QueueDeactivatePlan(plan, work);
+            QueueDeactivation(current, destroy: current.Mode != NavigationMode.KeepAlive, work);
 
             AttachNavigation(previous.ViewModel);
             QueueActivate(previous.ViewModel, previous.Parameter, work);
@@ -214,14 +239,30 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
+        List<ScopeDisposalTarget> targets;
 
-        List<(BaseViewModel ViewModel, string[] Regions)> targets;
-        using (_stateLock.EnterScope())
+        // Serialized with navigation transitions: otherwise a concurrent navigation
+        // could adopt a cache entry whose scope this call is about to dispose.
+        _navigationLock.Wait();
+        try
         {
-            targets = TakeCacheEntriesForDisposalLocked(RemoveRegionCacheEntriesLocked(regionName));
+            if (_disposed)
+            {
+                return;
+            }
+
+            using (_stateLock.EnterScope())
+            {
+                targets = TakeCacheEntriesForDisposalLocked(RemoveRegionCacheEntriesLocked(regionName));
+            }
+        }
+        finally
+        {
+            _navigationLock.Release();
         }
 
-        DisposeCacheEntriesSync(targets, pendingEvents, errors);
+        // Scope disposal runs outside the lock; the entries are already detached above.
+        DisposeScopesSync(targets, pendingEvents, errors);
         pendingEvents.Add(() => RegionCacheCleared?.Invoke(regionName));
 
         RaiseEvents(pendingEvents);
@@ -236,7 +277,29 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
 
-        ClearAllCacheCore(pendingEvents, errors);
+        // Serialized with navigation transitions (see ClearCache).
+        _navigationLock.Wait();
+        List<ScopeDisposalTarget> targets;
+        try
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            targets = TakeAllCacheEntriesLocked(out var affectedRegions);
+            foreach (var region in affectedRegions)
+            {
+                var capturedRegion = region;
+                pendingEvents.Add(() => RegionCacheCleared?.Invoke(capturedRegion));
+            }
+        }
+        finally
+        {
+            _navigationLock.Release();
+        }
+
+        DisposeScopesSync(targets, pendingEvents, errors);
 
         RaiseEvents(pendingEvents);
         ThrowCollectedErrors(errors);
@@ -252,14 +315,30 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
+        List<ScopeDisposalTarget> targets;
 
-        List<(BaseViewModel ViewModel, string[] Regions)> targets;
-        using (_stateLock.EnterScope())
+        // Serialized with navigation transitions: otherwise a concurrent navigation
+        // could adopt a cache entry whose scope this call is about to dispose.
+        await _navigationLock.WaitAsync().ConfigureAwait(false);
+        try
         {
-            targets = TakeCacheEntriesForDisposalLocked(RemoveRegionCacheEntriesLocked(regionName));
+            if (_disposed)
+            {
+                return;
+            }
+
+            using (_stateLock.EnterScope())
+            {
+                targets = TakeCacheEntriesForDisposalLocked(RemoveRegionCacheEntriesLocked(regionName));
+            }
+        }
+        finally
+        {
+            _navigationLock.Release();
         }
 
-        await DisposeCacheEntriesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
+        // Scope disposal runs outside the lock; the entries are already detached above.
+        await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
         pendingEvents.Add(() => RegionCacheCleared?.Invoke(regionName));
 
         RaiseEvents(pendingEvents);
@@ -274,7 +353,29 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
 
-        await ClearAllCacheCoreAsync(pendingEvents, errors).ConfigureAwait(false);
+        // Serialized with navigation transitions (see ClearCacheAsync).
+        await _navigationLock.WaitAsync().ConfigureAwait(false);
+        List<ScopeDisposalTarget> targets;
+        try
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            targets = TakeAllCacheEntriesLocked(out var affectedRegions);
+            foreach (var region in affectedRegions)
+            {
+                var capturedRegion = region;
+                pendingEvents.Add(() => RegionCacheCleared?.Invoke(capturedRegion));
+            }
+        }
+        finally
+        {
+            _navigationLock.Release();
+        }
+
+        await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
 
         RaiseEvents(pendingEvents);
         ThrowCollectedErrors(errors);
@@ -284,8 +385,8 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
 
     /// <inheritdoc />
     /// <remarks>
-    /// Best-effort: every cached and stacked ViewModel is attempted even if one of
-    /// them throws. Collected exceptions are rethrown after cleanup and events.
+    /// Best-effort: every page scope is attempted even if one of them throws.
+    /// Collected exceptions are rethrown after cleanup and events.
     /// </remarks>
     public void Dispose()
     {
@@ -293,30 +394,47 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
+        List<ScopeDisposalTarget> targets;
 
         _navigationLock.Wait();
         try
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
+
             _disposed = true;
 
-            ClearAllCacheCore(pendingEvents, errors);
-            DisposeStackEntriesSync(pendingEvents, errors);
+            targets = TakeAllScopesForDisposal();
+            foreach (var target in targets)
+            {
+                DetachNavigation(target.ViewModel);
+            }
         }
         finally
         {
             _navigationLock.Release();
-            RaiseEvents(pendingEvents);
-            _navigationLock.Dispose();
         }
+
+        // Page-scope disposal executes arbitrary user code, so it runs outside
+        // _navigationLock: concurrent callers fail fast on _disposed instead of
+        // blocking on another page's disposal.
+        //
+        // The lock itself is intentionally not disposed: in-flight waiters release it
+        // in their finally blocks, and disposing it under them would surface
+        // ObjectDisposedException. The _disposed flag already makes it unusable.
+        DisposeScopesSync(targets, pendingEvents, errors);
+        QueueCacheClearedEvents(targets, pendingEvents);
+        RaiseEvents(pendingEvents);
 
         ThrowCollectedErrors(errors);
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// Best-effort: every cached and stacked ViewModel is attempted even if one of
-    /// them throws. Collected exceptions are rethrown after cleanup and events.
+    /// Best-effort: every page scope is attempted even if one of them throws.
+    /// Collected exceptions are rethrown after cleanup and events.
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
@@ -324,22 +442,36 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
+        List<ScopeDisposalTarget> targets;
 
         await _navigationLock.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
+
             _disposed = true;
 
-            await ClearAllCacheCoreAsync(pendingEvents, errors).ConfigureAwait(false);
-            await DisposeStackEntriesAsync(pendingEvents, errors).ConfigureAwait(false);
+            targets = TakeAllScopesForDisposal();
+            foreach (var target in targets)
+            {
+                DetachNavigation(target.ViewModel);
+            }
         }
         finally
         {
             _navigationLock.Release();
-            RaiseEvents(pendingEvents);
-            _navigationLock.Dispose();
         }
+
+        // Page-scope disposal executes arbitrary user code (and awaits it), so it runs
+        // outside _navigationLock: concurrent callers fail fast on _disposed instead of
+        // blocking on another page's disposal. See Dispose() for why the lock itself
+        // is not disposed.
+        await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
+        QueueCacheClearedEvents(targets, pendingEvents);
+        RaiseEvents(pendingEvents);
 
         ThrowCollectedErrors(errors);
     }
@@ -349,6 +481,12 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
     /// <summary>
     /// Core navigation logic shared by both <see cref="NavigateToAsync{TViewModel}"/> overloads.
     /// </summary>
+    /// <remarks>
+    /// Resolution (page-scope creation and ViewModel activation) happens outside
+    /// <see cref="_navigationLock"/>; only the state transition runs under the lock and
+    /// only lifecycle/disposal work items are queued there. Everything queued runs
+    /// outside both locks via <see cref="RunTransitionAsync"/>.
+    /// </remarks>
     private async Task<bool> NavigateInternalAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
         string regionName,
         object? parameter,
@@ -375,52 +513,95 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
             }
         }
 
-        BaseViewModel? preResolvedVm = null;
-        bool isNewlyResolved = false;
+        // Resolve the target page outside _navigationLock: reuse the KeepAlive entry
+        // or create a fresh page scope and resolve the ViewModel from it.
+        // A concurrent ClearCache can remove or replace the cached entry between the
+        // lookup and the state transition, so the entry is re-validated while holding
+        // _navigationLock and the resolution is retried when it went stale. Without
+        // this, navigation could push a page whose scope was already disposed.
         var cacheKey = (regionName, typeof(TViewModel));
         bool useKeepAlive = mode == NavigationMode.KeepAlive;
 
-        if (useKeepAlive)
+        IServiceScope? ownedScope = null;
+        BaseViewModel targetVm = null!;
+        NavigationEntry? cachedEntry = null;
+
+        for (int attempt = 0; ; attempt++)
         {
-            using (_stateLock.EnterScope())
+            // After repeated races, stop consulting the cache and resolve a fresh page.
+            // (Practically unreachable; guards against a pathological ClearCache loop.)
+            bool consultCache = useKeepAlive && attempt < 4;
+            if (consultCache)
             {
-                if (_keepAliveCache.TryGetValue(cacheKey, out var cached))
+                using (_stateLock.EnterScope())
                 {
-                    preResolvedVm = cached;
+                    _keepAliveCache.TryGetValue(cacheKey, out cachedEntry);
                 }
             }
-        }
+            else
+            {
+                cachedEntry = null;
+            }
 
-        if (preResolvedVm is null)
-        {
-            preResolvedVm = _serviceProvider.GetRequiredService<TViewModel>();
-            isNewlyResolved = true;
+            if (cachedEntry is not null)
+            {
+                targetVm = cachedEntry.ViewModel;
+            }
+            else
+            {
+                ownedScope = _scopeFactory.CreateScope();
+                try
+                {
+                    targetVm = ownedScope.ServiceProvider.GetRequiredService<TViewModel>();
+                }
+                catch
+                {
+                    // Resolution failed: the scope never produced a page; drop it quietly
+                    // so the original exception propagates unmodified.
+                    await DisposeScopeBestEffortAsync(ownedScope).ConfigureAwait(false);
+                    throw;
+                }
+            }
+
+            await _navigationLock.WaitAsync().ConfigureAwait(false);
+
+            bool cacheValid;
+            using (_stateLock.EnterScope())
+            {
+                cacheValid = cachedEntry is null ||
+                    (_keepAliveCache.TryGetValue(cacheKey, out var current) && ReferenceEquals(current, cachedEntry));
+            }
+
+            if (cacheValid)
+            {
+                break; // Holding _navigationLock; proceed to the state transition.
+            }
+
+            // The cached entry went stale under us: drop the tentative resolution and retry.
+            _navigationLock.Release();
+            if (ownedScope is not null)
+            {
+                await DisposeScopeBestEffortAsync(ownedScope).ConfigureAwait(false);
+                ownedScope = null;
+            }
         }
 
         var work = new TransitionWork();
         bool success = false;
-        BaseViewModel? vmToDisposeAfterLock = null;
+        IServiceScope? scopeToRelease = null;
+        Exception? duplicateException = null;
+        List<(NavigationEntry Entry, bool Destroy)> deactivations = [];
+        NavigationEntry? pushedEntry = null;
 
-        await _navigationLock.WaitAsync().ConfigureAwait(false);
         try
         {
             if (_disposed)
             {
-                if (isNewlyResolved)
-                {
-                    vmToDisposeAfterLock = preResolvedVm;
-                }
-                // Keep success false to skip the queue building below.
+                scopeToRelease = ownedScope;
+                ownedScope = null;
             }
             else
             {
-                List<NavigationEntry> entriesToDeactivate = [];
-                bool destroyOldOnReplace = false;
-                NavigationEntry? oldOnReplace = null;
-                NavigationEntry? oldOnPush = null;
-                BaseViewModel? redundantVmToDispose = null;
-                bool stateMismatch = false;
-
                 using (_stateLock.EnterScope())
                 {
                     if (!_regionStacks.TryGetValue(regionName, out var stack))
@@ -429,109 +610,128 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
                         _regionStacks[regionName] = stack;
                     }
 
-                    // Make sure the current page did not change while the guard was running.
+                    // Make sure the current page did not change while the guard/resolve was running.
                     var actualCurrentVm = stack.Count > 0 ? stack.Peek().ViewModel : null;
                     if (!ReferenceEquals(actualCurrentVm, currentVmForGuard))
                     {
-                        stateMismatch = true;
-                        if (isNewlyResolved)
-                        {
-                            redundantVmToDispose = preResolvedVm;
-                        }
+                        // stateMismatch: abandon this navigation; the owned scope never became a page.
+                        scopeToRelease = ownedScope;
+                        ownedScope = null;
                     }
                     else
                     {
-                        if (mode == NavigationMode.ClearStack)
+                        // The cached entry was re-validated before acquiring the lock,
+                        // so no race adoption is needed here.
+                        if (stack.Count > 0 && stack.Peek().ViewModel.GetType() == typeof(TViewModel))
                         {
-                            while (stack.Count > 0)
-                            {
-                                entriesToDeactivate.Add(stack.Pop());
-                            }
+                            // No-op: a page of the same type is already the active page.
+                            // The freshly resolved instance is abandoned and its page scope
+                            // is released below; the active instance is untouched.
+                            scopeToRelease = ownedScope;
+                            ownedScope = null;
+                            success = true;
                         }
-                        else if (stack.Count > 0)
+                        else if (ownedScope is not null && IsOnAnyStackLocked(targetVm))
                         {
-                            if (mode == NavigationMode.Replace)
+                            // Fail-fast: a freshly resolved instance must not already live on a
+                            // navigation stack. This is always a registration/semantics bug
+                            // (typically a Singleton navigated to twice); pushing it would corrupt
+                            // back-navigation and lifecycle callbacks.
+                            scopeToRelease = ownedScope;
+                            ownedScope = null;
+                            duplicateException = new InvalidOperationException(
+                                $"Cannot navigate to '{targetVm.GetType().FullName}': the same ViewModel instance " +
+                                $"is already present on a navigation stack. A freshly resolved ViewModel instance cannot be pushed " +
+                                $"twice; navigate back to it or use a Transient registration.");
+                        }
+                        else
+                        {
+                            var entryMode = mode == NavigationMode.ClearStack ? NavigationMode.New : mode;
+                            if (cachedEntry is not null)
                             {
-                                oldOnReplace = stack.Pop();
-                                destroyOldOnReplace = oldOnReplace.Mode != NavigationMode.KeepAlive;
+                                // KeepAlive reuse: share the cached entry's page scope.
+                                pushedEntry = new NavigationEntry(regionName, cachedEntry.ViewModel, parameter, entryMode, cachedEntry.Scope);
                             }
                             else
                             {
-                                oldOnPush = stack.Peek();
-                            }
-                        }
-
-                        BaseViewModel nextVm = preResolvedVm;
-                        if (useKeepAlive)
-                        {
-                            if (_keepAliveCache.TryGetValue(cacheKey, out var cached))
-                            {
-                                nextVm = cached;
-                                if (isNewlyResolved && !ReferenceEquals(cached, preResolvedVm))
+                                // The retry loop resolves fresh without consulting the cache once
+                                // attempt >= 4 (pathological ClearCache race), so a winner may
+                                // have been cached concurrently. Re-check under the locks already
+                                // held and adopt it: pushing a never-cached KeepAlive page would
+                                // leak its scope (it pops with destroy=false, and with no cache
+                                // entry nothing would ever reclaim it).
+                                NavigationEntry? winner = null;
+                                if (useKeepAlive)
                                 {
-                                    redundantVmToDispose = preResolvedVm;
+                                    _keepAliveCache.TryGetValue(cacheKey, out winner);
+                                }
+
+                                if (winner is not null)
+                                {
+                                    scopeToRelease = ownedScope;
+                                    ownedScope = null;
+                                    pushedEntry = new NavigationEntry(regionName, winner.ViewModel, parameter, entryMode, winner.Scope);
+                                }
+                                else
+                                {
+                                    pushedEntry = new NavigationEntry(regionName, targetVm, parameter, entryMode, ownedScope!);
+                                    ownedScope = null;
+                                    if (useKeepAlive)
+                                    {
+                                        // No winner exists, and none can appear here: every cache
+                                        // mutation requires _navigationLock, held continuously
+                                        // since the validation above.
+                                        _keepAliveCache[cacheKey] = pushedEntry;
+                                    }
                                 }
                             }
-                            else
+
+                            if (mode == NavigationMode.ClearStack)
                             {
-                                _keepAliveCache[cacheKey] = nextVm;
+                                while (stack.Count > 0)
+                                {
+                                    var old = stack.Pop();
+                                    deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                }
                             }
+                            else if (stack.Count > 0)
+                            {
+                                if (mode == NavigationMode.Replace)
+                                {
+                                    var old = stack.Pop();
+                                    deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                }
+                                else
+                                {
+                                    deactivations.Add((stack.Peek(), false));
+                                }
+                            }
+
+                            stack.Push(pushedEntry);
+
+                            success = true;
                         }
-
-                        var entryMode = mode == NavigationMode.ClearStack ? NavigationMode.New : mode;
-                        stack.Push(new NavigationEntry(regionName, nextVm, parameter, entryMode));
-
-                        preResolvedVm = nextVm;
                     }
                 }
+            }
 
-                // A ViewModel resolved by this service but never placed on a stack is owned
-                // by the service and is disposed after the lock (see DisposeUnusedViewModelAsync).
-                // ViewModels are registered Transient (see README), so the navigation service —
-                // not the DI scope — is responsible for instances it resolved but discarded.
-                // This covers both the stateMismatch race above and the KeepAlive cache race
-                // below: in either case the unused instance would otherwise leak until the
-                // DI scope itself is disposed.
-                if (redundantVmToDispose != null)
-                {
-                    vmToDisposeAfterLock = redundantVmToDispose;
-                }
+            // Queue lifecycle work while holding _navigationLock but not _stateLock
+            // (QueueDeactivation acquires _stateLock internally via BuildDeactivatePlan),
+            // mirroring the GoBackAsync path. This avoids relying on Lock reentrancy
+            // and guarantees the work list is fully built before any concurrent
+            // navigation can acquire _navigationLock and queue its own work,
+            // preserving lifecycle/event ordering across navigations.
+            foreach (var (entry, destroy) in deactivations)
+            {
+                QueueDeactivation(entry, destroy, work);
+            }
 
-                if (stateMismatch)
-                {
-                    // The stack changed while the guard was running: abandon this navigation.
-                    // success stays false; the queue building below is skipped.
-                }
-                else
-                {
-                    // Collect the lifecycle/disposal/event work under the lock,
-                    // then execute it outside the lock (see RunTransitionAsync).
-                    foreach (var old in entriesToDeactivate)
-                    {
-                        DetachNavigation(old.ViewModel);
-                        var plan = BuildDeactivatePlan(old, destroy: old.Mode != NavigationMode.KeepAlive);
-                        QueueDeactivatePlan(plan, work);
-                    }
-
-                    if (oldOnReplace != null)
-                    {
-                        DetachNavigation(oldOnReplace.ViewModel);
-                        var plan = BuildDeactivatePlan(oldOnReplace, destroy: destroyOldOnReplace);
-                        QueueDeactivatePlan(plan, work);
-                    }
-                    else if (oldOnPush != null)
-                    {
-                        DetachNavigation(oldOnPush.ViewModel);
-                        var plan = BuildDeactivatePlan(oldOnPush, destroy: false);
-                        QueueDeactivatePlan(plan, work);
-                    }
-
-                    AttachNavigation(preResolvedVm);
-                    QueueActivate(preResolvedVm, parameter, work);
-                    work.Events.Add(() => RegionNavigated?.Invoke(regionName, preResolvedVm));
-
-                    success = true;
-                }
+            if (success && pushedEntry is not null)
+            {
+                AttachNavigation(pushedEntry.ViewModel);
+                QueueActivate(pushedEntry.ViewModel, parameter, work);
+                var capturedVm = pushedEntry.ViewModel;
+                work.Events.Add(() => RegionNavigated?.Invoke(regionName, capturedVm));
             }
         }
         finally
@@ -539,15 +739,46 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
             _navigationLock.Release();
         }
 
-        if (vmToDisposeAfterLock != null)
-            await DisposeUnusedViewModelAsync(vmToDisposeAfterLock).ConfigureAwait(false);
+        // A scope resolved but never pushed is owned by nobody: release it best-effort
+        // without disturbing the navigation outcome.
+        if (scopeToRelease is not null)
+        {
+            await DisposeScopeBestEffortAsync(scopeToRelease).ConfigureAwait(false);
+        }
+
+        if (duplicateException is not null)
+        {
+            ExceptionDispatchInfo.Capture(duplicateException).Throw();
+        }
 
         if (!success)
+        {
             return false;
+        }
 
         await RunTransitionAsync(work).ConfigureAwait(false);
 
         return true;
+    }
+
+    /// <summary>
+    /// Determines whether the given ViewModel instance is present on any region's
+    /// navigation stack. The caller must hold <see cref="_stateLock"/>.
+    /// </summary>
+    private bool IsOnAnyStackLocked(BaseViewModel viewModel)
+    {
+        foreach (var stack in _regionStacks.Values)
+        {
+            foreach (var entry in stack)
+            {
+                if (ReferenceEquals(entry.ViewModel, viewModel))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     // ────────────────────── Cache internals ──────────────────────
@@ -556,15 +787,15 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
     /// Removes every KeepAlive entry of one region from the cache and returns them.
     /// The caller must hold <see cref="_stateLock"/>.
     /// </summary>
-    private List<KeyValuePair<(string Region, Type ViewModelType), BaseViewModel>> RemoveRegionCacheEntriesLocked(string regionName)
+    private List<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>> RemoveRegionCacheEntriesLocked(string regionName)
     {
         var keysToRemove = _keepAliveCache.Keys.Where(k => k.Region == regionName).ToList();
-        List<KeyValuePair<(string Region, Type ViewModelType), BaseViewModel>> removed = [];
+        List<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>> removed = [];
         foreach (var key in keysToRemove)
         {
-            if (_keepAliveCache.Remove(key, out var viewModel))
+            if (_keepAliveCache.Remove(key, out var entry))
             {
-                removed.Add(new(key, viewModel));
+                removed.Add(new(key, entry));
             }
         }
 
@@ -575,7 +806,7 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
     /// Removes every KeepAlive entry from the cache and returns them.
     /// The caller must hold <see cref="_stateLock"/>.
     /// </summary>
-    private List<KeyValuePair<(string Region, Type ViewModelType), BaseViewModel>> RemoveAllCacheEntriesLocked()
+    private List<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>> RemoveAllCacheEntriesLocked()
     {
         var removed = _keepAliveCache.ToList();
         _keepAliveCache.Clear();
@@ -583,320 +814,291 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
     }
 
     /// <summary>
-    /// Clears the whole KeepAlive cache on the synchronous path.
-    /// Never throws: disposal exceptions are collected into <paramref name="errors"/>.
-    /// </summary>
-    private void ClearAllCacheCore(List<Action> pendingEvents, List<Exception> errors)
-    {
-        List<(BaseViewModel ViewModel, string[] Regions)> targets;
-        List<string> affectedRegions;
-
-        using (_stateLock.EnterScope())
-        {
-            affectedRegions = _keepAliveCache.Keys.Select(k => k.Region)
-                .Union(_regionStacks.Keys)
-                .Distinct()
-                .ToList();
-            targets = TakeCacheEntriesForDisposalLocked(RemoveAllCacheEntriesLocked());
-        }
-
-        DisposeCacheEntriesSync(targets, pendingEvents, errors);
-
-        foreach (var region in affectedRegions)
-        {
-            pendingEvents.Add(() => RegionCacheCleared?.Invoke(region));
-        }
-    }
-
-    /// <summary>
-    /// Clears the whole KeepAlive cache on the asynchronous path.
-    /// Never throws: disposal exceptions are collected into <paramref name="errors"/>.
-    /// </summary>
-    private async ValueTask ClearAllCacheCoreAsync(List<Action> pendingEvents, List<Exception> errors)
-    {
-        List<(BaseViewModel ViewModel, string[] Regions)> targets;
-        List<string> affectedRegions;
-
-        using (_stateLock.EnterScope())
-        {
-            affectedRegions = _keepAliveCache.Keys.Select(k => k.Region)
-                .Union(_regionStacks.Keys)
-                .Distinct()
-                .ToList();
-            targets = TakeCacheEntriesForDisposalLocked(RemoveAllCacheEntriesLocked());
-        }
-
-        await DisposeCacheEntriesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
-
-        foreach (var region in affectedRegions)
-        {
-            pendingEvents.Add(() => RegionCacheCleared?.Invoke(region));
-        }
-    }
-
-    /// <summary>
-    /// Splits removed cache entries into ViewModels that can be disposed now and ones
+    /// Splits removed cache entries into page scopes that can be disposed now and ones
     /// whose disposal must be deferred until their last stack/cache reference is gone.
     /// The caller must hold <see cref="_stateLock"/>.
     /// </summary>
-    private List<(BaseViewModel ViewModel, string[] Regions)> TakeCacheEntriesForDisposalLocked(
-        IEnumerable<KeyValuePair<(string Region, Type ViewModelType), BaseViewModel>> removedEntries)
+    private List<ScopeDisposalTarget> TakeCacheEntriesForDisposalLocked(
+        IEnumerable<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>> removedEntries)
     {
-        var regionsByViewModel = new Dictionary<BaseViewModel, HashSet<string>>(ReferenceEqualityComparer.Instance);
+        var regionsByScope = new Dictionary<IServiceScope, HashSet<string>>(ReferenceEqualityComparer.Instance);
+        var viewModelByScope = new Dictionary<IServiceScope, BaseViewModel>(ReferenceEqualityComparer.Instance);
         foreach (var entry in removedEntries)
         {
-            if (!regionsByViewModel.TryGetValue(entry.Value, out var regions))
+            var scope = entry.Value.Scope;
+            if (!regionsByScope.TryGetValue(scope, out var regions))
             {
                 regions = [];
-                regionsByViewModel.Add(entry.Value, regions);
+                regionsByScope.Add(scope, regions);
+                viewModelByScope.Add(scope, entry.Value.ViewModel);
             }
 
             regions.Add(entry.Key.Region);
         }
 
-        // Build the referenced set once instead of scanning all stacks per ViewModel.
-        var referencedViewModels = BuildReferencedViewModelsLocked();
-
-        List<(BaseViewModel ViewModel, string[] Regions)> readyToDispose = [];
-        foreach (var (viewModel, regions) in regionsByViewModel)
+        List<ScopeDisposalTarget> readyToDispose = [];
+        foreach (var (scope, regions) in regionsByScope)
         {
-            if (referencedViewModels.Contains(viewModel))
+            if (IsScopeReferencedLocked(scope))
             {
-                if (!_pendingKeepAliveDisposals.TryGetValue(viewModel, out var pendingRegions))
+                if (_pendingScopeDisposals.TryGetValue(scope, out var pending))
                 {
-                    pendingRegions = [];
-                    _pendingKeepAliveDisposals.Add(viewModel, pendingRegions);
+                    pending.Regions.UnionWith(regions);
+                }
+                else
+                {
+                    _pendingScopeDisposals.Add(scope, new PendingDisposal(viewModelByScope[scope], new HashSet<string>(regions)));
                 }
 
-                pendingRegions.UnionWith(regions);
                 continue;
             }
 
-            if (_pendingKeepAliveDisposals.Remove(viewModel, out var previouslyPendingRegions))
+            if (_pendingScopeDisposals.Remove(scope, out var previouslyPending))
             {
-                regions.UnionWith(previouslyPendingRegions);
+                regions.UnionWith(previouslyPending.Regions);
             }
 
-            readyToDispose.Add((viewModel, [.. regions]));
+            readyToDispose.Add(new ScopeDisposalTarget(scope, viewModelByScope[scope], [.. regions]));
         }
 
         return readyToDispose;
     }
 
     /// <summary>
-    /// Collects every ViewModel that is still referenced by any region stack or by
-    /// the KeepAlive cache. The caller must hold <see cref="_stateLock"/>.
+    /// Determines whether any region stack or the KeepAlive cache still references the
+    /// given page scope. The caller must hold <see cref="_stateLock"/>.
     /// </summary>
-    private HashSet<BaseViewModel> BuildReferencedViewModelsLocked()
+    private bool IsScopeReferencedLocked(IServiceScope scope)
     {
-        var referenced = new HashSet<BaseViewModel>(ReferenceEqualityComparer.Instance);
         foreach (var stack in _regionStacks.Values)
         {
             foreach (var entry in stack)
             {
-                referenced.Add(entry.ViewModel);
+                if (ReferenceEquals(entry.Scope, scope))
+                {
+                    return true;
+                }
             }
         }
 
         foreach (var cached in _keepAliveCache.Values)
         {
-            referenced.Add(cached);
+            if (ReferenceEquals(cached.Scope, scope))
+            {
+                return true;
+            }
         }
 
-        return referenced;
+        return false;
+    }
+
+    /// <summary>
+    /// Removes every KeepAlive entry from the cache and splits them into page scopes that
+    /// can be disposed now versus ones whose disposal must be deferred.
+    /// The caller must hold <see cref="_navigationLock"/> (but not <see cref="_stateLock"/>).
+    /// </summary>
+    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions)
+    {
+        using (_stateLock.EnterScope())
+        {
+            affectedRegions = _keepAliveCache.Keys.Select(k => k.Region)
+                .Union(_regionStacks.Keys)
+                .Distinct()
+                .ToList();
+            return TakeCacheEntriesForDisposalLocked(RemoveAllCacheEntriesLocked());
+        }
     }
 
     // ───────────────────── Disposal internals ─────────────────────
 
     /// <summary>
-    /// Detaches and disposes every ViewModel left on the region stacks (synchronous path).
-    /// Never throws: disposal exceptions are collected into <paramref name="errors"/>.
+    /// Disposes removed cache entries on the synchronous path. Every page scope is
+    /// attempted even if one throws; exceptions are collected into <paramref name="errors"/>.
     /// </summary>
-    private void DisposeStackEntriesSync(List<Action> pendingEvents, List<Exception> errors)
+    private void DisposeScopesSync(
+        List<ScopeDisposalTarget> targets,
+        List<Action> pendingEvents,
+        List<Exception> errors)
     {
-        var stackViewModels = TakeStackViewModelsForDisposal();
-        foreach (var (viewModel, regions) in stackViewModels)
+        foreach (var target in targets)
         {
-            DetachNavigation(viewModel);
-            try
-            {
-                DisposeViewModelSync(viewModel);
-            }
-            catch (Exception ex)
-            {
-                errors.Add(ex);
-            }
+            DisposeScopeSync(target.Scope, errors);
 
-            foreach (var region in regions)
+            foreach (var region in target.Regions)
             {
-                pendingEvents.Add(() => ViewModelDisposed?.Invoke(region, viewModel));
+                var capturedRegion = region;
+                var capturedViewModel = target.ViewModel;
+                pendingEvents.Add(() => ViewModelDisposed?.Invoke(capturedRegion, capturedViewModel));
             }
         }
     }
 
     /// <summary>
-    /// Detaches and disposes every ViewModel left on the region stacks (asynchronous path).
-    /// Never throws: disposal exceptions are collected into <paramref name="errors"/>.
+    /// Disposes removed cache entries on the asynchronous path. Every page scope is
+    /// attempted even if one throws; exceptions are collected into <paramref name="errors"/>.
     /// </summary>
-    private async ValueTask DisposeStackEntriesAsync(List<Action> pendingEvents, List<Exception> errors)
+    private async ValueTask DisposeScopesAsync(
+        List<ScopeDisposalTarget> targets,
+        List<Action> pendingEvents,
+        List<Exception> errors)
     {
-        var stackViewModels = TakeStackViewModelsForDisposal();
-        foreach (var (viewModel, regions) in stackViewModels)
+        foreach (var target in targets)
         {
-            DetachNavigation(viewModel);
-            try
-            {
-                await DisposeViewModelAsync(viewModel).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                errors.Add(ex);
-            }
+            await DisposeScopeAsync(target.Scope, errors).ConfigureAwait(false);
 
-            foreach (var region in regions)
+            foreach (var region in target.Regions)
             {
-                pendingEvents.Add(() => ViewModelDisposed?.Invoke(region, viewModel));
+                var capturedRegion = region;
+                var capturedViewModel = target.ViewModel;
+                pendingEvents.Add(() => ViewModelDisposed?.Invoke(capturedRegion, capturedViewModel));
             }
         }
     }
 
     /// <summary>
-    /// Takes every ViewModel on the region stacks (plus deferred KeepAlive disposals)
-    /// for disposal and clears all stacks. The caller must not hold <see cref="_stateLock"/>.
+    /// Takes every page scope owned by the service (region stacks, KeepAlive cache and
+    /// deferred disposals) and clears all of them. Each distinct scope is returned once.
+    /// The caller must not hold <see cref="_stateLock"/>.
     /// </summary>
-    private List<(BaseViewModel ViewModel, string[] Regions)> TakeStackViewModelsForDisposal()
+    private List<ScopeDisposalTarget> TakeAllScopesForDisposal()
     {
-        var regionsByViewModel = new Dictionary<BaseViewModel, HashSet<string>>(ReferenceEqualityComparer.Instance);
+        var regionsByScope = new Dictionary<IServiceScope, HashSet<string>>(ReferenceEqualityComparer.Instance);
+        var viewModelByScope = new Dictionary<IServiceScope, BaseViewModel>(ReferenceEqualityComparer.Instance);
+
+        void AddReference(IServiceScope scope, BaseViewModel viewModel, string region)
+        {
+            if (!regionsByScope.TryGetValue(scope, out var regions))
+            {
+                regions = [];
+                regionsByScope.Add(scope, regions);
+                viewModelByScope.Add(scope, viewModel);
+            }
+
+            regions.Add(region);
+        }
+
         using (_stateLock.EnterScope())
         {
             foreach (var (region, stack) in _regionStacks)
             {
                 foreach (var entry in stack)
                 {
-                    if (!regionsByViewModel.TryGetValue(entry.ViewModel, out var regions))
-                    {
-                        regions = [];
-                        regionsByViewModel.Add(entry.ViewModel, regions);
-                    }
-
-                    regions.Add(region);
+                    AddReference(entry.Scope, entry.ViewModel, region);
                 }
             }
 
-            foreach (var (viewModel, regions) in _pendingKeepAliveDisposals)
+            foreach (var (key, cached) in _keepAliveCache)
             {
-                if (!regionsByViewModel.TryGetValue(viewModel, out var allRegions))
-                {
-                    allRegions = [];
-                    regionsByViewModel.Add(viewModel, allRegions);
-                }
+                AddReference(cached.Scope, cached.ViewModel, key.Region);
+            }
 
-                allRegions.UnionWith(regions);
+            foreach (var (scope, pending) in _pendingScopeDisposals)
+            {
+                // The pending scope's regions were captured when its cache entry was removed.
+                foreach (var region in pending.Regions)
+                {
+                    AddReference(scope, pending.ViewModel, region);
+                }
             }
 
             _regionStacks.Clear();
-            _pendingKeepAliveDisposals.Clear();
+            _keepAliveCache.Clear();
+            _pendingScopeDisposals.Clear();
         }
 
-        return regionsByViewModel.Select(entry => (entry.Key, entry.Value.ToArray())).ToList();
+        return regionsByScope
+            .Select(kvp => new ScopeDisposalTarget(kvp.Key, viewModelByScope[kvp.Key], [.. kvp.Value]))
+            .ToList();
     }
 
     /// <summary>
-    /// Disposes removed cache entries on the synchronous path. Every ViewModel is
-    /// attempted even if one throws; exceptions are collected into <paramref name="errors"/>.
+    /// Queues a <see cref="INavigationService.RegionCacheCleared"/> notification for every
+    /// region affected by a service-wide disposal.
     /// </summary>
-    private void DisposeCacheEntriesSync(
-        List<(BaseViewModel ViewModel, string[] Regions)> targets,
-        List<Action> pendingEvents,
-        List<Exception> errors)
+    private void QueueCacheClearedEvents(List<ScopeDisposalTarget> targets, List<Action> pendingEvents)
     {
-        foreach (var (viewModel, regions) in targets)
+        foreach (var region in targets.SelectMany(t => t.Regions).Distinct())
         {
-            try
-            {
-                DisposeViewModelSync(viewModel);
-            }
-            catch (Exception ex)
-            {
-                errors.Add(ex);
-            }
-
-            foreach (var region in regions)
-            {
-                pendingEvents.Add(() => ViewModelDisposed?.Invoke(region, viewModel));
-            }
+            var capturedRegion = region;
+            pendingEvents.Add(() => RegionCacheCleared?.Invoke(capturedRegion));
         }
     }
 
     /// <summary>
-    /// Disposes removed cache entries on the asynchronous path. Every ViewModel is
-    /// attempted even if one throws; exceptions are collected into <paramref name="errors"/>.
+    /// Disposes a single page scope, preferring <see cref="IAsyncDisposable"/> when the
+    /// scope implementation supports it. Never throws: exceptions are collected into
+    /// <paramref name="errors"/>.
     /// </summary>
-    private async ValueTask DisposeCacheEntriesAsync(
-        List<(BaseViewModel ViewModel, string[] Regions)> targets,
-        List<Action> pendingEvents,
-        List<Exception> errors)
-    {
-        foreach (var (viewModel, regions) in targets)
-        {
-            try
-            {
-                await DisposeViewModelAsync(viewModel).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                errors.Add(ex);
-            }
-
-            foreach (var region in regions)
-            {
-                pendingEvents.Add(() => ViewModelDisposed?.Invoke(region, viewModel));
-            }
-        }
-    }
-
-    /// <summary>
-    /// Disposes a single ViewModel, preferring <see cref="IAsyncDisposable"/> when implemented.
-    /// </summary>
-    private static async ValueTask DisposeViewModelAsync(BaseViewModel viewModel)
-    {
-        if (viewModel is IAsyncDisposable asyncDisposable)
-        {
-            await asyncDisposable.DisposeAsync().ConfigureAwait(false);
-        }
-        else if (viewModel is IDisposable disposable)
-        {
-            disposable.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Disposes a single ViewModel on the synchronous path via <see cref="IDisposable"/>.
-    /// ViewModels that only implement <see cref="IAsyncDisposable"/> are intentionally
-    /// skipped here; callers that need async cleanup must use the asynchronous path.
-    /// </summary>
-    private static void DisposeViewModelSync(BaseViewModel viewModel)
-    {
-        if (viewModel is IDisposable disposable)
-        {
-            disposable.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Disposes a ViewModel instance that was resolved but never used (it lost a race
-    /// or the service was disposed concurrently). Exceptions are swallowed: a redundant
-    /// instance must never break navigation.
-    /// </summary>
-    private static async ValueTask DisposeUnusedViewModelAsync(BaseViewModel viewModel)
+    /// <remarks>
+    /// Within one page scope the DI container stops disposing remaining services after the
+    /// first throwing disposable (platform behavior, sync and async alike). Across page
+    /// scopes the navigation service still attempts every scope.
+    /// </remarks>
+    private static async ValueTask DisposeScopeAsync(IServiceScope scope, List<Exception> errors)
     {
         try
         {
-            await DisposeViewModelAsync(viewModel).ConfigureAwait(false);
+            if (scope is IAsyncDisposable asyncScope)
+            {
+                await asyncScope.DisposeAsync().ConfigureAwait(false);
+            }
+            else
+            {
+                scope.Dispose();
+            }
+        }
+        catch (Exception ex)
+        {
+            errors.Add(ex);
+        }
+    }
+
+    /// <summary>
+    /// Disposes a single page scope on the synchronous path via <see cref="IDisposable"/>.
+    /// Never throws: exceptions are collected into <paramref name="errors"/>.
+    /// </summary>
+    /// <remarks>
+    /// Platform behavior: if the page scope contains a service that only implements
+    /// <see cref="IAsyncDisposable"/>, the DI container throws
+    /// <see cref="InvalidOperationException"/> telling the caller to use
+    /// <c>DisposeAsync</c> instead. Pages that need asynchronous cleanup must be torn
+    /// down through the asynchronous APIs (<c>ClearCacheAsync</c>, <c>DisposeAsync</c>,
+    /// <c>GoBackAsync</c>, <c>NavigateToAsync</c>); the synchronous APIs only support
+    /// synchronously-disposable pages.
+    /// </remarks>
+    private static void DisposeScopeSync(IServiceScope scope, List<Exception> errors)
+    {
+        try
+        {
+            scope.Dispose();
+        }
+        catch (Exception ex)
+        {
+            errors.Add(ex);
+        }
+    }
+
+    /// <summary>
+    /// Releases a page scope that was created but never became a page (lost a race or the
+    /// service was disposed concurrently). Exceptions are swallowed: a redundant scope must
+    /// never break navigation.
+    /// </summary>
+    private static async ValueTask DisposeScopeBestEffortAsync(IServiceScope scope)
+    {
+        try
+        {
+            if (scope is IAsyncDisposable asyncScope)
+            {
+                await asyncScope.DisposeAsync().ConfigureAwait(false);
+            }
+            else
+            {
+                scope.Dispose();
+            }
         }
         catch
         {
-            // Best-effort cleanup of a redundant instance; never propagate.
+            // Best-effort cleanup of a redundant scope; never propagate.
         }
     }
 
@@ -951,8 +1153,8 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
 
     /// <summary>
     /// Executes the work items collected under the navigation lock: lifecycle callbacks,
-    /// disposals and activation, then queued events. Lifecycle/disposal exceptions are
-    /// collected and rethrown afterwards so one failing ViewModel never aborts the rest.
+    /// page-scope disposals and activation, then queued events. Lifecycle/disposal exceptions
+    /// are collected and rethrown afterwards so one failing page never aborts the rest.
     /// </summary>
     private static async Task RunTransitionAsync(TransitionWork work)
     {
@@ -982,16 +1184,18 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
     }
 
     /// <summary>
-    /// Queues the deactivation work (OnNavigatedFrom callback plus disposal when needed)
-    /// for one ViewModel.
+    /// Queues the deactivation work (OnNavigatedFrom callback plus page-scope disposal
+    /// when needed) for one entry. Must be called while holding
+    /// <see cref="_navigationLock"/> but not <see cref="_stateLock"/>.
     /// </summary>
-    private void QueueDeactivatePlan(DeactivatePlan plan, TransitionWork work)
+    private void QueueDeactivation(NavigationEntry entry, bool destroy, TransitionWork work)
     {
-        var viewModel = plan.ViewModel;
+        DetachNavigation(entry.ViewModel);
+        var plan = BuildDeactivatePlan(entry, destroy);
 
         work.NavigatedFromActions.Add(() =>
         {
-            if (viewModel is INavigationAware aware)
+            if (entry.ViewModel is INavigationAware aware)
                 aware.OnNavigatedFrom();
         });
 
@@ -1000,20 +1204,25 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
 
         work.DisposeActions.Add(async () =>
         {
-            await DisposeViewModelAsync(viewModel).ConfigureAwait(false);
+            await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false);
 
             using (_stateLock.EnterScope())
-                _pendingKeepAliveDisposals.Remove(viewModel);
+                _pendingScopeDisposals.Remove(entry.Scope);
 
+            // Ownership released: notify even if the scope disposal threw (the error
+            // was collected above and will be rethrown by RunTransitionAsync).
             foreach (var region in plan.RegionsToNotify)
-                work.Events.Add(() => ViewModelDisposed?.Invoke(region, viewModel));
+            {
+                var capturedRegion = region;
+                work.Events.Add(() => ViewModelDisposed?.Invoke(capturedRegion, entry.ViewModel));
+            }
         });
     }
 
     /// <summary>
     /// Queues the activation work (OnNavigatedTo callback) for one ViewModel.
     /// </summary>
-    private void QueueActivate(BaseViewModel viewModel, object? parameter, TransitionWork work)
+    private static void QueueActivate(BaseViewModel viewModel, object? parameter, TransitionWork work)
     {
         work.NavigatedToActions.Add(() =>
         {
@@ -1023,33 +1232,48 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
     }
 
     /// <summary>
-    /// Builds the deactivation plan for a ViewModel that is leaving the active slot.
+    /// Builds the deactivation plan for an entry that is leaving the active slot:
+    /// whether its page scope should be disposed and which regions to notify.
+    /// Acquires <see cref="_stateLock"/> internally.
     /// </summary>
     private DeactivatePlan BuildDeactivatePlan(NavigationEntry entry, bool destroy)
     {
-        var viewModel = entry.ViewModel;
         var regionsToNotify = new HashSet<string> { entry.RegionName };
-        bool shouldDispose = destroy && entry.Mode != NavigationMode.KeepAlive;
+        bool shouldDispose;
 
         using (_stateLock.EnterScope())
         {
-            if (shouldDispose
-                && _keepAliveCache.TryGetValue((entry.RegionName, viewModel.GetType()), out var cached)
-                && ReferenceEquals(cached, viewModel))
+            if (_pendingScopeDisposals.TryGetValue(entry.Scope, out var pending))
             {
-                _keepAliveCache.Remove((entry.RegionName, viewModel.GetType()));
+                regionsToNotify.UnionWith(pending.Regions);
             }
 
-            if (_pendingKeepAliveDisposals.TryGetValue(viewModel, out var pendingRegions)
-                && !BuildReferencedViewModelsLocked().Contains(viewModel))
+            if (IsScopeReferencedLocked(entry.Scope))
             {
-                regionsToNotify.UnionWith(pendingRegions);
-                shouldDispose = true;
-                // The pending entry is removed after disposal succeeds (see the queued closure).
+                // Still needed by another stack entry or the cache: defer disposal.
+                shouldDispose = false;
+                if (destroy)
+                {
+                    // Defensive: a destroy request for a still-referenced scope is remembered
+                    // so the last pop disposes it.
+                    if (_pendingScopeDisposals.TryGetValue(entry.Scope, out var existing))
+                    {
+                        existing.Regions.UnionWith(regionsToNotify);
+                    }
+                    else
+                    {
+                        _pendingScopeDisposals[entry.Scope] =
+                            new PendingDisposal(entry.ViewModel, new HashSet<string>(regionsToNotify));
+                    }
+                }
+            }
+            else
+            {
+                shouldDispose = destroy || _pendingScopeDisposals.ContainsKey(entry.Scope);
             }
         }
 
-        return new DeactivatePlan(viewModel, shouldDispose, regionsToNotify.ToArray());
+        return new DeactivatePlan(shouldDispose, [.. regionsToNotify]);
     }
 
     /// <summary>
@@ -1081,9 +1305,15 @@ public sealed class NavigationService(IServiceProvider serviceProvider) : INavig
         public List<Exception> Errors { get; } = [];
     }
 
-    /// <summary>Deactivation plan for one ViewModel: whether to dispose it and which regions to notify.</summary>
-    private record struct DeactivatePlan(BaseViewModel ViewModel, bool ShouldDispose, string[] RegionsToNotify);
+    /// <summary>Deactivation plan for one entry: whether to dispose its page scope and which regions to notify.</summary>
+    private readonly record struct DeactivatePlan(bool ShouldDispose, string[] RegionsToNotify);
 
-    /// <summary>One page on a region's navigation stack.</summary>
-    private sealed record NavigationEntry(string RegionName, BaseViewModel ViewModel, object? Parameter, NavigationMode Mode);
+    /// <summary>A page scope whose cache entry was removed while still referenced elsewhere.</summary>
+    private sealed record PendingDisposal(BaseViewModel ViewModel, HashSet<string> Regions);
+
+    /// <summary>A page scope selected for disposal, with the regions to notify.</summary>
+    private sealed record ScopeDisposalTarget(IServiceScope Scope, BaseViewModel ViewModel, string[] Regions);
+
+    /// <summary>One page on a region's navigation stack. The scope owns the ViewModel's lifetime.</summary>
+    private sealed record NavigationEntry(string RegionName, BaseViewModel ViewModel, object? Parameter, NavigationMode Mode, IServiceScope Scope);
 }

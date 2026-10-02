@@ -7,6 +7,35 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// Platform-agnostic navigation service that manages region-based navigation stacks,
 /// KeepAlive caching, and ViewModel lifecycle.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Lifetime model (v2.0):</b> every page gets its own <c>IServiceScope</c>. The ViewModel
+/// is resolved from that scope, and leaving the page disposes the scope — releasing the
+/// ViewModel and its whole Transient/Scoped dependency graph via the DI container.
+/// </para>
+/// <list type="table">
+/// <listheader><term>Registration</term><description>Page lifetime</description></listheader>
+/// <item><term>Transient</term><description>A new instance per page; disposed with the page scope.</description></item>
+/// <item><term>Scoped</term><description>One instance per page; disposed with the page scope.</description></item>
+/// <item><term>Singleton</term><description>Shared from the root container; a page scope never disposes it.</description></item>
+/// </list>
+/// <para>
+/// A freshly resolved ViewModel <i>instance</i> cannot appear twice on navigation
+/// stacks: navigating to a type whose instance is already the active page is a no-op
+/// returning <see langword="true"/>, while navigating to a fresh instance that lives
+/// elsewhere on a stack throws <see cref="InvalidOperationException"/> (typically a
+/// Singleton registered ViewModel navigated to twice — navigate back to it instead).
+/// Exception: re-navigating to a <i>cached</i> KeepAlive page reuses the cached instance
+/// and may push it again (v1.x compatible); the shared page scope is disposed only
+/// after its last stack/cache reference disappears.
+/// </para>
+/// <para>
+/// Within one page scope the DI container stops disposing remaining services after the
+/// first throwing disposable (platform behavior, sync and async alike). Across pages the
+/// service still attempts every scope: a single failure is rethrown as-is, several are
+/// wrapped in <see cref="AggregateException"/>.
+/// </para>
+/// </remarks>
 public interface INavigationService
 {
     // ────────────────────────────── Events ──────────────────────────────
@@ -18,16 +47,17 @@ public interface INavigationService
     event Action<string, BaseViewModel>? RegionNavigated;
 
     /// <summary>
-    /// Raised when the navigation service disposes a ViewModel.
+    /// Raised when the navigation service releases ownership of a page's ViewModel.
     /// </summary>
     /// <remarks>
-    /// <para>Parameters: region name, disposed ViewModel.</para>
+    /// <para>Parameters: region name, released ViewModel.</para>
     /// <para>
-    /// If a ViewModel only implements <see cref="IAsyncDisposable"/> and is removed
-    /// through a synchronous cleanup path, this event indicates that the navigation
-    /// reference has been removed — not that async resources have been released.
-    /// Use <see cref="ClearCacheAsync"/> or <see cref="ClearAllCacheAsync"/> to ensure
-    /// proper async disposal.
+    /// Ownership-released means the ViewModel was removed from navigation state and its
+    /// page scope is being disposed. The event fires even if the scope disposal threw
+    /// (the error is still reported to the caller); it does <i>not</i> mean every
+    /// disposable inside the scope was released — the DI container stops a scope at the
+    /// first throwing disposable. Singleton ViewModels are never disposed by a page
+    /// scope and therefore never raise this event through page teardown.
     /// </para>
     /// </remarks>
     event Action<string, BaseViewModel>? ViewModelDisposed;
@@ -121,13 +151,15 @@ public interface INavigationService
     /// <param name="regionName">The navigation region to clear.</param>
     /// <remarks>
     /// <para>
-    /// ViewModels still referenced by the navigation stack are deferred for disposal
+    /// Page scopes still referenced by a navigation stack are deferred for disposal
     /// until their last reference is removed.
     /// </para>
     /// <para>
-    /// The synchronous path calls <see cref="IDisposable.Dispose"/> but does not call
-    /// <see cref="IAsyncDisposable.DisposeAsync"/>. Use <see cref="ClearCacheAsync"/>
-    /// to ensure proper async disposal.
+    /// The synchronous path disposes page scopes via <see cref="IDisposable.Dispose"/>.
+    /// If a page scope contains a service that only implements
+    /// <see cref="IAsyncDisposable"/>, the DI container throws
+    /// <see cref="InvalidOperationException"/> directing the caller to the asynchronous
+    /// APIs. Use <see cref="ClearCacheAsync"/> when pages need asynchronous cleanup.
     /// </para>
     /// </remarks>
     void ClearCache(string regionName);
@@ -137,13 +169,15 @@ public interface INavigationService
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ViewModels still referenced by navigation stacks are deferred for disposal
+    /// Page scopes still referenced by navigation stacks are deferred for disposal
     /// until their last reference is removed.
     /// </para>
     /// <para>
-    /// The synchronous path calls <see cref="IDisposable.Dispose"/> but does not call
-    /// <see cref="IAsyncDisposable.DisposeAsync"/>. Use <see cref="ClearAllCacheAsync"/>
-    /// to ensure proper async disposal.
+    /// The synchronous path disposes page scopes via <see cref="IDisposable.Dispose"/>.
+    /// If a page scope contains a service that only implements
+    /// <see cref="IAsyncDisposable"/>, the DI container throws
+    /// <see cref="InvalidOperationException"/> directing the caller to the asynchronous
+    /// APIs. Use <see cref="ClearAllCacheAsync"/> when pages need asynchronous cleanup.
     /// </para>
     /// </remarks>
     void ClearAllCache();
