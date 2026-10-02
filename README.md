@@ -48,6 +48,34 @@ services.AddFlowNavigation();          // singleton — single-window apps
 services.AddScopedFlowNavigation();    // scoped — each window gets its own navigation stack
 ```
 
+**Singleton or scoped?** A *region* is a named navigation slot — typically one
+`NavigationHost` control in your UI — and each region owns an independent page
+stack (see [Regions](#regions)). This choice only decides the *scope of those
+stacks*:
+
+- `AddFlowNavigation()` registers one app-wide `INavigationService`. Every window
+  shares the same region stacks: two windows each hosting a `"MainRegion"` would
+  interfere with each other.
+- `AddScopedFlowNavigation()` gives each DI scope (typically one per window) its
+  own `INavigationService` with fully isolated region stacks.
+
+Both methods use `TryAdd`, so calling both registers only the first one — a
+single container holds exactly one `INavigationService` registration. The
+ViewModels' lifetimes are independent of this choice (see
+[Page-level service scopes](#page-level-service-scopes-v20)).
+
+**Mixed setup** — one global stack plus isolated windows: register the singleton
+for the shared stack, and construct per-window services manually from each
+window's scope (they are not registered in DI):
+
+```csharp
+services.AddFlowNavigation(); // global stack
+
+// Per-window isolated stack:
+using var windowScope = rootProvider.CreateScope();
+var windowNavigation = new NavigationService(windowScope.ServiceProvider);
+```
+
 ### 2. Write a ViewModel
 
 ```csharp
@@ -150,6 +178,30 @@ See [ElegantSeries.Flow.WPF](src/ElegantSeries.Flow.WPF/README.md) and
 | `Replace` | Replace the current page. The old page is disposed unless it was `KeepAlive`. |
 | `KeepAlive` | Reuse a cached ViewModel of the same type in the region instead of creating a new one. |
 | `ClearStack` | Drop the whole stack and start fresh with the new page. |
+
+## Regions
+
+A *region* is a named navigation slot — usually one `NavigationHost` control —
+and each region owns an independent page stack. Navigating in one region never
+affects another, so different parts of a window can navigate independently:
+
+```xml
+<!-- Sidebar region: menu pages -->
+<flow:NavigationHost RegionName="Sidebar" />
+<!-- Main region: detail pages -->
+<flow:NavigationHost RegionName="MainRegion" />
+```
+
+```csharp
+await navigation.NavigateToAsync<MenuViewModel>("Sidebar");
+await navigation.NavigateToAsync<DetailViewModel>("MainRegion");
+await navigation.GoBackAsync("Sidebar");   // only the sidebar pops
+```
+
+The default region name is `"MainRegion"`, so single-region apps can omit the
+argument everywhere. A ViewModel *instance* can only be active in one region at
+a time — navigating an instance that already lives on a *different* region's
+stack throws `InvalidOperationException`.
 
 ## Lifecycle
 
