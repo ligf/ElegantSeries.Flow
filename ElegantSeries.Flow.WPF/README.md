@@ -114,7 +114,7 @@ error — rethrow there during development to fail fast on misconfiguration:
 ```csharp
 public sealed class StrictHost : NavigationHost
 {
-    protected override void OnViewCreationFailed(BaseViewModel vm, Exception ex)
+    protected override void OnViewCreationFailed(INavigationViewModel vm, Exception ex)
         => throw new InvalidOperationException($"No view for {vm.GetType().Name}.", ex);
 }
 ```
