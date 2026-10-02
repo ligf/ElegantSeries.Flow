@@ -396,6 +396,28 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task NewMode_WhenNavigatingAwayAndBack_ShouldCreateFreshInstance_AndDisposeOldOne()
+    {
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await _navigationService.NavigateToAsync<TestDetailViewModel, string>("first");
+
+        var firstInstance = (TestDetailViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.Equal("first", firstInstance.ReceivedParam);
+
+        // Leave the page: the transient page scope is disposed.
+        await _navigationService.GoBackAsync();
+        Assert.True(firstInstance.Disposed);
+
+        // Come back: a brand-new instance, no state carried over.
+        await _navigationService.NavigateToAsync<TestDetailViewModel, string>("second");
+        var secondInstance = (TestDetailViewModel)_navigationService.GetCurrentViewModel()!;
+
+        Assert.NotSame(firstInstance, secondInstance);
+        Assert.False(secondInstance.Disposed);
+        Assert.Equal("second", secondInstance.ReceivedParam);
+    }
+
+    [Fact]
     public async Task ClearCache_WhenKeepAliveIsInHistory_ShouldDisposeAfterLastStackReferenceIsRemoved()
     {
         await _navigationService.NavigateToAsync<TestHomeViewModel>();
