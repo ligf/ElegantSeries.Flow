@@ -15,6 +15,7 @@ namespace AvaloniaSample;
 public partial class SecondWindow : Window
 {
     private readonly IServiceScope _scope;
+    private readonly INavigationService _navigation;
 
     public SecondWindow()
     {
@@ -22,18 +23,19 @@ public partial class SecondWindow : Window
 
         // Per-window scope -> per-window navigation service (not in DI).
         _scope = App.Services.CreateScope();
-        var navigation = new NavigationService(_scope.ServiceProvider);
+        _navigation = new NavigationService(_scope.ServiceProvider);
         var views = App.Services.GetRequiredService<IViewLocator>();
 
-        WindowHost.NavigationService = navigation;
+        WindowHost.NavigationService = _navigation;
         WindowHost.ViewLocator = views;
 
-        _ = navigation.NavigateToAsync<HomeViewModel>();
+        _ = _navigation.NavigateToAsync<HomeViewModel>();
     }
 
     protected override void OnClosed(EventArgs e)
     {
         WindowHost.Dispose();
+        (_navigation as IDisposable)?.Dispose();
         _scope.Dispose();
         base.OnClosed(e);
     }
