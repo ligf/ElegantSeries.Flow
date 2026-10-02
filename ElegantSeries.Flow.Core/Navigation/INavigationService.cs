@@ -1,4 +1,3 @@
-using ElegantSeries.Flow.Core.ViewModels;
 using System.Diagnostics.CodeAnalysis;
 
 namespace ElegantSeries.Flow.Core.Navigation;
@@ -22,12 +21,30 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// <para>
 /// A freshly resolved ViewModel <i>instance</i> cannot appear twice on navigation
 /// stacks: navigating to a type whose instance is already the active page is a no-op
-/// returning <see langword="true"/>, while navigating to a fresh instance that lives
+/// returning <see langword="true"/> (or a <i>refresh</i> when <c>refreshIfActive</c> is
+/// set — the active instance's activation callbacks run again with the new parameter,
+/// without creating a new page scope), while navigating to a fresh instance that lives
 /// elsewhere on a stack throws <see cref="InvalidOperationException"/> (typically a
 /// Singleton registered ViewModel navigated to twice — navigate back to it instead).
 /// Exception: re-navigating to a <i>cached</i> KeepAlive page reuses the cached instance
-/// and may push it again (v1.x compatible); the shared page scope is disposed only
-/// after its last stack/cache reference disappears.
+/// and may push it again (v1.x compatible), so the same ViewModel can appear several
+/// times on one stack and back navigation passes through it repeatedly; the shared page
+/// scope is disposed only after its last stack/cache reference disappears.
+/// </para>
+/// <para>
+/// <b>Cancellation:</b> <c>NavigateToAsync</c> / <c>GoBackAsync</c> accept a
+/// <see cref="CancellationToken"/> that is honored until the region stack is updated.
+/// Cancellation before that point releases the created page scope (if any) and throws
+/// <see cref="OperationCanceledException"/>. Once the stack has been updated the
+/// transition runs to completion and the token is ignored.
+/// </para>
+/// <para>
+/// <b>Transition order</b> (fixed): <c>OnNavigatedFrom</c> →
+/// page-scope disposal → <c>OnNavigatedTo</c> → events. UI hosts should swap views on
+/// <see cref="RegionNavigated"/>; the view is not guaranteed to be attached yet when
+/// <c>OnNavigatedTo</c> runs. ViewModels that need asynchronous work during the
+/// transition should implement <see cref="INavigationAwareAsync"/> instead of
+/// <see cref="INavigationAware"/>.
 /// </para>
 /// <para>
 /// Within one page scope the DI container stops disposing remaining services after the
@@ -43,8 +60,20 @@ public interface INavigationService
     /// <summary>
     /// Raised when a region successfully navigates to a new active ViewModel.
     /// </summary>
-    /// <remarks>Parameters: region name, activated ViewModel.</remarks>
-    event Action<string, BaseViewModel>? RegionNavigated;
+    /// <remarks>
+    /// <para>Parameters: region name, activated ViewModel.</para>
+    /// <para>
+    /// This is also raised for a <i>refresh</i> navigation (same type already active with
+    /// <c>refreshIfActive</c>): the page is not pushed again, but subscribers are notified
+    /// that its activation callbacks ran again with a new parameter.
+    /// </para>
+    /// <para>
+    /// The navigation service is typically a long-lived singleton: views/hosts that
+    /// subscribe must unsubscribe when detached (or dispose their subscription), otherwise
+    /// the service keeps the subscriber alive.
+    /// </para>
+    /// </remarks>
+    event Action<string, INavigationViewModel>? RegionNavigated;
 
     /// <summary>
     /// Raised when the navigation service releases ownership of a page's ViewModel.
@@ -56,11 +85,17 @@ public interface INavigationService
     /// page scope is being disposed. The event fires even if the scope disposal threw
     /// (the error is still reported to the caller); it does <i>not</i> mean every
     /// disposable inside the scope was released — the DI container stops a scope at the
-    /// first throwing disposable. Singleton ViewModels are never disposed by a page
-    /// scope and therefore never raise this event through page teardown.
+    /// first throwing disposable. The event also fires for Singleton ViewModels when
+    /// their page is torn down: the page scope is disposed, but the shared instance
+    /// itself survives because it is owned by the root container.
+    /// </para>
+    /// <para>
+    /// The navigation service is typically a long-lived singleton: views/hosts that
+    /// subscribe must unsubscribe when detached (or dispose their subscription), otherwise
+    /// the service keeps the subscriber alive.
     /// </para>
     /// </remarks>
-    event Action<string, BaseViewModel>? ViewModelDisposed;
+    event Action<string, INavigationViewModel>? ViewModelDisposed;
 
     /// <summary>
     /// Raised when a region's KeepAlive cache is cleared.
@@ -82,14 +117,14 @@ public interface INavigationService
     /// </summary>
     /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
     /// <returns>The active ViewModel, or <see langword="null"/> if the region is empty.</returns>
-    BaseViewModel? GetCurrentViewModel(string regionName = "MainRegion");
+    INavigationViewModel? GetCurrentViewModel(string regionName = "MainRegion");
 
     /// <summary>
     /// Checks whether the active ViewModel in the specified region is of the given type.
     /// </summary>
     /// <typeparam name="TViewModel">The ViewModel type to check.</typeparam>
     /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
-    bool IsActive<TViewModel>(string regionName = "MainRegion") where TViewModel : BaseViewModel;
+    bool IsActive<TViewModel>(string regionName = "MainRegion") where TViewModel : INavigationViewModel;
 
     /// <summary>
     /// Gets the <see cref="NavigationMode"/> of the current page in the specified region.
@@ -106,14 +141,34 @@ public interface INavigationService
     /// <typeparam name="TViewModel">The target ViewModel type.</typeparam>
     /// <param name="regionName">The target region. Defaults to <c>"MainRegion"</c>.</param>
     /// <param name="mode">The navigation mode. Defaults to <see cref="NavigationMode.New"/>.</param>
+    /// <param name="refreshIfActive">
+    /// When <see langword="true"/> and a page of type <typeparamref name="TViewModel"/> is
+    /// already the active page, the page is <i>refreshed</i> instead of being a silent
+    /// no-op: nothing is pushed and no new page scope is created — the active instance's
+    /// activation callbacks run again with the new parameter and
+    /// <see cref="RegionNavigated"/> is raised. When the target type is not active this
+    /// flag has no effect. Defaults to <see langword="false"/>.
+    /// </param>
+    /// <param name="cancellationToken">
+    /// Cooperative cancellation, honored until the region stack is updated: cancellation
+    /// before that point releases the created page scope (if any) and throws
+    /// <see cref="OperationCanceledException"/>. Once the stack has been updated the
+    /// transition runs to completion and the token is ignored.
+    /// </param>
     /// <returns>
     /// <see langword="true"/> if navigation succeeded;
     /// <see langword="false"/> if cancelled by a guard.
     /// </returns>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled before the region
+    /// stack is updated.
+    /// </exception>
     Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
         string regionName = "MainRegion",
-        NavigationMode mode = NavigationMode.New)
-        where TViewModel : BaseViewModel;
+        NavigationMode mode = NavigationMode.New,
+        bool refreshIfActive = false,
+        CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel;
 
     /// <summary>
     /// Navigates to the specified ViewModel type with a strongly-typed parameter.
@@ -123,25 +178,54 @@ public interface INavigationService
     /// <param name="parameter">The navigation parameter.</param>
     /// <param name="regionName">The target region. Defaults to <c>"MainRegion"</c>.</param>
     /// <param name="mode">The navigation mode. Defaults to <see cref="NavigationMode.New"/>.</param>
+    /// <param name="refreshIfActive">
+    /// When <see langword="true"/> and a page of type <typeparamref name="TViewModel"/> is
+    /// already the active page, the page is <i>refreshed</i> with
+    /// <paramref name="parameter"/> instead of being a silent no-op: nothing is pushed and
+    /// no new page scope is created — the active instance's activation callbacks run again
+    /// and <see cref="RegionNavigated"/> is raised. When the target type is not active this
+    /// flag has no effect. Defaults to <see langword="false"/>.
+    /// </param>
+    /// <param name="cancellationToken">
+    /// Cooperative cancellation, honored until the region stack is updated: cancellation
+    /// before that point releases the created page scope (if any) and throws
+    /// <see cref="OperationCanceledException"/>. Once the stack has been updated the
+    /// transition runs to completion and the token is ignored.
+    /// </param>
     /// <returns>
     /// <see langword="true"/> if navigation succeeded;
     /// <see langword="false"/> if cancelled by a guard.
     /// </returns>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled before the region
+    /// stack is updated.
+    /// </exception>
     Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
         TParam parameter,
         string regionName = "MainRegion",
-        NavigationMode mode = NavigationMode.New)
-        where TViewModel : BaseViewModel;
+        NavigationMode mode = NavigationMode.New,
+        bool refreshIfActive = false,
+        CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel;
 
     /// <summary>
     /// Navigates back to the previous page in the specified region.
     /// </summary>
     /// <param name="regionName">The target region. Defaults to <c>"MainRegion"</c>.</param>
+    /// <param name="cancellationToken">
+    /// Cooperative cancellation, honored until the region stack is updated: cancellation
+    /// before that point throws <see cref="OperationCanceledException"/>. Once the stack
+    /// has been updated the transition runs to completion and the token is ignored.
+    /// </param>
     /// <returns>
     /// <see langword="true"/> if back navigation succeeded;
     /// <see langword="false"/> if cancelled or the stack has one or fewer pages.
     /// </returns>
-    Task<bool> GoBackAsync(string regionName = "MainRegion");
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled before the region
+    /// stack is updated.
+    /// </exception>
+    Task<bool> GoBackAsync(string regionName = "MainRegion", CancellationToken cancellationToken = default);
 
     // ──────────────── Cache Management (Sync then Async) ────────────────
 

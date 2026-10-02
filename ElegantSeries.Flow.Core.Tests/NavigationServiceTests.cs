@@ -208,6 +208,15 @@ public class NavigationServiceTests
         services.AddTransient<ScopedViewModel>();
         services.AddTransient<ThrowingDependencyViewModel>();
         services.AddSingleton<SingletonViewModel>();
+        services.AddTransient<RefreshableViewModel>();
+        services.AddTransient<BothAwareViewModel>();
+        services.AddTransient<AsyncThrowingViewModel>();
+        services.AddTransient<TypedAsyncViewModel>();
+        services.AddTransient<ContextGuardViewModel>();
+        services.AddTransient<BothGuardViewModel>();
+        services.AddTransient<ContextGuardDetailViewModel>();
+        services.AddTransient<CancelInNavigatedToViewModel>();
+        services.AddTransient<ThinViewModel>();
 
         _serviceProvider = services.BuildServiceProvider();
         _navigationService = _serviceProvider.GetRequiredService<INavigationService>();
@@ -217,7 +226,7 @@ public class NavigationServiceTests
     public async Task NavigateToAsync_ShouldActivateViewModel_AndTriggerEvent()
     {
         string? notifiedRegion = null;
-        BaseViewModel? notifiedVm = null;
+        INavigationViewModel? notifiedVm = null;
 
         _navigationService.RegionNavigated += (r, vm) =>
         {
@@ -275,7 +284,7 @@ public class NavigationServiceTests
     [Fact]
     public async Task GoBackAsync_ShouldReturnToPreviousViewModel_AndDisposeCurrent()
     {
-        BaseViewModel? disposedVm = null;
+        INavigationViewModel? disposedVm = null;
         _navigationService.ViewModelDisposed += (_, vm) => disposedVm = vm;
 
         await _navigationService.NavigateToAsync<TestHomeViewModel>();
@@ -315,7 +324,7 @@ public class NavigationServiceTests
         var oldViewModel = (ThrowingNavigatedFromViewModel)_navigationService.GetCurrentViewModel()!;
         oldViewModel.ThrowOnNavigatedFrom = true;
 
-        BaseViewModel? navigatedEventViewModel = null;
+        INavigationViewModel? navigatedEventViewModel = null;
         _navigationService.RegionNavigated += (_, vm) => navigatedEventViewModel = vm;
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -330,7 +339,7 @@ public class NavigationServiceTests
     [Fact]
     public async Task OnNavigatedToThrows_ShouldKeepCommittedPageActiveAndPropagateException()
     {
-        BaseViewModel? navigatedEventViewModel = null;
+        INavigationViewModel? navigatedEventViewModel = null;
         _navigationService.RegionNavigated += (_, vm) => navigatedEventViewModel = vm;
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -560,7 +569,7 @@ public class NavigationServiceTests
     public async Task ClearCache_Sync_ShouldDisposeAndTriggerEvents()
     {
         string? clearedRegion = null;
-        BaseViewModel? disposedVm = null;
+        INavigationViewModel? disposedVm = null;
 
         _navigationService.RegionCacheCleared += r => clearedRegion = r;
         _navigationService.ViewModelDisposed += (_, vm) => disposedVm = vm;
@@ -727,7 +736,7 @@ public class NavigationServiceTests
     {
         bool secondNavigated = false;
 
-        void Handler(string region, BaseViewModel vm)
+        void Handler(string region, INavigationViewModel vm)
         {
             if (vm is TestHomeViewModel)
             {
@@ -779,7 +788,7 @@ public class NavigationServiceTests
     public async Task ClearCacheAsync_ShouldRaiseRegionCacheCleared_AndViewModelDisposedEvents()
     {
         string? clearedRegion = null;
-        BaseViewModel? disposedVm = null;
+        INavigationViewModel? disposedVm = null;
 
         _navigationService.RegionCacheCleared += r => clearedRegion = r;
         _navigationService.ViewModelDisposed += (_, vm) => disposedVm = vm;
@@ -876,7 +885,7 @@ public class NavigationServiceTests
     [Fact]
     public async Task NavigateAway_WhenPageScopeDisposalThrows_ViewModelDisposedStillFires_PinOwnershipReleased()
     {
-        BaseViewModel? releasedVm = null;
+        INavigationViewModel? releasedVm = null;
         string? releasedRegion = null;
         _navigationService.ViewModelDisposed += (region, vm) => { releasedRegion = region; releasedVm = vm; };
 
@@ -1262,7 +1271,428 @@ public class NavigationServiceTests
 
     #endregion
 
+    #region Review feedback: cancellation, async lifecycle, refresh, guard context, thin base
+
+    [Fact]
+    public async Task NavigateToAsync_WhenTokenAlreadyCancelled_ThrowsOperationCanceledException()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => _navigationService.NavigateToAsync<TestHomeViewModel>(cancellationToken: cts.Token));
+
+        Assert.Null(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenCancelledDuringResolve_ReleasesAbandonedScopeAndThrows()
+    {
+        TrackedDisposeViewModel.DisposeCount = 0;
+
+        var services = new ServiceCollection();
+        services.AddFlowNavigation();
+        services.AddTransient<TrackedDisposeViewModel>();
+        var innerProvider = services.BuildServiceProvider();
+        using var cts = new CancellationTokenSource();
+        var provider = new TestServiceProvider(
+            innerProvider,
+            new CancellingScopeFactory(innerProvider.GetRequiredService<IServiceScopeFactory>(), cts));
+        var navigationService = new NavigationService(provider);
+
+        var ex = await Assert.ThrowsAsync<OperationCanceledException>(
+            () => navigationService.NavigateToAsync<TrackedDisposeViewModel>(cancellationToken: cts.Token));
+
+        Assert.Equal(cts.Token, ex.CancellationToken);
+        // The scope created for the abandoned page was released: nothing leaked.
+        Assert.Equal(1, TrackedDisposeViewModel.DisposeCount);
+
+        await navigationService.DisposeAsync();
+        await innerProvider.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenCancelledAfterStackUpdate_RunsToCompletion()
+    {
+        using var cts = new CancellationTokenSource();
+        CancelInNavigatedToViewModel.TokenSource = cts;
+        try
+        {
+            await _navigationService.NavigateToAsync<TestHomeViewModel>();
+            var result = await _navigationService.NavigateToAsync<CancelInNavigatedToViewModel>(
+                cancellationToken: cts.Token);
+
+            Assert.True(result);
+            Assert.True(_navigationService.IsActive<CancelInNavigatedToViewModel>());
+        }
+        finally
+        {
+            CancelInNavigatedToViewModel.TokenSource = null;
+        }
+    }
+
+    [Fact]
+    public async Task GoBackAsync_WhenTokenAlreadyCancelled_ThrowsAndKeepsStack()
+    {
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await _navigationService.NavigateToAsync<TestDetailViewModel, string>("x");
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => _navigationService.GoBackAsync(cancellationToken: cts.Token));
+
+        Assert.True(_navigationService.IsActive<TestDetailViewModel>());
+    }
+
+    [Fact]
+    public async Task INavigationAwareAsync_TakesPrecedenceOverSyncCallbacks()
+    {
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await _navigationService.NavigateToAsync<BothAwareViewModel>();
+        var vm = (BothAwareViewModel)_navigationService.GetCurrentViewModel()!;
+
+        Assert.True(vm.AsyncToCalled);
+        Assert.False(vm.SyncToCalled);
+
+        await _navigationService.NavigateToAsync<TestDetailViewModel, string>("x");
+
+        Assert.True(vm.AsyncFromCalled);
+        Assert.False(vm.SyncFromCalled);
+    }
+
+    [Fact]
+    public async Task INavigationAwareAsync_WhenCallbackThrows_ExceptionPropagatesAfterTransition()
+    {
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _navigationService.NavigateToAsync<AsyncThrowingViewModel>());
+
+        Assert.Equal("OnNavigatedToAsync failed.", ex.Message);
+        // The page was committed before the callback ran.
+        Assert.True(_navigationService.IsActive<AsyncThrowingViewModel>());
+    }
+
+    [Fact]
+    public async Task INavigationAwareAsync_Typed_ReceivesStronglyTypedParameter()
+    {
+        await _navigationService.NavigateToAsync<TypedAsyncViewModel, string>("typed-param");
+        var vm = (TypedAsyncViewModel)_navigationService.GetCurrentViewModel()!;
+
+        Assert.Equal("typed-param", vm.ReceivedParam);
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_RefreshIfActive_ReinvokesCallbacksOnSameInstance()
+    {
+        await _navigationService.NavigateToAsync<RefreshableViewModel, string>("first");
+        var vm = (RefreshableViewModel)_navigationService.GetCurrentViewModel()!;
+
+        int navigatedEvents = 0;
+        _navigationService.RegionNavigated += (_, _) => navigatedEvents++;
+
+        var result = await _navigationService.NavigateToAsync<RefreshableViewModel, string>(
+            "second", refreshIfActive: true);
+
+        Assert.True(result);
+        Assert.Same(vm, _navigationService.GetCurrentViewModel());
+        Assert.Equal(2, vm.NavigatedToCount);
+        Assert.Equal("second", vm.LastParameter);
+        Assert.Equal(1, navigatedEvents);
+        Assert.False(_navigationService.CanGoBack());
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_SameTypeWithoutRefresh_IsSilentNoOp()
+    {
+        await _navigationService.NavigateToAsync<RefreshableViewModel, string>("first");
+        var vm = (RefreshableViewModel)_navigationService.GetCurrentViewModel()!;
+
+        int navigatedEvents = 0;
+        _navigationService.RegionNavigated += (_, _) => navigatedEvents++;
+
+        var result = await _navigationService.NavigateToAsync<RefreshableViewModel, string>("second");
+
+        Assert.True(result);
+        Assert.Same(vm, _navigationService.GetCurrentViewModel());
+        Assert.Equal(1, vm.NavigatedToCount);
+        Assert.Equal(0, navigatedEvents);
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_RefreshIfActive_WhenNotOnTop_NavigatesNormally()
+    {
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+
+        var result = await _navigationService.NavigateToAsync<RefreshableViewModel, string>(
+            "p", refreshIfActive: true);
+
+        Assert.True(result);
+        var vm = (RefreshableViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.Equal(1, vm.NavigatedToCount);
+        Assert.Equal("p", vm.LastParameter);
+        Assert.True(_navigationService.CanGoBack());
+    }
+
+    [Fact]
+    public async Task INavigationGuardWithContext_ReceivesFullContext()
+    {
+        await _navigationService.NavigateToAsync<ContextGuardViewModel>();
+        var guard = (ContextGuardViewModel)_navigationService.GetCurrentViewModel()!;
+
+        var result = await _navigationService.NavigateToAsync<TestDetailViewModel, string>("p1");
+
+        Assert.True(result);
+        var ctx = guard.LastContext!;
+        Assert.Equal("MainRegion", ctx.RegionName);
+        Assert.Equal(typeof(TestDetailViewModel), ctx.TargetViewModelType);
+        Assert.Equal(NavigationMode.New, ctx.Mode);
+        Assert.Equal("p1", ctx.Parameter);
+        Assert.False(ctx.IsBack);
+    }
+
+    [Fact]
+    public async Task INavigationGuardWithContext_Deny_CancelsNavigation()
+    {
+        await _navigationService.NavigateToAsync<ContextGuardViewModel>();
+        var guard = (ContextGuardViewModel)_navigationService.GetCurrentViewModel()!;
+        guard.Allow = false;
+
+        var result = await _navigationService.NavigateToAsync<TestDetailViewModel>();
+
+        Assert.False(result);
+        Assert.Same(guard, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task INavigationGuardWithContext_TakesPrecedenceOverPlainGuard()
+    {
+        await _navigationService.NavigateToAsync<BothGuardViewModel>();
+        var guard = (BothGuardViewModel)_navigationService.GetCurrentViewModel()!;
+
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel>());
+
+        Assert.True(guard.ContextGuardCalled);
+        Assert.False(guard.PlainGuardCalled);
+    }
+
+    [Fact]
+    public async Task GoBack_GuardWithContext_ReceivesBackContext()
+    {
+        await _navigationService.NavigateToAsync<TestHomeViewModel, string>("home-param");
+        await _navigationService.NavigateToAsync<ContextGuardDetailViewModel>();
+        var guard = (ContextGuardDetailViewModel)_navigationService.GetCurrentViewModel()!;
+
+        Assert.True(await _navigationService.GoBackAsync());
+
+        var ctx = guard.LastContext!;
+        Assert.True(ctx.IsBack);
+        Assert.Null(ctx.Mode);
+        Assert.Equal(typeof(TestHomeViewModel), ctx.TargetViewModelType);
+        Assert.Equal("home-param", ctx.Parameter);
+        Assert.Equal("MainRegion", ctx.RegionName);
+    }
+
+    [Fact]
+    public async Task NavigationViewModelBase_ThinBase_WorksWithoutToolkit()
+    {
+        await _navigationService.NavigateToAsync<ThinViewModel>();
+        var thin = (ThinViewModel)_navigationService.GetCurrentViewModel()!;
+
+        Assert.NotNull(thin.Navigation);
+
+        int changed = 0;
+        thin.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ThinViewModel.Title))
+            {
+                changed++;
+            }
+        };
+        thin.Title = "hello";
+        thin.Title = "hello"; // unchanged value: no event
+
+        Assert.Equal(1, changed);
+
+        Assert.True(await thin.GoToDetailAsync());
+        Assert.True(_navigationService.IsActive<TestDetailViewModel>());
+        Assert.Null(thin.Navigation);
+    }
+
+    [Fact]
+    public async Task ViewModelDisposed_FiresForSingletonPageTeardown_ButInstanceSurvives()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowNavigation();
+        services.AddSingleton<SingletonViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var serviceProvider = services.BuildServiceProvider();
+        var navigationService = (NavigationService)serviceProvider.GetRequiredService<INavigationService>();
+
+        INavigationViewModel? disposedVm = null;
+        navigationService.ViewModelDisposed += (_, vm) => disposedVm = vm;
+
+        await navigationService.NavigateToAsync<SingletonViewModel>();
+        var singleton = (SingletonViewModel)navigationService.GetCurrentViewModel()!;
+        // Replace destroys the singleton's page (a merely covered page in New mode stays
+        // alive on the back stack and must NOT raise ViewModelDisposed).
+        await navigationService.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.Replace);
+
+        // Ownership was released (event fired) but the root-owned instance survives.
+        Assert.Same(singleton, disposedVm);
+        Assert.False(singleton.Disposed);
+
+        await navigationService.DisposeAsync();
+        await serviceProvider.DisposeAsync();
+    }
+
+    #endregion
+
     #region v2.0 test doubles
+
+    private sealed class RefreshableViewModel : BaseViewModel, INavigationAware
+    {
+        public int NavigatedToCount { get; private set; }
+        public object? LastParameter { get; private set; }
+
+        public void OnNavigatedTo(object? parameter)
+        {
+            NavigatedToCount++;
+            LastParameter = parameter;
+        }
+
+        public void OnNavigatedFrom() { }
+    }
+
+    private sealed class BothAwareViewModel : BaseViewModel, INavigationAware, INavigationAwareAsync
+    {
+        public bool SyncToCalled { get; private set; }
+        public bool SyncFromCalled { get; private set; }
+        public bool AsyncToCalled { get; private set; }
+        public bool AsyncFromCalled { get; private set; }
+
+        public void OnNavigatedTo(object? parameter) => SyncToCalled = true;
+        public void OnNavigatedFrom() => SyncFromCalled = true;
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            AsyncToCalled = true;
+            return Task.CompletedTask;
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken)
+        {
+            AsyncFromCalled = true;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class AsyncThrowingViewModel : BaseViewModel, INavigationAwareAsync
+    {
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+            => Task.FromException(new InvalidOperationException("OnNavigatedToAsync failed."));
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class TypedAsyncViewModel : BaseViewModel, INavigationAwareAsync<string>
+    {
+        public string? ReceivedParam { get; private set; }
+
+        public Task OnNavigatedToAsync(string parameter, CancellationToken cancellationToken)
+        {
+            ReceivedParam = parameter;
+            return Task.CompletedTask;
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class ContextGuardViewModel : BaseViewModel, INavigationGuardWithContext
+    {
+        public NavigationGuardContext? LastContext { get; private set; }
+        public bool Allow { get; set; } = true;
+
+        public Task<bool> CanNavigateFromAsync(NavigationGuardContext context)
+        {
+            LastContext = context;
+            return Task.FromResult(Allow);
+        }
+    }
+
+    private sealed class BothGuardViewModel : BaseViewModel, INavigationGuard, INavigationGuardWithContext
+    {
+        public bool PlainGuardCalled { get; private set; }
+        public bool ContextGuardCalled { get; private set; }
+
+        public Task<bool> CanNavigateFromAsync()
+        {
+            PlainGuardCalled = true;
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> CanNavigateFromAsync(NavigationGuardContext context)
+        {
+            ContextGuardCalled = true;
+            return Task.FromResult(true);
+        }
+    }
+
+    private sealed class ContextGuardDetailViewModel : BaseViewModel, INavigationGuardWithContext
+    {
+        public NavigationGuardContext? LastContext { get; private set; }
+
+        public Task<bool> CanNavigateFromAsync(NavigationGuardContext context)
+        {
+            LastContext = context;
+            return Task.FromResult(true);
+        }
+    }
+
+    private sealed class CancelInNavigatedToViewModel : BaseViewModel, INavigationAware
+    {
+        public static CancellationTokenSource? TokenSource;
+
+        public void OnNavigatedTo(object? parameter) => TokenSource?.Cancel();
+        public void OnNavigatedFrom() { }
+    }
+
+    private sealed class ThinViewModel : NavigationViewModelBase
+    {
+        private string? _title;
+
+        public string? Title
+        {
+            get => _title;
+            set => SetProperty(ref _title, value);
+        }
+
+        public Task<bool> GoToDetailAsync() => NavigateToAsync<TestDetailViewModel>();
+    }
+
+    /// <summary>
+    /// Cancels the token on the first created scope, simulating cancellation that lands
+    /// between page-scope creation and the stack update.
+    /// </summary>
+    private sealed class CancellingScopeFactory(IServiceScopeFactory inner, CancellationTokenSource cts) : IServiceScopeFactory
+    {
+        private readonly IServiceScopeFactory _inner = inner;
+        private readonly CancellationTokenSource _cts = cts;
+        private int _calls;
+
+        public IServiceScope CreateScope()
+        {
+            var scope = _inner.CreateScope();
+            if (Interlocked.Increment(ref _calls) == 1)
+            {
+                _cts.Cancel();
+            }
+
+            return scope;
+        }
+    }
 
     private sealed class SingletonViewModel : BaseViewModel, IDisposable
     {
