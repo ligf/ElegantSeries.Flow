@@ -1,19 +1,23 @@
-using CommunityToolkit.Mvvm.ComponentModel;
-using ElegantSeries.Flow.Core.Navigation;
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using ElegantSeries.Flow.Core.Navigation;
 
 namespace ElegantSeries.Flow.Core.ViewModels;
 
 /// <summary>
-/// Base class for all ViewModels in the ElegantSeries.Flow framework.
-/// Provides convenient navigation methods that delegate to the attached
-/// <see cref="INavigationService"/>.
+/// Thin ViewModel base class with no MVVM toolkit dependency.
 /// </summary>
 /// <remarks>
 /// <para>
-/// This base class builds on CommunityToolkit.Mvvm (<see cref="ObservableObject"/>) for
-/// <c>[ObservableProperty]</c> source generation. For a toolkit-free alternative, derive
-/// from <see cref="NavigationViewModelBase"/> instead.
+/// Provides <see cref="INotifyPropertyChanged"/> (with a <see cref="SetProperty{T}"/>
+/// helper) and the navigation plumbing shared by all ElegantSeries.Flow ViewModels:
+/// the <see cref="Navigation"/> property plus protected navigation helpers.
+/// </para>
+/// <para>
+/// Prefer <see cref="BaseViewModel"/> when you use CommunityToolkit.Mvvm source
+/// generation (<c>[ObservableProperty]</c> and friends); prefer this class when the
+/// toolkit dependency is unwanted.
 /// </para>
 /// <para>
 /// The <see cref="Navigation"/> property is managed automatically by the
@@ -22,7 +26,7 @@ namespace ElegantSeries.Flow.Core.ViewModels;
 /// call the protected navigation methods instead of touching this property.
 /// </para>
 /// </remarks>
-public abstract partial class BaseViewModel : ObservableObject, INavigationViewModel
+public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPropertyChanged
 {
     /// <summary>
     /// Gets the navigation service attached to this ViewModel, or <see langword="null"/>
@@ -40,6 +44,36 @@ public abstract partial class BaseViewModel : ObservableObject, INavigationViewM
         get => Navigation;
         set => Navigation = value;
     }
+
+    /// <inheritdoc />
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>
+    /// Sets the backing field and raises <see cref="PropertyChanged"/> when the value changed.
+    /// </summary>
+    /// <typeparam name="T">The property type.</typeparam>
+    /// <param name="field">The backing field.</param>
+    /// <param name="value">The new value.</param>
+    /// <param name="propertyName">The property name (captured automatically).</param>
+    /// <returns><see langword="true"/> when the value changed.</returns>
+    protected bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+        {
+            return false;
+        }
+
+        field = value;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
+
+    /// <summary>
+    /// Raises <see cref="PropertyChanged"/> for the given property.
+    /// </summary>
+    /// <param name="propertyName">The property name (captured automatically).</param>
+    protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     /// <summary>
     /// Navigates to the specified ViewModel type.

@@ -17,8 +17,12 @@ thread-safe by design.
 - **Navigation modes** — `New`, `Replace`, `KeepAlive`, `ClearStack`
 - **KeepAlive cache** — opt-in ViewModel reuse across navigations
 - **Typed parameters** — `NavigateToAsync<TViewModel, TParam>(param)` with compile-time type safety
-- **Lifecycle callbacks** — `INavigationAware` (`OnNavigatedTo` / `OnNavigatedFrom`)
-- **Navigation guards** — `INavigationGuard.CanNavigateFromAsync()` can cancel navigation
+- **Lifecycle callbacks** — `INavigationAware` (`OnNavigatedTo` / `OnNavigatedFrom`),
+  or the async `INavigationAwareAsync` when the transition needs `await`
+- **Navigation guards** — `INavigationGuard.CanNavigateFromAsync()` can cancel navigation,
+  or `INavigationGuardWithContext` for target/mode/parameter-aware decisions
+- **Cancellation** — `CancellationToken` on navigation calls, honored until the stack updates
+- **Refresh** — re-invoke the active page's callbacks with a new parameter (`refreshIfActive`)
 - **AOT / trimming safe** — `DynamicallyAccessedMembers` annotations, no runtime reflection
 - **Thread-safe** — transitions are serialized; all shared state is lock-guarded
 - **Best-effort disposal** — one failing `Dispose` never leaks the remaining ViewModels
@@ -63,6 +67,10 @@ public partial class HomeViewModel : BaseViewModel, INavigationAware
 `BaseViewModel.Navigation` is attached automatically when the ViewModel becomes the active
 page and cleared when it is navigated away from, so the `protected NavigateToAsync` /
 `GoBackAsync` helpers can be called directly from the ViewModel.
+
+`BaseViewModel` builds on CommunityToolkit.Mvvm. If you don't want the toolkit
+dependency, derive from `NavigationViewModelBase` instead — same navigation plumbing
+with a plain `INotifyPropertyChanged` implementation.
 
 Register your ViewModels with DI (transient is the typical lifetime):
 
@@ -111,19 +119,84 @@ public interface INavigationAware
     void OnNavigatedFrom();
 }
 
+public interface INavigationAwareAsync   // implement INSTEAD of INavigationAware when you need await
+{
+    Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default);
+    Task OnNavigatedFromAsync(CancellationToken cancellationToken = default);
+}
+
 public interface INavigationGuard
 {
     Task<bool> CanNavigateFromAsync();      // return false to cancel navigation
 }
+
+public interface INavigationGuardWithContext  // instead of INavigationGuard, when the decision needs context
+{
+    Task<bool> CanNavigateFromAsync(NavigationGuardContext context);
+    // context: RegionName, TargetViewModelType, Mode (null for back), Parameter, IsBack
+}
 ```
 
-Lifecycle callbacks and `Dispose` calls always run **outside** internal locks, so they may
-safely call back into `INavigationService` without deadlocking.
+Lifecycle callbacks and page-scope disposals always run **outside** internal locks, so they may
+safely call back into `INavigationService` without deadlocking. The fixed transition order
+is: `OnNavigatedFrom` → page-scope disposal → `OnNavigatedTo` → events (`RegionNavigated`).
+UI layers should swap views on `RegionNavigated`; the view is not guaranteed to be attached
+yet when `OnNavigatedTo` runs.
+
+A callback that throws does not abort the transition: the exception is collected and
+rethrown afterwards (single as-is, several as `AggregateException`). The token passed to
+`INavigationAwareAsync` callbacks is always `CancellationToken.None` — once the stack has
+been updated the transition runs to completion.
+
+### Cancellation
+
+`NavigateToAsync` / `GoBackAsync` accept a `CancellationToken` that is honored **until the
+region stack is updated**: cancellation before that point releases the created page scope
+(if any) and throws `OperationCanceledException`. Afterwards the transition runs to
+completion and the token is ignored.
+
+### Refreshing the active page
+
+Navigating to the already-active type is a silent no-op returning `true`. Pass
+`refreshIfActive: true` to turn it into a *refresh*: nothing is pushed and no new page
+scope is created — the active instance's activation callbacks simply run again with the
+new parameter, and `RegionNavigated` is raised. The current page's from-guard is still
+consulted and may veto the refresh.
+
+### Page-level service scopes (v2.0)
+
+Every page gets its own `IServiceScope`. The ViewModel is resolved from that scope, and
+leaving the page disposes the scope — the DI container then releases the ViewModel and
+its whole Transient/Scoped dependency graph. The navigation service never disposes
+ViewModels directly.
+
+| Registration | Navigation behavior | When the page is left |
+|---|---|---|
+| `Transient` | A new instance per page scope | The scope disposes the ViewModel and its dependency graph |
+| `Scoped` | One instance per page scope | The scope disposes it |
+| `Singleton` | Shared from the root container | The page scope never disposes it |
+
+A ViewModel *instance* never appears twice on one region's stack: navigating to the
+already-active type is a no-op returning `true` (or a *refresh* with `refreshIfActive`,
+re-invoking the active instance's callbacks with the new parameter); navigating to a
+type whose instance lives deeper on the stack *pops back to it* — the pages above are
+dropped and the existing instance is re-activated. Singleton ViewModels and cached
+KeepAlive pages therefore survive navigation away and are reused on return, matching
+mainstream frameworks (cf. Prism's `IsNavigationTarget`). Only an instance living on a
+*different* region's stack throws `InvalidOperationException` (a ViewModel cannot be
+active in two regions at once).
+
+`ViewModelReleased` means the service **released ownership** (the page left navigation
+state and its scope is being disposed), not "every disposable was released": the DI
+container stops a scope at the first throwing disposable. The event also fires for
+Singleton ViewModels when their page is torn down — the page scope is disposed, but the
+shared instance itself survives because it is owned by the root container.
 
 ## KeepAlive cache
 
-`NavigationMode.KeepAlive` keeps the ViewModel in a per-region cache keyed by
-`(region, ViewModel type)`. Navigating to the same type reuses the cached instance.
+`NavigationMode.KeepAlive` keeps the page (ViewModel + its page scope) in a per-region
+cache keyed by `(region, ViewModel type)`. Navigating to the same type reuses the cached
+page and its scope — no new scope is created.
 
 ```csharp
 await navigation.NavigateToAsync<SettingsViewModel>(mode: NavigationMode.KeepAlive);
@@ -132,19 +205,24 @@ navigation.ClearCache("MainRegion");   // or await navigation.ClearCacheAsync("M
 navigation.ClearAllCache();            // or await navigation.ClearAllCacheAsync();
 ```
 
-ViewModels that are still referenced by a navigation stack are **not** disposed immediately;
-their disposal is deferred until the last reference disappears. Disposal prefers
-`IAsyncDisposable` on the async paths; the synchronous paths only call `IDisposable`
-(ViewModels implementing only `IAsyncDisposable` are skipped there — use the async
-variants for full cleanup).
+One `(region, type)` key holds at most one cached page. Page scopes still referenced by a
+navigation stack are **not** disposed immediately; their disposal is deferred until the
+last stack/cache reference disappears. Disposal prefers `IAsyncDisposable` on the async
+paths. The synchronous paths dispose scopes via `IDisposable.Dispose` — if a page scope
+contains a service that only implements `IAsyncDisposable`, the DI container throws
+`InvalidOperationException` (use the async variants when pages need async cleanup).
 
 ### Disposal error semantics
 
-Cache clearing and service disposal are **best-effort**: every ViewModel is attempted even
-if one of them throws, so a single faulty `Dispose` can never leak the remaining
-ViewModels. After cleanup and events finish, collected exceptions are rethrown —
-a single exception is rethrown preserving its original stack trace, several are wrapped
-in an `AggregateException`.
+Teardown is **best-effort across pages**: every page scope is attempted even if one of
+them throws, so a single faulty `Dispose` can never leak the remaining pages. After
+cleanup and events finish, collected exceptions are rethrown — a single exception is
+rethrown preserving its original stack trace, several are wrapped in an
+`AggregateException`.
+
+**Caveat:** *within* one page scope the DI container stops disposing remaining services
+after the first throwing disposable (platform behavior, sync and async alike). Only
+cross-page isolation is provided by the navigation service.
 
 ## Thread safety
 
@@ -163,13 +241,13 @@ in platform-specific layers.
 
 | Member | Description |
 |--------|-------------|
-| `NavigateToAsync<T>(region?, mode?)` | Navigate to a ViewModel type |
-| `NavigateToAsync<T, TParam>(param, region?, mode?)` | Navigate with a typed parameter |
-| `GoBackAsync(region?)` | Pop the current page |
+| `NavigateToAsync<T>(region?, mode?, refreshIfActive?, cancellationToken?)` | Navigate to a ViewModel type |
+| `NavigateToAsync<T, TParam>(param, region?, mode?, refreshIfActive?, cancellationToken?)` | Navigate with a typed parameter |
+| `GoBackAsync(region?, cancellationToken?)` | Pop the current page |
 | `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentMode(region?)` | Queries |
 | `ClearCache(region?)` / `ClearCacheAsync(region?)` | Clear one region's KeepAlive cache |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | Clear all KeepAlive caches |
-| `RegionNavigated` / `ViewModelDisposed` / `RegionCacheCleared` | Events |
+| `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` | Events |
 | `AddFlowNavigation()` / `AddScopedFlowNavigation()` | DI registration |
 
 ## Contributing

@@ -9,10 +9,10 @@
 
     <!-- NuGet package metadata -->
     <PackageId>ElegantSeries.Flow</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>ligf</Authors>
     <Description>A lightweight, AOT-friendly MVVM navigation library for .NET: region-based navigation stacks, KeepAlive ViewModel caching, typed navigation parameters, navigation guards, and lifecycle callbacks.</Description>
-    <PackageTags>navigation;mvvm;avalonia;wpf;maui;winui;viewmodel;aot;trimming</PackageTags>
+    <PackageTags>navigation;mvvm;viewmodel;aot;trimming</PackageTags>
     <PackageProjectUrl>https://github.com/ligf/ElegantSeries.Flow</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ligf/ElegantSeries.Flow</RepositoryUrl>
     <RepositoryType>git</RepositoryType>

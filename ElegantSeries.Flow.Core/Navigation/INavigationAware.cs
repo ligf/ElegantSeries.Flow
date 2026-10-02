@@ -9,6 +9,10 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// Implementations should return quickly and must not throw exceptions.
 /// </para>
 /// <para>
+/// When a ViewModel implements <see cref="INavigationAwareAsync"/>, the asynchronous
+/// callbacks are used <i>instead of</i> these: implement only one of the two interfaces.
+/// </para>
+/// <para>
 /// Do not perform dialogs, I/O, long-running computations, or synchronously wait
 /// for async operations inside these callbacks. Schedule such work after the
 /// navigation completes and handle any exceptions independently.

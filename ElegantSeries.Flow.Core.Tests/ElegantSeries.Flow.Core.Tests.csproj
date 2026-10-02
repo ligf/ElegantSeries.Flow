@@ -5,6 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- xUnit1051 (pass TestContext.Current.CancellationToken) is intentionally suppressed:
+         navigation calls in these tests are synchronous-in-effect and complete immediately;
+         cooperative cancellation is covered by dedicated cancellation tests instead. -->
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
