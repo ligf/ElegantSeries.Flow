@@ -1,6 +1,5 @@
 using System.Windows;
 using ElegantSeries.Flow.Core.Extensions;
-using ElegantSeries.Flow.Core.Navigation;
 using ElegantSeries.Flow.WPF.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using WpfSample.ViewModels;
@@ -31,10 +30,6 @@ public partial class App : Application
         });
 
         Services = services.BuildServiceProvider();
-
-        // Show the first page.
-        var navigation = Services.GetRequiredService<INavigationService>();
-        _ = navigation.NavigateToAsync<HomeViewModel>();
 
         base.OnStartup(e);
     }

@@ -128,8 +128,10 @@ navigationHost.Attach(navigationService);
 ```
 
 ```xml
-<!-- 3. Drop the host in XAML -->
-<flow:NavigationHost x:Name="navigationHost" RegionName="MainRegion" />
+<!-- 3. Drop the host in XAML (WPF shown; Avalonia uses the ...Avalonia.Hosting namespace) -->
+<Window xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Hosting;assembly=ElegantSeries.Flow.WPF">
+    <flow:NavigationHost x:Name="navigationHost" RegionName="MainRegion" />
+</Window>
 ```
 
 Both hosts listen to `RegionNavigated`, resolve the View via the registered `IViewLocator`
