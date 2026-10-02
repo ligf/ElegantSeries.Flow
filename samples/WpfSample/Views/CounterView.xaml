@@ -1,0 +1,15 @@
+<flow:BaseView x:Class="WpfSample.Views.CounterView"
+             x:TypeArguments="vm:CounterViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:WpfSample.ViewModels">
+    <StackPanel Margin="24" VerticalAlignment="Center">
+        <TextBlock Text="Counter (KeepAlive)" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding Count}" FontSize="48" Margin="0,0,0,16" />
+        <Button Content="Increment" Command="{Binding IncrementCommand}"
+                Width="160" HorizontalAlignment="Left" />
+        <TextBlock Text="Navigate away and back — the count is preserved."
+                   Margin="0,16,0,0" TextWrapping="Wrap" Opacity="0.6" />
+    </StackPanel>
+</flow:BaseView>

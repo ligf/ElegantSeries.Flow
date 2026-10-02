@@ -23,15 +23,21 @@ public partial class App : Application
         // Core navigation.
         services.AddFlowNavigation();
 
-        // ViewModels (transient is the typical lifetime).
+        // ViewModels. MenuViewModel is a singleton to demonstrate that singleton
+        // ViewModels coexist fine with transient pages: the page scope resolves
+        // the shared root instance and never disposes it.
+        services.AddSingleton<MenuViewModel>();
         services.AddTransient<HomeViewModel>();
         services.AddTransient<DetailViewModel>();
+        services.AddTransient<CounterViewModel>();
 
         // AOT-safe view registration: no runtime reflection.
         services.AddFlowViews(views =>
         {
+            views.Register<MenuView, MenuViewModel>();
             views.Register<HomeView, HomeViewModel>();
             views.Register<DetailView, DetailViewModel>();
+            views.Register<CounterView, CounterViewModel>();
         });
 
         Services = services.BuildServiceProvider();

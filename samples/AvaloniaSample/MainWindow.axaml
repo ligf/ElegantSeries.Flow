@@ -2,6 +2,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:flow="clr-namespace:ElegantSeries.Flow.Avalonia.Hosting;assembly=ElegantSeries.Flow.Avalonia"
         x:Class="AvaloniaSample.MainWindow"
-        Title="AvaloniaSample" Width="400" Height="300">
-    <flow:NavigationHost x:Name="MainHost" RegionName="MainRegion" />
+        Title="AvaloniaSample" Width="600" Height="400">
+    <Grid ColumnDefinitions="180,*">
+        <!-- Sidebar region: menu, navigates independently -->
+        <flow:NavigationHost x:Name="SidebarHost" RegionName="Sidebar" Grid.Column="0" />
+        <!-- Main region: content pages -->
+        <flow:NavigationHost x:Name="MainHost" RegionName="MainRegion" Grid.Column="1" />
+    </Grid>
 </Window>

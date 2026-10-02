@@ -14,16 +14,23 @@ public partial class MainWindow : Window
 
         var navigation = App.Services.GetRequiredService<INavigationService>();
         var views = App.Services.GetRequiredService<IViewLocator>();
+
+        // Both regions share the singleton navigation service but keep
+        // independent stacks.
+        SidebarHost.NavigationService = navigation;
+        SidebarHost.ViewLocator = views;
         MainHost.NavigationService = navigation;
         MainHost.ViewLocator = views;
 
-        // Navigate after the host is attached so the first page is shown.
-        _ = navigation.NavigateToAsync<HomeViewModel>();
+        // Navigate after the hosts are attached so the first pages are shown.
+        _ = navigation.NavigateToAsync<MenuViewModel>("Sidebar");
+        _ = navigation.NavigateToAsync<HomeViewModel>("MainRegion");
     }
 
     protected override void OnClosed(EventArgs e)
     {
-        MainHost.Dispose(); // unsubscribes from the navigation service
+        SidebarHost.Dispose();
+        MainHost.Dispose();
         base.OnClosed(e);
     }
 }
