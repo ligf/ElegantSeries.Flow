@@ -176,13 +176,15 @@ ViewModels directly.
 | `Scoped` | One instance per page scope | The scope disposes it |
 | `Singleton` | Shared from the root container | The page scope never disposes it |
 
-A freshly resolved ViewModel *instance* cannot appear twice on navigation stacks:
-navigating to a type whose instance is already the active page is a no-op returning
-`true`; navigating to a fresh instance that lives elsewhere on a stack throws
-`InvalidOperationException` (typically a Singleton ViewModel navigated to twice —
-navigate back to it instead). Exception: re-navigating to a *cached* KeepAlive page
-reuses the cached instance and may push it again (v1.x compatible); the shared page
-scope is disposed only after its last stack/cache reference disappears.
+A ViewModel *instance* never appears twice on one region's stack: navigating to the
+already-active type is a no-op returning `true` (or a *refresh* with `refreshIfActive`,
+re-invoking the active instance's callbacks with the new parameter); navigating to a
+type whose instance lives deeper on the stack *pops back to it* — the pages above are
+dropped and the existing instance is re-activated. Singleton ViewModels and cached
+KeepAlive pages therefore survive navigation away and are reused on return, matching
+mainstream frameworks (cf. Prism's `IsNavigationTarget`). Only an instance living on a
+*different* region's stack throws `InvalidOperationException` (a ViewModel cannot be
+active in two regions at once).
 
 `ViewModelDisposed` means the service **released ownership** (the page left navigation
 state and its scope is being disposed), not "every disposable was released": the DI

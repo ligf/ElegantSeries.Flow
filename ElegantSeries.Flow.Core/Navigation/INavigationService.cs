@@ -19,17 +19,24 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// <item><term>Singleton</term><description>Shared from the root container; a page scope never disposes it.</description></item>
 /// </list>
 /// <para>
-/// A freshly resolved ViewModel <i>instance</i> cannot appear twice on navigation
-/// stacks: navigating to a type whose instance is already the active page is a no-op
-/// returning <see langword="true"/> (or a <i>refresh</i> when <c>refreshIfActive</c> is
-/// set — the active instance's activation callbacks run again with the new parameter,
-/// without creating a new page scope), while navigating to a fresh instance that lives
-/// elsewhere on a stack throws <see cref="InvalidOperationException"/> (typically a
-/// Singleton registered ViewModel navigated to twice — navigate back to it instead).
-/// Exception: re-navigating to a <i>cached</i> KeepAlive page reuses the cached instance
-/// and may push it again (v1.x compatible), so the same ViewModel can appear several
-/// times on one stack and back navigation passes through it repeatedly; the shared page
-/// scope is disposed only after its last stack/cache reference disappears.
+/// A ViewModel <i>instance</i> never appears twice on one region's stack:
+/// navigating to a type whose instance is already the active page is a no-op
+/// returning <see langword="true"/> (or a <i>refresh</i> when <c>refreshIfActive</c>
+/// is set — the active instance's activation callbacks run again with the new
+/// parameter, without creating a new page scope); navigating to a type whose
+/// instance lives deeper on the region's stack <i>pops back to it</i> — the pages
+/// above leave the stack and the existing instance is re-activated with the new
+/// parameter. This is how <c>Singleton</c> ViewModels and cached <c>KeepAlive</c>
+/// pages behave (mainstream behavior, cf. Prism's <c>IsNavigationTarget</c>):
+/// navigate away and the instance survives; navigate to its type and it is reused
+/// instead of duplicated. The shared page scope is disposed only after its last
+/// stack/cache reference disappears.
+/// </para>
+/// <para>
+/// Navigating to an instance that lives on a <i>different</i> region's stack throws
+/// <see cref="InvalidOperationException"/>: a ViewModel has a single
+/// <see cref="INavigationViewModel.Navigation"/> reference and cannot be active in
+/// two regions at once.
 /// </para>
 /// <para>
 /// <b>Cancellation:</b> <c>NavigateToAsync</c> / <c>GoBackAsync</c> accept a

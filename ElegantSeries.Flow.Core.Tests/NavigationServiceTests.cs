@@ -150,6 +150,20 @@ public class KeepAliveViewModel : BaseViewModel, IDisposable
     }
 }
 
+public sealed class ParamAwareKeepAliveViewModel : BaseViewModel, INavigationAware, IDisposable
+{
+    public object? LastParameter { get; private set; }
+    public bool Disposed { get; private set; }
+
+    public void OnNavigatedTo(object? parameter) => LastParameter = parameter;
+
+    public void OnNavigatedFrom()
+    {
+    }
+
+    public void Dispose() => Disposed = true;
+}
+
 /// <summary>
 /// A KeepAlive ViewModel whose synchronous <see cref="IDisposable.Dispose"/> always throws.
 /// Used to verify that one failing disposal never blocks the disposal of the remaining ViewModels.
@@ -202,6 +216,7 @@ public class NavigationServiceTests
         services.AddTransient<TrackedDisposeViewModel>();
         services.AddTransient<KeepAliveViewModel>();
         services.AddTransient<ThrowingKeepAliveViewModel>();
+        services.AddTransient<ParamAwareKeepAliveViewModel>();
         services.AddTransient<ThrowingAsyncDisposeViewModel>();
         services.AddTransient<DisposableService>();
         services.AddTransient<ServiceDependentViewModel>();
@@ -401,35 +416,76 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task KeepAlive_WhenCachedInstancePushedTwice_ShouldShareScope_AndDisposeExactlyOnce()
+    public async Task KeepAlive_WhenCachedInstanceDeeperOnStack_PopsBackToIt()
     {
-        // v1.x compatible: re-navigating to a cached KeepAlive page reuses the cached
-        // instance even when it is already on the stack; both entries share one page scope.
+        // Mainstream behavior: navigating to a cached KeepAlive page whose instance is
+        // already on the stack pops back to it instead of pushing a duplicate.
         await _navigationService.NavigateToAsync<TestHomeViewModel>();
         await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
         var keepAlive = (KeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
         await _navigationService.NavigateToAsync<TestDetailViewModel>();
-        await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        var detail = (TestDetailViewModel)_navigationService.GetCurrentViewModel()!;
+
+        int navigatedEvents = 0;
+        _navigationService.RegionNavigated += (_, _) => navigatedEvents++;
+
+        var result = await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+
+        Assert.True(result);
         Assert.Same(keepAlive, _navigationService.GetCurrentViewModel());
+        // The Detail page was popped; the Home page below remains.
+        Assert.True(_navigationService.CanGoBack());
+        Assert.Equal(1, navigatedEvents);
 
-        // Pop the second push: the shared scope survives (still referenced by the first entry).
-        Assert.True(await _navigationService.GoBackAsync());
+        // The popped Detail page's scope was disposed; the shared KeepAlive scope survives.
+        Assert.True(detail.Disposed);
         Assert.False(keepAlive.Disposed);
 
-        // Pop the Detail page (a normal page: disposed with its own scope).
-        Assert.True(await _navigationService.GoBackAsync());
+        // The page is still cached and reusable afterwards.
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive));
         Assert.Same(keepAlive, _navigationService.GetCurrentViewModel());
         Assert.False(keepAlive.Disposed);
+    }
 
-        // Pop the first push: the entry is still cached, so the scope still survives.
-        Assert.True(await _navigationService.GoBackAsync());
-        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
-        Assert.False(keepAlive.Disposed);
+    [Fact]
+    public async Task NavigateToAsync_PopToExisting_DeliversNewParameter()
+    {
+        await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "first", mode: NavigationMode.KeepAlive);
+        var vm = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
 
-        // Clearing the cache releases the last reference: disposed exactly once.
-        await _navigationService.ClearCacheAsync("MainRegion");
-        Assert.True(keepAlive.Disposed);
-        Assert.Equal(1, keepAlive.DisposeCallCount);
+        var result = await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "second", mode: NavigationMode.KeepAlive);
+
+        Assert.True(result);
+        Assert.Same(vm, _navigationService.GetCurrentViewModel());
+        Assert.Equal("second", vm.LastParameter);
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenSingletonOnAnotherRegionStack_ThrowsInvalidOperationException()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowNavigation();
+        services.AddSingleton<SingletonViewModel>();
+        var serviceProvider = services.BuildServiceProvider();
+        var navigationService = (NavigationService)serviceProvider.GetRequiredService<INavigationService>();
+
+        await navigationService.NavigateToAsync<SingletonViewModel>("Region1");
+
+        // Same-region would pop back to the instance; another region cannot share it:
+        // a ViewModel has a single Navigation reference.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => navigationService.NavigateToAsync<SingletonViewModel>("Region2"));
+
+        Assert.Contains("another region's", ex.Message);
+        Assert.Null(navigationService.GetCurrentViewModel("Region2"));
+        Assert.True(navigationService.IsActive<SingletonViewModel>("Region1"));
+
+        await navigationService.DisposeAsync();
+        await serviceProvider.DisposeAsync();
     }
 
     [Fact]
@@ -1023,7 +1079,7 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task NavigateToAsync_WhenSingletonAlreadyOnStack_ShouldThrowInvalidOperationException_AndReleaseAbandonedScope()
+    public async Task NavigateToAsync_WhenSingletonDeeperOnStack_PopsBackToExistingInstance()
     {
         var services = new ServiceCollection();
         services.AddFlowNavigation();
@@ -1034,18 +1090,21 @@ public class NavigationServiceTests
         var navigationService = new NavigationService(new TestServiceProvider(inner, tracking));
 
         await navigationService.NavigateToAsync<SingletonViewModel>();
+        var singleton = (SingletonViewModel)navigationService.GetCurrentViewModel()!;
         await navigationService.NavigateToAsync<TestHomeViewModel>();
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => navigationService.NavigateToAsync<SingletonViewModel>());
-        Assert.Contains("already present on a navigation stack", ex.Message);
+        var result = await navigationService.NavigateToAsync<SingletonViewModel>();
 
-        // The failed navigation must not disturb existing state.
-        Assert.True(navigationService.IsActive<TestHomeViewModel>());
+        // Mainstream behavior: pop back to the shared instance instead of fail-fast.
+        Assert.True(result);
+        Assert.Same(singleton, navigationService.GetCurrentViewModel());
+        Assert.False(navigationService.CanGoBack());
+        Assert.False(singleton.Disposed);
 
-        // Three scopes were created (singleton page, home page, abandoned duplicate);
-        // only the abandoned one was released, so no scope leaks.
+        // Three scopes were created (singleton page, home page, abandoned re-resolution);
+        // the abandoned one and the popped home page's scope were released: no leak.
         Assert.Equal(3, tracking.CreatedScopes);
-        Assert.Equal(1, tracking.DisposedScopes);
+        Assert.Equal(2, tracking.DisposedScopes);
 
         await navigationService.DisposeAsync();
         Assert.Equal(3, tracking.DisposedScopes);

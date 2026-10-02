@@ -34,8 +34,8 @@ public static class FlowServiceCollectionExtensions
     /// </list>
     /// <para>
     /// Do not register an ordinary page as <c>Singleton</c> and expect it to be disposed
-    /// when popped — it won't be: navigating to its type while its instance is already on
-    /// a stack throws <see cref="InvalidOperationException"/> instead.
+    /// when popped — it won't be: navigating to its type while its instance lives deeper
+    /// on the region's stack pops back to the shared instance instead of pushing a duplicate.
     /// </para>
     /// </remarks>
     public static IServiceCollection AddFlowNavigation(this IServiceCollection services)

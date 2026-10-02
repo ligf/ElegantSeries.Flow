@@ -150,6 +150,7 @@ public sealed partial class NavigationService
         List<(NavigationEntry Entry, bool Destroy)> deactivations = [];
         NavigationEntry? pushedEntry = null;
         NavigationEntry? refreshEntry = null;
+        NavigationEntry? reactivatedEntry = null;
 
         try
         {
@@ -204,85 +205,114 @@ public sealed partial class NavigationService
 
                             success = true;
                         }
-                        else if (ownedScope is not null && IsOnAnyStackLocked(targetVm))
-                        {
-                            // Fail-fast: a freshly resolved instance must not already live on a
-                            // navigation stack. This is always a registration/semantics bug
-                            // (typically a Singleton navigated to twice); pushing it would corrupt
-                            // back-navigation and lifecycle callbacks.
-                            scopeToRelease = ownedScope;
-                            ownedScope = null;
-                            duplicateException = new InvalidOperationException(
-                                $"Cannot navigate to '{targetVm.GetType().FullName}': the same ViewModel instance " +
-                                $"is already present on a navigation stack. A freshly resolved ViewModel instance cannot be pushed " +
-                                $"twice; navigate back to it or use a Transient registration.");
-                        }
                         else
                         {
-                            var entryMode = mode == NavigationMode.ClearStack ? NavigationMode.New : mode;
-                            if (cachedEntry is not null)
+                            var existingEntry = FindEntryOnStackLocked(stack, targetVm);
+                            if (existingEntry is not null)
                             {
-                                // KeepAlive reuse: share the cached entry's page scope.
-                                pushedEntry = new NavigationEntry(regionName, cachedEntry.ViewModel, parameter, entryMode, cachedEntry.Scope);
+                                // Pop back to the existing instance (mainstream behavior):
+                                // the pages above it leave the stack and the existing page
+                                // is re-activated with the new parameter. A duplicate
+                                // instance is never pushed. The abandoned scope (fresh
+                                // singleton re-resolution) is released below.
+                                scopeToRelease = ownedScope;
+                                ownedScope = null;
+
+                                while (stack.Count > 0 && !ReferenceEquals(stack.Peek(), existingEntry))
+                                {
+                                    var old = stack.Pop();
+                                    deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                }
+
+                                // Swap the entry so the re-activation carries the new
+                                // parameter; the ViewModel instance, page scope and mode
+                                // are preserved.
+                                var popped = stack.Pop();
+                                reactivatedEntry = new NavigationEntry(
+                                    popped.RegionName, popped.ViewModel, parameter, popped.Mode, popped.Scope);
+                                stack.Push(reactivatedEntry);
+
+                                success = true;
+                            }
+                            else if (IsOnAnyStackLocked(targetVm))
+                            {
+                                // The instance lives on a *different* region's stack: a
+                                // ViewModel has a single Navigation reference and cannot
+                                // be active in two regions at once.
+                                scopeToRelease = ownedScope;
+                                ownedScope = null;
+                                duplicateException = new InvalidOperationException(
+                                    $"Cannot navigate to '{targetVm.GetType().FullName}': the same ViewModel instance " +
+                                    $"is already present on another region's navigation stack. A ViewModel instance " +
+                                    $"cannot be active in two regions at once.");
                             }
                             else
                             {
-                                // The retry loop resolves fresh without consulting the cache once
-                                // attempt >= 4 (pathological ClearCache race), so a winner may
-                                // have been cached concurrently. Re-check under the locks already
-                                // held and adopt it: pushing a never-cached KeepAlive page would
-                                // leak its scope (it pops with destroy=false, and with no cache
-                                // entry nothing would ever reclaim it).
-                                NavigationEntry? winner = null;
-                                if (useKeepAlive)
+                                var entryMode = mode == NavigationMode.ClearStack ? NavigationMode.New : mode;
+                                if (cachedEntry is not null)
                                 {
-                                    _keepAliveCache.TryGetValue(cacheKey, out winner);
-                                }
-
-                                if (winner is not null)
-                                {
-                                    scopeToRelease = ownedScope;
-                                    ownedScope = null;
-                                    pushedEntry = new NavigationEntry(regionName, winner.ViewModel, parameter, entryMode, winner.Scope);
+                                    // KeepAlive reuse: share the cached entry's page scope.
+                                    pushedEntry = new NavigationEntry(regionName, cachedEntry.ViewModel, parameter, entryMode, cachedEntry.Scope);
                                 }
                                 else
                                 {
-                                    pushedEntry = new NavigationEntry(regionName, targetVm, parameter, entryMode, ownedScope!);
-                                    ownedScope = null;
+                                    // The retry loop resolves fresh without consulting the cache once
+                                    // attempt >= 4 (pathological ClearCache race), so a winner may
+                                    // have been cached concurrently. Re-check under the locks already
+                                    // held and adopt it: pushing a never-cached KeepAlive page would
+                                    // leak its scope (it pops with destroy=false, and with no cache
+                                    // entry nothing would ever reclaim it).
+                                    NavigationEntry? winner = null;
                                     if (useKeepAlive)
                                     {
-                                        // No winner exists, and none can appear here: every cache
-                                        // mutation requires _navigationLock, held continuously
-                                        // since the validation above.
-                                        _keepAliveCache[cacheKey] = pushedEntry;
+                                        _keepAliveCache.TryGetValue(cacheKey, out winner);
+                                    }
+
+                                    if (winner is not null)
+                                    {
+                                        scopeToRelease = ownedScope;
+                                        ownedScope = null;
+                                        pushedEntry = new NavigationEntry(regionName, winner.ViewModel, parameter, entryMode, winner.Scope);
+                                    }
+                                    else
+                                    {
+                                        pushedEntry = new NavigationEntry(regionName, targetVm, parameter, entryMode, ownedScope!);
+                                        ownedScope = null;
+                                        if (useKeepAlive)
+                                        {
+                                            // No winner exists, and none can appear here: every cache
+                                            // mutation requires _navigationLock, held continuously
+                                            // since the validation above.
+                                            _keepAliveCache[cacheKey] = pushedEntry;
+                                        }
                                     }
                                 }
-                            }
 
-                            if (mode == NavigationMode.ClearStack)
-                            {
-                                while (stack.Count > 0)
+                                if (mode == NavigationMode.ClearStack)
                                 {
-                                    var old = stack.Pop();
-                                    deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                    while (stack.Count > 0)
+                                    {
+                                        var old = stack.Pop();
+                                        deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                    }
                                 }
-                            }
-                            else if (stack.Count > 0)
-                            {
-                                if (mode == NavigationMode.Replace)
+                                else if (stack.Count > 0)
                                 {
-                                    var old = stack.Pop();
-                                    deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                    if (mode == NavigationMode.Replace)
+                                    {
+                                        var old = stack.Pop();
+                                        deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                    }
+                                    else
+                                    {
+                                        deactivations.Add((stack.Peek(), false));
+                                    }
                                 }
-                                else
-                                {
-                                    deactivations.Add((stack.Peek(), false));
-                                }
-                            }
 
-                            stack.Push(pushedEntry);
+                                stack.Push(pushedEntry);
 
-                            success = true;
+                                success = true;
+                            }
                         }
                     }
                 }
@@ -315,6 +345,15 @@ public sealed partial class NavigationService
                     // (The ViewModel is already attached from its original activation.)
                     QueueActivate(refreshEntry.ViewModel, parameter, work);
                     var capturedVm = refreshEntry.ViewModel;
+                    work.Events.Add(() => RegionNavigated?.Invoke(regionName, capturedVm));
+                }
+                else if (reactivatedEntry is not null)
+                {
+                    // Pop-to-existing: the instance was detached when it was covered;
+                    // re-attach it as the active page.
+                    AttachNavigation(reactivatedEntry.ViewModel);
+                    QueueActivate(reactivatedEntry.ViewModel, parameter, work);
+                    var capturedVm = reactivatedEntry.ViewModel;
                     work.Events.Add(() => RegionNavigated?.Invoke(regionName, capturedVm));
                 }
             }
@@ -392,5 +431,24 @@ public sealed partial class NavigationService
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Finds the stack entry holding the given ViewModel instance, or
+    /// <see langword="null"/> when it is not on the stack.
+    /// The caller must hold <see cref="_stateLock"/>.
+    /// </summary>
+    private static NavigationEntry? FindEntryOnStackLocked(
+        Stack<NavigationEntry> stack, INavigationViewModel viewModel)
+    {
+        foreach (var entry in stack)
+        {
+            if (ReferenceEquals(entry.ViewModel, viewModel))
+            {
+                return entry;
+            }
+        }
+
+        return null;
     }
 }

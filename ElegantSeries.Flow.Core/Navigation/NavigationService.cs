@@ -23,12 +23,14 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// </list>
 /// <para>
 /// Because disposal is delegated to the container, the navigation service never calls
-/// <c>Dispose</c> on a ViewModel directly. An <see cref="INavigationViewModel"/> instance
-/// is rejected with <see cref="InvalidOperationException"/> if a freshly resolved instance
-/// is already present on any navigation stack: pushing the same instance twice would corrupt
-/// back-navigation and lifecycle semantics. Navigating to the already-active type is a
-/// no-op that returns <see langword="true"/> — or a <i>refresh</i> when requested, which
-/// re-invokes the active instance's activation callbacks without creating a new page scope.
+/// <c>Dispose</c> on a ViewModel directly. A ViewModel <i>instance</i> never appears
+/// twice on one region's stack: navigating to the already-active type is a no-op that
+/// returns <see langword="true"/> (or a <i>refresh</i> when requested, which re-invokes
+/// the active instance's activation callbacks without creating a new page scope);
+/// navigating to a type whose instance lives deeper on the region's stack pops back to
+/// it and re-activates it with the new parameter. Only an instance that lives on a
+/// <i>different</i> region's stack is rejected with <see cref="InvalidOperationException"/>:
+/// a ViewModel has a single navigation reference and cannot be active in two regions at once.
 /// </para>
 /// <para>
 /// Thread safety: every public member is safe to call from any thread. Navigation
