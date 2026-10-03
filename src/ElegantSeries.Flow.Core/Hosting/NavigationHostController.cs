@@ -1,11 +1,12 @@
 using System.Runtime.CompilerServices;
 using ElegantSeries.Flow.Core.Navigation;
-using ElegantSeries.Flow.WPF.Threading;
+using ElegantSeries.Flow.Core.Threading;
 
-namespace ElegantSeries.Flow.WPF.Hosting;
+namespace ElegantSeries.Flow.Core.Hosting;
 
 /// <summary>
-/// UI-framework-agnostic navigation-host logic behind <see cref="NavigationHost"/>.
+/// UI-framework-agnostic navigation-host logic used by the platform
+/// <c>NavigationHost</c> controls (WPF, Avalonia).
 /// </summary>
 /// <remarks>
 /// <para>

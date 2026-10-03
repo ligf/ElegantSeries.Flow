@@ -1,5 +1,5 @@
 using ElegantSeries.Flow.Core.ViewModels;
-using ElegantSeries.Flow.WPF.Locating;
+using ElegantSeries.Flow.Core.Locating;
 
 namespace ElegantSeries.Flow.WPF.Tests.Logic;
 

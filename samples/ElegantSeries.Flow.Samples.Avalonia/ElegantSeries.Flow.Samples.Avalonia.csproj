@@ -6,6 +6,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- The framework's AOT story is proven by publishing this sample as
+         Native AOT (see CI). WPF cannot be NativeAOT-published (framework
+         limitation), so the Avalonia sample carries the AOT proof. -->
+    <PublishAot>true</PublishAot>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,6 +1,6 @@
 using ElegantSeries.Flow.Core.Navigation;
 
-namespace ElegantSeries.Flow.WPF.Locating;
+namespace ElegantSeries.Flow.Core.Locating;
 
 /// <summary>
 /// Thread-safe ViewModel-type to view-factory registry.
@@ -9,7 +9,7 @@ namespace ElegantSeries.Flow.WPF.Locating;
 /// <para>
 /// This type is generic over the view type and has no UI-framework dependency,
 /// which keeps the registration/lookup logic unit-testable without a UI runtime.
-/// <see cref="ViewLocator"/> is the thin WPF adapter over <c>ViewRegistry&lt;FrameworkElement&gt;</c>.
+/// Each platform's <c>ViewLocator</c> is a thin adapter over <c>ViewRegistry&lt;TView&gt;</c>.
 /// </para>
 /// <para>
 /// Lookups use the ViewModel's exact runtime type (<see cref="object.GetType"/>);
@@ -73,7 +73,17 @@ internal sealed class ViewRegistry<TView> where TView : class
                 $"Call {nameof(Register)} first to map the ViewModel type to a view.");
         }
 
-        return factory(viewModel);
+        // User code: exceptions propagate unchanged; a null return fails fast
+        // instead of poisoning downstream caches.
+        var view = factory(viewModel);
+        if (view is null)
+        {
+            throw new InvalidOperationException(
+                $"The view factory registered for ViewModel type '{viewModel.GetType().FullName}' returned null. " +
+                "View factories must not return null.");
+        }
+
+        return view;
     }
 
     /// <summary>

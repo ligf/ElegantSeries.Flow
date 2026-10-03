@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using ElegantSeries.Flow.Core.Navigation;
 using ElegantSeries.Flow.Core.ViewModels;
-using ElegantSeries.Flow.WPF.Threading;
+using ElegantSeries.Flow.Core.Threading;
 
 namespace ElegantSeries.Flow.WPF.Tests;
 

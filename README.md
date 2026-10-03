@@ -127,8 +127,11 @@ var current = navigation.GetCurrentViewModel();
 ElegantSeries.Flow is UI-agnostic: it manages ViewModels, and your platform layer maps the
 active ViewModel to a View. The typical pattern is a `ContentControl`-style host bound to
 `GetCurrentViewModel()` and refreshed on the `RegionNavigated` event. For AOT-safe
-ViewModel→View mapping, decorate ViewModels with `[AotRoute(typeof(DetailView))]` from
-the `ElegantSeries.Flow.Core.Routing` namespace.
+ViewModel→View mapping, register views explicitly via `views.Register` /
+`views.RegisterTransient` / `views.RegisterSingleton` inside `services.AddFlowViews(...)`
+— no runtime reflection, no naming conventions. (The `[AotRoute]` attribute in
+`ElegantSeries.Flow.Core.Routing` is a reserved compile-time contract for a future source
+generator; it is not consumed at runtime today.)
 
 ## UI integration
 
@@ -332,8 +335,11 @@ are serialized with an async lock; shared state is guarded by a dedicated lock.
 The library sets `IsAotCompatible=true` and annotates generic ViewModel parameters with
 `[DynamicallyAccessedMembers(PublicConstructors)]`. ViewModels are resolved through
 `IServiceProvider` — register them in DI and avoid `Activator.CreateInstance` at the
-app layer. The `[AotRoute]` attribute exists for source-generator-based View resolution
-in platform-specific layers.
+app layer. The `[AotRoute]` attribute is a reserved compile-time contract for a future
+source generator; it is not consumed at runtime today. Note: the WPF sample app itself
+cannot be NativeAOT-published (WPF as a framework does not support Native AOT); the
+Avalonia sample is published with `PublishAot=true` in CI as the proof of the
+framework's AOT story.
 
 ## API overview
 

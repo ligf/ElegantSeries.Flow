@@ -21,7 +21,7 @@ public sealed class NavigationHostTests
 
     private sealed class TestHost : NavigationHost
     {
-        public TestHost(IDispatcher dispatcher)
+        public TestHost(Core.Threading.IDispatcher dispatcher)
             : base(dispatcher)
         {
         }
