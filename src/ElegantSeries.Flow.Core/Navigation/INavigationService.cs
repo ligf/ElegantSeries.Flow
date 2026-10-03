@@ -26,11 +26,13 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// parameter, without creating a new page scope); navigating to a type whose
 /// instance lives deeper on the region's stack <i>pops back to it</i> — the pages
 /// above leave the stack and the existing instance is re-activated with the new
-/// parameter. This is how <c>Singleton</c> ViewModels and cached <c>KeepAlive</c>
-/// pages behave (mainstream behavior, cf. Prism's <c>IsNavigationTarget</c>):
-/// navigate away and the instance survives; navigate to its type and it is reused
-/// instead of duplicated. The shared page scope is disposed only after its last
-/// stack/cache reference disappears.
+/// parameter. Deduplication is by <i>instance reference</i>, not by type:
+/// navigating to a type while a <i>different</i> instance of that type is active
+/// still pushes a new page. This is how <c>Singleton</c> ViewModels and cached
+/// <c>KeepAlive</c> pages behave (mainstream behavior, cf. Prism's
+/// <c>IsNavigationTarget</c>): navigate away and the instance survives; navigate
+/// to its type and it is reused instead of duplicated. The shared page scope is
+/// disposed only after its last stack/cache reference disappears.
 /// </para>
 /// <para>
 /// Navigating to an instance that lives on a <i>different</i> region's stack throws
@@ -255,6 +257,11 @@ public interface INavigationService
     /// <see cref="InvalidOperationException"/> directing the caller to the asynchronous
     /// APIs. Use <see cref="ClearCacheAsync"/> when pages need asynchronous cleanup.
     /// </para>
+    /// <para>
+    /// This method blocks until any in-flight navigation transition releases the
+    /// navigation lock. Prefer <see cref="ClearCacheAsync"/> on UI threads to avoid
+    /// stalling the interface.
+    /// </para>
     /// </remarks>
     void ClearCache(string regionName);
 
@@ -272,6 +279,11 @@ public interface INavigationService
     /// <see cref="IAsyncDisposable"/>, the DI container throws
     /// <see cref="InvalidOperationException"/> directing the caller to the asynchronous
     /// APIs. Use <see cref="ClearAllCacheAsync"/> when pages need asynchronous cleanup.
+    /// </para>
+    /// <para>
+    /// This method blocks until any in-flight navigation transition releases the
+    /// navigation lock. Prefer <see cref="ClearAllCacheAsync"/> on UI threads to avoid
+    /// stalling the interface.
     /// </para>
     /// </remarks>
     void ClearAllCache();
