@@ -19,5 +19,7 @@
                 Width="160" HorizontalAlignment="Left" />
         <TextBlock Text="Push a few pages, then ClearStack: the stack resets to one fresh page."
                    Margin="0,12,0,0" TextWrapping="Wrap" Opacity="0.6" />
+        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap"
+                   FontSize="12" Opacity="0.6" />
     </StackPanel>
 </flow:BaseView>

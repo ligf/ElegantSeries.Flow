@@ -17,12 +17,23 @@ public sealed partial class StackDemoViewModel : BaseViewModel, INavigationAware
     private int _depth;
 
     /// <summary>
+    /// Status line: explains why a navigation did nothing (e.g. going back
+    /// at the root). Cleared on the next successful navigation.
+    /// </summary>
+    [ObservableProperty]
+    private string _statusMessage = string.Empty;
+
+    /// <summary>
     /// Proves transient recreation: push, go back, push again — the id
     /// differs because the popped page scope was disposed.
     /// </summary>
     public string InstanceId { get; } = Guid.NewGuid().ToString("N")[..8];
 
-    public void OnNavigatedTo(int parameter) => Depth = parameter;
+    public void OnNavigatedTo(int parameter)
+    {
+        Depth = parameter;
+        StatusMessage = string.Empty;
+    }
 
     public void OnNavigatedFrom() { }
 
@@ -31,5 +42,11 @@ public sealed partial class StackDemoViewModel : BaseViewModel, INavigationAware
         => NavigateToAsync<StackChildViewModel, int>(Depth + 1, "Q1");
 
     [RelayCommand]
-    private Task GoBackAsync() => base.GoBackAsync("Q1");
+    private async Task GoBackAsync()
+    {
+        if (await base.GoBackAsync("Q1"))
+            StatusMessage = string.Empty;
+        else
+            StatusMessage = "Already at the root — nothing to go back to.";
+    }
 }

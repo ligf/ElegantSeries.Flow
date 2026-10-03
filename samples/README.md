@@ -32,7 +32,13 @@ Both samples demonstrate the library's full feature set:
 
    Note: navigating to the already-active page type is a no-op by design
    (per MAUI-style semantics), so push demos alternate between two page
-   types rather than pushing the same type.
+   types rather than pushing the same type. Quadrant pages that can hit a
+   no-op (e.g. Back at the root) show a one-line status hint instead of
+   failing silently.
+4. **External region control** — the "Push Q1" / "Back Q1" buttons above
+   the quadrant grid drive Q1's region from outside the quadrant: regions
+   are addressable by name, so any code holding the navigation service can
+   navigate them.
 4. **Typed parameters** — `NavigateToAsync<DetailViewModel, string>(...)`.
 5. **KeepAlive** — the Counter page is navigated with
    `NavigationMode.KeepAlive`: increment, navigate away and back, the count is
