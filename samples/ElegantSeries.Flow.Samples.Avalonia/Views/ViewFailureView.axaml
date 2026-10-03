@@ -1,0 +1,20 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             xmlns:views="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.Views"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.ViewFailureView"
+             x:DataType="vm:ViewFailureViewModel">
+    <Grid Margin="24" RowDefinitions="Auto,*,Auto">
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="View Creation Failure" FontSize="28" Margin="0,0,0,8" />
+            <TextBlock Text="The region below navigates to a ViewModel with no registered view. The host keeps the previous content and reports the failure through OnViewCreationFailed — shown here as a status line instead of crashing the UI."
+                       TextWrapping="Wrap" Margin="0,0,0,12" Opacity="0.7" />
+            <Button Content="Navigate to unregistered page" Command="{Binding NavigateToUnregisteredCommand}"
+                    Width="240" HorizontalAlignment="Left" Margin="0,0,0,12" />
+        </StackPanel>
+        <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="0,0,0,12">
+            <views:FailureDemoHost x:Name="FailureHost" RegionName="FailureRegion" />
+        </Border>
+        <TextBlock Grid.Row="2" Text="{Binding StatusMessage}" TextWrapping="Wrap" FontSize="12" Opacity="0.7" />
+    </Grid>
+</UserControl>

@@ -31,6 +31,11 @@ public partial class App : Application
         // services, ...).
         services.AddTransient<HomeViewModel>();
         services.AddTransient<DetailViewModel>();
+        services.AddTransient<AsyncDisposeDemoViewModel>();
+        services.AddTransient<FactoryDemoViewModel>();
+        // DI only: deliberately no view registered — navigating to it
+        // exercises the host's view-creation-failure path.
+        services.AddTransient<UnregisteredDemoViewModel>();
 
         // AOT-safe view registration: no runtime reflection.
         services.AddFlowViews(views =>
@@ -58,6 +63,19 @@ public partial class App : Application
             views.RegisterTransient<ClearStackDemoView, ClearStackDemoViewModel>();
             views.RegisterTransient<ClearStackChildView, ClearStackChildViewModel>();
             views.RegisterTransient<RefreshDemoView, RefreshDemoViewModel>();
+            views.RegisterTransient<AsyncDisposeView, AsyncDisposeDemoViewModel>();
+            // Custom view factory: the factory overload does not touch DI, so
+            // the ViewModel needs its own DI registration (see above). Use a
+            // factory when the view needs constructor arguments or other
+            // custom construction logic.
+            views.Register<FactoryDemoViewModel>(_ =>
+            {
+                var view = new FactoryDemoView();
+                view.ApplyFactoryBadge();
+                return view;
+            });
+            views.RegisterTransient<ViewFailureView, ViewFailureViewModel>();
+>>>>>>> adc9780 (Samples: fill demo gaps (IAsyncDisposable, ClearAllCache, plain guard, custom factory, view failure); converge App registrations to RegisterTransient/Singleton)
         });
 
         Services = services.BuildServiceProvider();
