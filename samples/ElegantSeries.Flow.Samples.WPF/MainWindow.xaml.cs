@@ -1,5 +1,6 @@
 using System.Windows;
 using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.WPF.Hosting;
 using ElegantSeries.Flow.WPF.Locating;
 using Microsoft.Extensions.DependencyInjection;
 using ElegantSeries.Flow.Samples.WPF.ViewModels;
@@ -8,6 +9,8 @@ namespace ElegantSeries.Flow.Samples.WPF;
 
 public partial class MainWindow : Window
 {
+    private readonly NavigationHost[] _hosts;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -15,17 +18,25 @@ public partial class MainWindow : Window
         var navigation = App.Services.GetRequiredService<INavigationService>();
         var views = App.Services.GetRequiredService<IViewLocator>();
 
-        // Both regions share the singleton navigation service but keep
+        // All regions share the singleton navigation service but keep
         // independent stacks.
-        SidebarHost.NavigationService = navigation;
-        SidebarHost.ViewLocator = views;
-        MainHost.NavigationService = navigation;
-        MainHost.ViewLocator = views;
+        _hosts = [SidebarHost, Q1Host, Q2Host, Q3Host, Q4Host];
+        foreach (var host in _hosts)
+        {
+            host.NavigationService = navigation;
+            host.ViewLocator = views;
+        }
 
         // Navigate after the hosts are attached so the first pages are shown.
         // Failures are observed instead of fire-and-forget.
+        // Q1 is the quadrant the menu drives; Q2-Q4 keep independent content
+        // to prove regions navigate in isolation. Q1 and Q4 show the same
+        // ViewModel *type* to prove each region keeps its own instance.
         SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<MenuViewModel>("Sidebar"), ReportError);
-        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<HomeViewModel>("MainRegion"), ReportError);
+        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<HomeViewModel>("Q1"), ReportError);
+        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<CounterViewModel>("Q2", NavigationMode.KeepAlive), ReportError);
+        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<DetailViewModel, string>("Top-right detail", "Q3"), ReportError);
+        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<HomeViewModel>("Q4"), ReportError);
     }
 
     private void ReportError(string message) =>
@@ -33,8 +44,8 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        SidebarHost.Dispose();
-        MainHost.Dispose();
+        foreach (var host in _hosts)
+            host.Dispose();
         base.OnClosed(e);
     }
 }

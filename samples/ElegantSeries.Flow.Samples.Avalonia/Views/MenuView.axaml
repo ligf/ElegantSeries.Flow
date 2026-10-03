@@ -8,7 +8,6 @@
         <Button Content="Home" Command="{Binding GoHomeCommand}" Margin="0,0,0,8" />
         <Button Content="Detail" Command="{Binding GoDetailCommand}" Margin="0,0,0,8" />
         <Button Content="Counter (KeepAlive)" Command="{Binding GoCounterCommand}" Margin="0,0,0,8" />
-        <Button Content="Dashboard (nested)" Command="{Binding GoDashboardCommand}" Margin="0,0,0,8" />
         <Button Content="Guarded" Command="{Binding GoGuardedCommand}" Margin="0,0,0,8" />
         <Button Content="Features" Command="{Binding GoFeaturesCommand}" Margin="0,0,0,8" />
         <Button Content="Second window" Command="{Binding OpenSecondWindowCommand}" />
