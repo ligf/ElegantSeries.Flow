@@ -23,53 +23,41 @@ public partial class App : Application
         // Core navigation.
         services.AddFlowNavigation();
 
-        // ViewModels. MenuViewModel is a singleton to demonstrate that singleton
-        // ViewModels coexist fine with transient pages: the page scope resolves
-        // the shared root instance and never disposes it.
-        services.AddSingleton<MenuViewModel>();
+        // The combined RegisterTransient/RegisterSingleton calls below cover
+        // the common cases (view mapping + DI registration in one). The
+        // separate style (services.AddTransient + views.Register) is kept for
+        // Home and Detail to demonstrate the decoupled alternative — use it
+        // when a ViewModel needs custom DI setup (factory, decorators, keyed
+        // services, ...).
         services.AddTransient<HomeViewModel>();
         services.AddTransient<DetailViewModel>();
-        services.AddTransient<CounterViewModel>();
-        services.AddTransient<GuardedViewModel>();
-        services.AddTransient<AsyncDemoViewModel>();
-        services.AddTransient<CacheDemoViewModel>();
-        services.AddTransient<CancelDemoViewModel>();
-        services.AddTransient<QuadrantsViewModel>();
-        services.AddTransient<StackDemoViewModel>();
-        services.AddTransient<StackChildViewModel>();
-        services.AddTransient<KeepAliveDemoViewModel>();
-        services.AddTransient<KeepAliveTempViewModel>();
-        services.AddTransient<ParamDemoViewModel>();
-        services.AddTransient<ParamReceiverViewModel>();
-        services.AddTransient<ReplaceDemoViewModel>();
-        services.AddTransient<ReplaceTargetViewModel>();
-        services.AddTransient<ClearStackDemoViewModel>();
-        services.AddTransient<ClearStackChildViewModel>();
-        services.AddTransient<RefreshDemoViewModel>();
 
         // AOT-safe view registration: no runtime reflection.
         services.AddFlowViews(views =>
         {
-            views.Register<MenuView, MenuViewModel>();
+            // Singleton ViewModel: coexists fine with transient pages — the
+            // page scope resolves the shared root instance and never disposes
+            // it.
+            views.RegisterSingleton<MenuView, MenuViewModel>();
             views.Register<HomeView, HomeViewModel>();
             views.Register<DetailView, DetailViewModel>();
-            views.Register<CounterView, CounterViewModel>();
-            views.Register<GuardedView, GuardedViewModel>();
-            views.Register<AsyncDemoView, AsyncDemoViewModel>();
-            views.Register<CacheDemoView, CacheDemoViewModel>();
-            views.Register<CancelDemoView, CancelDemoViewModel>();
-            views.Register<QuadrantsView, QuadrantsViewModel>();
-            views.Register<StackDemoView, StackDemoViewModel>();
-            views.Register<StackChildView, StackChildViewModel>();
-            views.Register<KeepAliveDemoView, KeepAliveDemoViewModel>();
-            views.Register<KeepAliveTempView, KeepAliveTempViewModel>();
-            views.Register<ParamDemoView, ParamDemoViewModel>();
-            views.Register<ParamReceiverView, ParamReceiverViewModel>();
-            views.Register<ReplaceDemoView, ReplaceDemoViewModel>();
-            views.Register<ReplaceTargetView, ReplaceTargetViewModel>();
-            views.Register<ClearStackDemoView, ClearStackDemoViewModel>();
-            views.Register<ClearStackChildView, ClearStackChildViewModel>();
-            views.Register<RefreshDemoView, RefreshDemoViewModel>();
+            views.RegisterTransient<CounterView, CounterViewModel>();
+            views.RegisterTransient<GuardedView, GuardedViewModel>();
+            views.RegisterTransient<AsyncDemoView, AsyncDemoViewModel>();
+            views.RegisterTransient<CacheDemoView, CacheDemoViewModel>();
+            views.RegisterTransient<CancelDemoView, CancelDemoViewModel>();
+            views.RegisterTransient<QuadrantsView, QuadrantsViewModel>();
+            views.RegisterTransient<StackDemoView, StackDemoViewModel>();
+            views.RegisterTransient<StackChildView, StackChildViewModel>();
+            views.RegisterTransient<KeepAliveDemoView, KeepAliveDemoViewModel>();
+            views.RegisterTransient<KeepAliveTempView, KeepAliveTempViewModel>();
+            views.RegisterTransient<ParamDemoView, ParamDemoViewModel>();
+            views.RegisterTransient<ParamReceiverView, ParamReceiverViewModel>();
+            views.RegisterTransient<ReplaceDemoView, ReplaceDemoViewModel>();
+            views.RegisterTransient<ReplaceTargetView, ReplaceTargetViewModel>();
+            views.RegisterTransient<ClearStackDemoView, ClearStackDemoViewModel>();
+            views.RegisterTransient<ClearStackChildView, ClearStackChildViewModel>();
+            views.RegisterTransient<RefreshDemoView, RefreshDemoViewModel>();
         });
 
         Services = services.BuildServiceProvider();
