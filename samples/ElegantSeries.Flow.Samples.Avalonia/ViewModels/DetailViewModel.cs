@@ -1,7 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ElegantSeries.Flow.Core.Navigation;
-using ElegantSeries.Flow.Core.ViewModels;
+using ElegantSeries.Flow.Mvvm;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.ViewModels;
 

@@ -80,7 +80,7 @@ var windowNavigation = new NavigationService(windowScope.ServiceProvider);
 ### 2. Write a ViewModel
 
 ```csharp
-using ElegantSeries.Flow.Core.ViewModels;
+using ElegantSeries.Flow.Mvvm;
 using ElegantSeries.Flow.Core.Navigation;
 
 public partial class HomeViewModel : BaseViewModel, INavigationAware
@@ -97,9 +97,10 @@ public partial class HomeViewModel : BaseViewModel, INavigationAware
 page and cleared when it is navigated away from, so the `protected NavigateToAsync` /
 `GoBackAsync` helpers can be called directly from the ViewModel.
 
-`BaseViewModel` builds on CommunityToolkit.Mvvm. If you don't want the toolkit
-dependency, derive from `NavigationViewModelBase` instead — same navigation plumbing
-with a plain `INotifyPropertyChanged` implementation.
+`BaseViewModel` lives in the optional `ElegantSeries.Flow.Mvvm` package and builds on
+CommunityToolkit.Mvvm. If you don't want the toolkit dependency, derive from
+`NavigationViewModelBase` (in the core `ElegantSeries.Flow` package) instead — same
+navigation plumbing with a plain `INotifyPropertyChanged` implementation.
 
 Register your ViewModels with DI (transient is the typical lifetime):
 
@@ -132,6 +133,15 @@ ViewModel→View mapping, register views explicitly via `views.Register` /
 — no runtime reflection, no naming conventions. (The `[AotRoute]` attribute in
 `ElegantSeries.Flow.Core.Routing` is a reserved compile-time contract for a future source
 generator; it is not consumed at runtime today.)
+
+## Packages
+
+| Package | Contents |
+|---------|----------|
+| `ElegantSeries.Flow` | Core: navigation service, regions, page DI scopes, KeepAlive cache, guards, lifecycle — no MVVM toolkit dependency |
+| `ElegantSeries.Flow.Mvvm` | Optional CommunityToolkit.Mvvm integration: `BaseViewModel` (`ElegantSeries.Flow.Mvvm`) |
+| `ElegantSeries.Flow.WPF` | WPF host: `NavigationHost`, `BaseView<TViewModel>`, `ViewLocator` |
+| `ElegantSeries.Flow.Avalonia` | Avalonia host: `NavigationHost`, `BaseView<TViewModel>`, `ViewLocator` |
 
 ## UI integration
 

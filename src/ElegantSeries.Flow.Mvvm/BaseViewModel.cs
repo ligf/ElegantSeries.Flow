@@ -2,18 +2,18 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using ElegantSeries.Flow.Core.Navigation;
 using System.Diagnostics.CodeAnalysis;
 
-namespace ElegantSeries.Flow.Core.ViewModels;
+namespace ElegantSeries.Flow.Mvvm;
 
 /// <summary>
-/// Base class for all ViewModels in the ElegantSeries.Flow framework.
-/// Provides convenient navigation methods that delegate to the attached
-/// <see cref="INavigationService"/>.
+/// Base class for ViewModels in the ElegantSeries.Flow framework, for apps that
+/// use CommunityToolkit.Mvvm.
 /// </summary>
 /// <remarks>
 /// <para>
 /// This base class builds on CommunityToolkit.Mvvm (<see cref="ObservableObject"/>) for
 /// <c>[ObservableProperty]</c> source generation. For a toolkit-free alternative, derive
-/// from <see cref="NavigationViewModelBase"/> instead.
+/// from <see cref="Core.ViewModels.NavigationViewModelBase"/> (in the
+/// <c>ElegantSeries.Flow</c> core package) instead.
 /// </para>
 /// <para>
 /// The <see cref="Navigation"/> property is managed automatically by the

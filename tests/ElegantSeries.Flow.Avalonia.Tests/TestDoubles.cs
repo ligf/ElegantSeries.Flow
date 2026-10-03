@@ -8,22 +8,22 @@ using ElegantSeries.Flow.Avalonia.Views;
 namespace ElegantSeries.Flow.Avalonia.Tests;
 
 /// <summary>Test ViewModel (non-sealed so derivation semantics can be tested).</summary>
-internal class TestViewModel : BaseViewModel
+internal class TestViewModel : NavigationViewModelBase
 {
 }
 
 /// <summary>Another test ViewModel.</summary>
-internal sealed class OtherViewModel : BaseViewModel
+internal sealed class OtherViewModel : NavigationViewModelBase
 {
 }
 
 /// <summary>Third test ViewModel (for concurrency tests).</summary>
-internal sealed class ThirdViewModel : BaseViewModel
+internal sealed class ThirdViewModel : NavigationViewModelBase
 {
 }
 
 /// <summary>Fourth test ViewModel (for concurrency tests).</summary>
-internal sealed class FourthViewModel : BaseViewModel
+internal sealed class FourthViewModel : NavigationViewModelBase
 {
 }
 
@@ -33,7 +33,7 @@ internal sealed class DerivedViewModel : TestViewModel
 }
 
 /// <summary>ViewModel type intentionally left unregistered.</summary>
-internal sealed class UnregisteredViewModel : BaseViewModel
+internal sealed class UnregisteredViewModel : NavigationViewModelBase
 {
 }
 

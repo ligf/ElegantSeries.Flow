@@ -30,7 +30,7 @@ public sealed class ViewRegistryTests
     {
         var registry = new ViewRegistry<object>();
         var vm = new StubViewModel();
-        BaseViewModel? received = null;
+        NavigationViewModelBase? received = null;
         registry.Register<StubViewModel>(v => { received = v; return new object(); });
 
         registry.CreateView(vm);

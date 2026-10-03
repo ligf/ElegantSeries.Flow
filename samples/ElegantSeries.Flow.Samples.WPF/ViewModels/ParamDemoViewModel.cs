@@ -1,5 +1,5 @@
 using CommunityToolkit.Mvvm.Input;
-using ElegantSeries.Flow.Core.ViewModels;
+using ElegantSeries.Flow.Mvvm;
 
 namespace ElegantSeries.Flow.Samples.WPF.ViewModels;
 

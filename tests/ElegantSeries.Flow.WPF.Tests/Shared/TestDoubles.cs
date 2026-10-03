@@ -7,11 +7,11 @@ namespace ElegantSeries.Flow.WPF.Tests;
 
 // Test doubles shared by both test legs (net10.0 logic tests and net10.0-windows UI tests).
 
-internal class StubViewModel : BaseViewModel
+internal class StubViewModel : NavigationViewModelBase
 {
 }
 
-internal class OtherViewModel : BaseViewModel
+internal class OtherViewModel : NavigationViewModelBase
 {
 }
 

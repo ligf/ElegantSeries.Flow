@@ -6,13 +6,13 @@ using ElegantSeries.Flow.Core.ViewModels;
 
 namespace ElegantSeries.Flow.Core.Tests;
 
-public class TestHomeViewModel : BaseViewModel
+public class TestHomeViewModel : NavigationViewModelBase
 {
     public bool NavigatedToCalled { get; set; }
     public bool NavigatedFromCalled { get; set; }
 }
 
-public class ThrowingNavigatedFromViewModel : BaseViewModel, INavigationAware
+public class ThrowingNavigatedFromViewModel : NavigationViewModelBase, INavigationAware
 {
     public bool ThrowOnNavigatedFrom { get; set; }
 
@@ -27,7 +27,7 @@ public class ThrowingNavigatedFromViewModel : BaseViewModel, INavigationAware
     }
 }
 
-public class ThrowingNavigatedToViewModel : BaseViewModel, INavigationAware
+public class ThrowingNavigatedToViewModel : NavigationViewModelBase, INavigationAware
 {
     public void OnNavigatedTo(object? parameter)
         => throw new InvalidOperationException("OnNavigatedTo failed.");
@@ -40,7 +40,7 @@ public class ThrowingNavigatedToViewModel : BaseViewModel, INavigationAware
 /// <see cref="INavigationAware.OnNavigatedTo"/>. If lifecycle callbacks ran under
 /// the navigation lock, the nested call would deadlock.
 /// </summary>
-public class ReentrantNavigatedToViewModel : BaseViewModel, INavigationAware
+public class ReentrantNavigatedToViewModel : NavigationViewModelBase, INavigationAware
 {
     public void OnNavigatedTo(object? parameter)
     {
@@ -55,7 +55,7 @@ public class ReentrantNavigatedToViewModel : BaseViewModel, INavigationAware
 /// Guard that replaces itself via a nested navigation while an outer navigation is
 /// awaiting this guard, forcing the outer navigation into the stateMismatch path.
 /// </summary>
-public class StateMismatchGuardViewModel : BaseViewModel, INavigationGuard
+public class StateMismatchGuardViewModel : NavigationViewModelBase, INavigationGuard
 {
     private bool _nestedDone;
 
@@ -77,14 +77,14 @@ public class StateMismatchGuardViewModel : BaseViewModel, INavigationGuard
 /// <summary>
 /// Tracks disposal so tests can observe instances the service resolved but never used.
 /// </summary>
-public class TrackedDisposeViewModel : BaseViewModel, IDisposable
+public class TrackedDisposeViewModel : NavigationViewModelBase, IDisposable
 {
     public static int DisposeCount;
 
     public void Dispose() => DisposeCount++;
 }
 
-public class TestDetailViewModel : BaseViewModel, INavigationAware<string>, IAsyncDisposable
+public class TestDetailViewModel : NavigationViewModelBase, INavigationAware<string>, IAsyncDisposable
 {
     public string? ReceivedParam { get; private set; }
     public bool Disposed { get; private set; }
@@ -103,7 +103,7 @@ public class TestDetailViewModel : BaseViewModel, INavigationAware<string>, IAsy
     }
 }
 
-public class SimpleAwareViewModel : BaseViewModel, INavigationAware
+public class SimpleAwareViewModel : NavigationViewModelBase, INavigationAware
 {
     public object? NavigatedToParam { get; private set; }
     public bool NavigatedToCalled { get; private set; }
@@ -121,14 +121,14 @@ public class SimpleAwareViewModel : BaseViewModel, INavigationAware
     }
 }
 
-public class CallerViewModel : BaseViewModel
+public class CallerViewModel : NavigationViewModelBase
 {
     public Task<bool> TriggerNavigateToHomeAsync() => NavigateToAsync<TestHomeViewModel>();
     public Task<bool> TriggerNavigateToDetailAsync(string param) => NavigateToAsync<TestDetailViewModel, string>(param);
     public Task<bool> TriggerGoBackAsync() => GoBackAsync();
 }
 
-public class GuardedViewModel : BaseViewModel, INavigationGuard
+public class GuardedViewModel : NavigationViewModelBase, INavigationGuard
 {
     public bool AllowNavigation { get; set; } = true;
 
@@ -138,7 +138,7 @@ public class GuardedViewModel : BaseViewModel, INavigationGuard
     }
 }
 
-public class KeepAliveViewModel : BaseViewModel, IDisposable
+public class KeepAliveViewModel : NavigationViewModelBase, IDisposable
 {
     public bool Disposed { get; private set; }
     public int DisposeCallCount { get; private set; }
@@ -150,7 +150,7 @@ public class KeepAliveViewModel : BaseViewModel, IDisposable
     }
 }
 
-public sealed class ParamAwareKeepAliveViewModel : BaseViewModel, INavigationAware, IDisposable
+public sealed class ParamAwareKeepAliveViewModel : NavigationViewModelBase, INavigationAware, IDisposable
 {
     public object? LastParameter { get; private set; }
     public bool Disposed { get; private set; }
@@ -168,7 +168,7 @@ public sealed class ParamAwareKeepAliveViewModel : BaseViewModel, INavigationAwa
 /// A KeepAlive ViewModel whose synchronous <see cref="IDisposable.Dispose"/> always throws.
 /// Used to verify that one failing disposal never blocks the disposal of the remaining ViewModels.
 /// </summary>
-public class ThrowingKeepAliveViewModel : BaseViewModel, IDisposable
+public class ThrowingKeepAliveViewModel : NavigationViewModelBase, IDisposable
 {
     public bool DisposeAttempted { get; private set; }
 
@@ -182,7 +182,7 @@ public class ThrowingKeepAliveViewModel : BaseViewModel, IDisposable
 /// <summary>
 /// A KeepAlive ViewModel whose <see cref="IAsyncDisposable.DisposeAsync"/> always throws.
 /// </summary>
-public class ThrowingAsyncDisposeViewModel : BaseViewModel, IAsyncDisposable
+public class ThrowingAsyncDisposeViewModel : NavigationViewModelBase, IAsyncDisposable
 {
     public bool DisposeAttempted { get; private set; }
 
@@ -1633,7 +1633,7 @@ public class NavigationServiceTests
 
     #region v2.0 test doubles
 
-    private sealed class RefreshableViewModel : BaseViewModel, INavigationAware
+    private sealed class RefreshableViewModel : NavigationViewModelBase, INavigationAware
     {
         public int NavigatedToCount { get; private set; }
         public object? LastParameter { get; private set; }
@@ -1647,7 +1647,7 @@ public class NavigationServiceTests
         public void OnNavigatedFrom() { }
     }
 
-    private sealed class BothAwareViewModel : BaseViewModel, INavigationAware, INavigationAwareAsync
+    private sealed class BothAwareViewModel : NavigationViewModelBase, INavigationAware, INavigationAwareAsync
     {
         public bool SyncToCalled { get; private set; }
         public bool SyncFromCalled { get; private set; }
@@ -1670,7 +1670,7 @@ public class NavigationServiceTests
         }
     }
 
-    private sealed class AsyncThrowingViewModel : BaseViewModel, INavigationAwareAsync
+    private sealed class AsyncThrowingViewModel : NavigationViewModelBase, INavigationAwareAsync
     {
         public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
             => Task.FromException(new InvalidOperationException("OnNavigatedToAsync failed."));
@@ -1678,7 +1678,7 @@ public class NavigationServiceTests
         public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
-    private sealed class TypedAsyncViewModel : BaseViewModel, INavigationAwareAsync<string>
+    private sealed class TypedAsyncViewModel : NavigationViewModelBase, INavigationAwareAsync<string>
     {
         public string? ReceivedParam { get; private set; }
 
@@ -1691,7 +1691,7 @@ public class NavigationServiceTests
         public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
-    private sealed class ContextGuardViewModel : BaseViewModel, INavigationGuardWithContext
+    private sealed class ContextGuardViewModel : NavigationViewModelBase, INavigationGuardWithContext
     {
         public NavigationGuardContext? LastContext { get; private set; }
         public bool Allow { get; set; } = true;
@@ -1703,7 +1703,7 @@ public class NavigationServiceTests
         }
     }
 
-    private sealed class BothGuardViewModel : BaseViewModel, INavigationGuard, INavigationGuardWithContext
+    private sealed class BothGuardViewModel : NavigationViewModelBase, INavigationGuard, INavigationGuardWithContext
     {
         public bool PlainGuardCalled { get; private set; }
         public bool ContextGuardCalled { get; private set; }
@@ -1721,7 +1721,7 @@ public class NavigationServiceTests
         }
     }
 
-    private sealed class ContextGuardDetailViewModel : BaseViewModel, INavigationGuardWithContext
+    private sealed class ContextGuardDetailViewModel : NavigationViewModelBase, INavigationGuardWithContext
     {
         public NavigationGuardContext? LastContext { get; private set; }
 
@@ -1732,7 +1732,7 @@ public class NavigationServiceTests
         }
     }
 
-    private sealed class CancelInNavigatedToViewModel : BaseViewModel, INavigationAware
+    private sealed class CancelInNavigatedToViewModel : NavigationViewModelBase, INavigationAware
     {
         public static CancellationTokenSource? TokenSource;
 
@@ -1775,7 +1775,7 @@ public class NavigationServiceTests
         }
     }
 
-    private sealed class SingletonViewModel : BaseViewModel, IDisposable
+    private sealed class SingletonViewModel : NavigationViewModelBase, IDisposable
     {
         public bool Disposed { get; private set; }
         public void Dispose() => Disposed = true;
@@ -1787,7 +1787,7 @@ public class NavigationServiceTests
         public void Dispose() => Disposed = true;
     }
 
-    private sealed class ServiceDependentViewModel : BaseViewModel, IDisposable
+    private sealed class ServiceDependentViewModel : NavigationViewModelBase, IDisposable
     {
         public DisposableService Service { get; }
         public bool Disposed { get; private set; }
@@ -1800,14 +1800,14 @@ public class NavigationServiceTests
         public void Dispose() => Disposed = true;
     }
 
-    private sealed class ScopedViewModel : BaseViewModel, IDisposable
+    private sealed class ScopedViewModel : NavigationViewModelBase, IDisposable
     {
         public Guid InstanceId { get; } = Guid.NewGuid();
         public bool Disposed { get; private set; }
         public void Dispose() => Disposed = true;
     }
 
-    private sealed class ThrowingDependencyViewModel : BaseViewModel, IDisposable
+    private sealed class ThrowingDependencyViewModel : NavigationViewModelBase, IDisposable
     {
         public DisposableService Service { get; }
         public bool DisposeAttempted { get; private set; }
