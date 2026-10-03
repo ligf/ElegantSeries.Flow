@@ -4,8 +4,8 @@
              x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.KeepAliveTempView"
              x:DataType="vm:KeepAliveTempViewModel">
     <StackPanel Margin="16" VerticalAlignment="Center">
-        <TextBlock Text="临时页面" FontSize="20" Margin="0,0,0,12" />
-        <Button Content="返回" Command="{Binding GoBackCommand}"
+        <TextBlock Text="Temp Page" FontSize="20" Margin="0,0,0,12" />
+        <Button Content="Back" Command="{Binding GoBackCommand}"
                 Width="140" HorizontalAlignment="Left" />
     </StackPanel>
 </UserControl>

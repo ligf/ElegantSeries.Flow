@@ -9,7 +9,10 @@
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:HomeViewModel, IsDesignTimeCreatable=False}">
     <StackPanel Margin="24" VerticalAlignment="Center">
-        <TextBlock Text="{Binding Title}" FontSize="28" Margin="0,0,0,16" />
+        <TextBlock Text="{Binding Title}" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding InstanceId, StringFormat='Instance: {0}'}" Margin="0,0,0,4" Opacity="0.6" />
+        <TextBlock Text="Navigate away and back — the id changes: the page was recreated."
+                   Margin="0,0,0,16" TextWrapping="Wrap" Opacity="0.6" />
         <Button Content="Go to Detail" Command="{Binding GoToDetailCommand}"
                 Width="160" HorizontalAlignment="Left" />
     </StackPanel>

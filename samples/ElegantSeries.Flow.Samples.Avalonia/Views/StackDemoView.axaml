@@ -4,11 +4,12 @@
              x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.StackDemoView"
              x:DataType="vm:StackDemoViewModel">
     <StackPanel Margin="16" VerticalAlignment="Center">
-        <TextBlock Text="页面栈" FontSize="20" Margin="0,0,0,8" />
-        <TextBlock Text="{Binding Depth, StringFormat='当前深度: {0}'}" Margin="0,0,0,12" />
-        <Button Content="Push 一层" Command="{Binding PushDeeperCommand}"
+        <TextBlock Text="Navigation Stack" FontSize="20" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding Depth, StringFormat='Depth: {0}'}" Margin="0,0,0,4" />
+        <TextBlock Text="{Binding InstanceId, StringFormat='Instance: {0}'}" Margin="0,0,0,12" Opacity="0.6" />
+        <Button Content="Push Deeper" Command="{Binding PushDeeperCommand}"
                 Width="140" HorizontalAlignment="Left" Margin="0,0,0,8" />
-        <Button Content="返回" Command="{Binding GoBackCommand}"
+        <Button Content="Back" Command="{Binding GoBackCommand}"
                 Width="140" HorizontalAlignment="Left" />
     </StackPanel>
 </UserControl>

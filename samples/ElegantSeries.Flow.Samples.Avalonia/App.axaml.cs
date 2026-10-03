@@ -31,14 +31,17 @@ public partial class App : Application
         services.AddTransient<DetailViewModel>();
         services.AddTransient<CounterViewModel>();
         services.AddTransient<GuardedViewModel>();
-        services.AddTransient<FeaturesViewModel>();
+        services.AddTransient<AsyncDemoViewModel>();
+        services.AddTransient<CacheDemoViewModel>();
+        services.AddTransient<CancelDemoViewModel>();
         services.AddTransient<QuadrantsViewModel>();
         services.AddTransient<StackDemoViewModel>();
         services.AddTransient<KeepAliveDemoViewModel>();
         services.AddTransient<KeepAliveTempViewModel>();
         services.AddTransient<ParamDemoViewModel>();
-        services.AddTransient<ModesDemoViewModel>();
-        services.AddTransient<ModesChildViewModel>();
+        services.AddTransient<ReplaceDemoViewModel>();
+        services.AddTransient<ClearStackDemoViewModel>();
+        services.AddTransient<RefreshDemoViewModel>();
 
         // AOT-safe view registration: no runtime reflection.
         services.AddFlowViews(views =>
@@ -48,14 +51,17 @@ public partial class App : Application
             views.Register<DetailView, DetailViewModel>();
             views.Register<CounterView, CounterViewModel>();
             views.Register<GuardedView, GuardedViewModel>();
-            views.Register<FeaturesView, FeaturesViewModel>();
+            views.Register<AsyncDemoView, AsyncDemoViewModel>();
+            views.Register<CacheDemoView, CacheDemoViewModel>();
+            views.Register<CancelDemoView, CancelDemoViewModel>();
             views.Register<QuadrantsView, QuadrantsViewModel>();
             views.Register<StackDemoView, StackDemoViewModel>();
             views.Register<KeepAliveDemoView, KeepAliveDemoViewModel>();
             views.Register<KeepAliveTempView, KeepAliveTempViewModel>();
             views.Register<ParamDemoView, ParamDemoViewModel>();
-            views.Register<ModesDemoView, ModesDemoViewModel>();
-            views.Register<ModesChildView, ModesChildViewModel>();
+            views.Register<ReplaceDemoView, ReplaceDemoViewModel>();
+            views.Register<ClearStackDemoView, ClearStackDemoViewModel>();
+            views.Register<RefreshDemoView, RefreshDemoViewModel>();
         });
 
         Services = services.BuildServiceProvider();

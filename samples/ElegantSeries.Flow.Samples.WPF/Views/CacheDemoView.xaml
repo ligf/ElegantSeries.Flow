@@ -1,0 +1,22 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.CacheDemoView"
+             x:TypeArguments="vm:CacheDemoViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.WPF.ViewModels"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:CacheDemoViewModel, IsDesignTimeCreatable=False}">
+    <StackPanel Margin="24">
+        <TextBlock Text="Clear Cache" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="1. Open the Counter and Increment. 2. Come back here. 3. ClearCache. 4. Open the Counter again — the count is reset."
+                   Margin="0,0,0,12" TextWrapping="Wrap" Opacity="0.6" />
+        <Button Content="Open Counter (KeepAlive)" Command="{Binding OpenCounterCommand}"
+                Width="200" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="ClearCache" Command="{Binding ClearKeepAliveCacheCommand}"
+                Width="200" HorizontalAlignment="Left" Margin="0,0,0,12" />
+        <TextBox Text="{Binding Log}" IsReadOnly="True" AcceptsReturn="True"
+                 VerticalScrollBarVisibility="Auto" Height="120" FontFamily="Consolas" />
+    </StackPanel>
+</flow:BaseView>

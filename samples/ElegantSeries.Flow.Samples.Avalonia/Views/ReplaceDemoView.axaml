@@ -1,0 +1,18 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.ReplaceDemoView"
+             x:DataType="vm:ReplaceDemoViewModel">
+    <StackPanel Margin="16" VerticalAlignment="Center">
+        <TextBlock Text="Replace Mode" FontSize="20" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding InstanceId, StringFormat='Instance: {0}'}" Margin="0,0,0,12" Opacity="0.6" />
+        <Button Content="Replace with New Page" Command="{Binding ReplaceSelfCommand}"
+                Width="160" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="Push New Page" Command="{Binding PushSelfCommand}"
+                Width="160" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="Back" Command="{Binding GoBackCommand}"
+                Width="160" HorizontalAlignment="Left" />
+        <TextBlock Text="Replace swaps the page without growing the stack: after a replace, Back has nowhere to go."
+                   Margin="0,12,0,0" TextWrapping="Wrap" Opacity="0.6" />
+    </StackPanel>
+</UserControl>

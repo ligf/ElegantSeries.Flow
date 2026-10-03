@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.CancelDemoView"
+             x:DataType="vm:CancelDemoViewModel">
+    <StackPanel Margin="24" VerticalAlignment="Center">
+        <TextBlock Text="Cancellation" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding Status}" Margin="0,0,0,12" TextWrapping="Wrap" />
+        <Button Content="Start Cancelled Navigation" Command="{Binding CancelledNavigationCommand}"
+                Width="200" HorizontalAlignment="Left" />
+    </StackPanel>
+</UserControl>
