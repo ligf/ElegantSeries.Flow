@@ -22,4 +22,19 @@ public sealed partial class MenuViewModel : BaseViewModel
     [RelayCommand]
     private Task GoCounterAsync()
         => NavigateToAsync<CounterViewModel>("MainRegion", NavigationMode.KeepAlive);
+
+    [RelayCommand]
+    private Task GoDashboardAsync()
+        => NavigateToAsync<DashboardViewModel>("MainRegion");
+
+    [RelayCommand]
+    private Task GoGuardedAsync()
+        => NavigateToAsync<GuardedViewModel>("MainRegion");
+
+    [RelayCommand]
+    private Task GoFeaturesAsync()
+        => NavigateToAsync<FeaturesViewModel>("MainRegion");
+
+    [RelayCommand]
+    private void OpenSecondWindow() => new SecondWindow().Show();
 }

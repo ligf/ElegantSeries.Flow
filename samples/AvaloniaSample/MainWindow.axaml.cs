@@ -23,9 +23,12 @@ public partial class MainWindow : Window
         MainHost.ViewLocator = views;
 
         // Navigate after the hosts are attached so the first pages are shown.
-        _ = navigation.NavigateToAsync<MenuViewModel>("Sidebar");
-        _ = navigation.NavigateToAsync<HomeViewModel>("MainRegion");
+        // Failures are observed instead of fire-and-forget.
+        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<MenuViewModel>("Sidebar"), ReportError);
+        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<HomeViewModel>("MainRegion"), ReportError);
     }
+
+    private void ReportError(string message) => ErrorText.Text = message;
 
     protected override void OnClosed(EventArgs e)
     {
