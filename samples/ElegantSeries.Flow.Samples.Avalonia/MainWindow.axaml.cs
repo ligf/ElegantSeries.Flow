@@ -43,8 +43,32 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        // Best-effort: every host is disposed even if one of them throws,
+        // mirroring the navigation service's own disposal semantics.
+        List<Exception>? errors = null;
         foreach (var host in _hosts)
-            host.Dispose();
+        {
+            try
+            {
+                host.Dispose();
+            }
+            catch (Exception ex)
+            {
+                errors ??= [];
+                errors.Add(ex);
+            }
+        }
+
         base.OnClosed(e);
+
+        if (errors is { Count: 1 })
+        {
+            throw errors[0];
+        }
+
+        if (errors is { Count: > 1 })
+        {
+            throw new AggregateException("One or more navigation hosts failed to dispose.", errors);
+        }
     }
 }
