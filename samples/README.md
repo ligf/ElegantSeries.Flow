@@ -11,8 +11,14 @@ in your IDE and run the sample you need.
 
 Both samples demonstrate the library's full feature set:
 
-1. **DI setup** — `AddFlowNavigation()` (singleton), ViewModels registered as
-   transient, views registered AOT-safely via `AddFlowViews(...)`.
+1. **DI setup** — `AddFlowNavigation()` (singleton); views + ViewModels
+   registered AOT-safely via `AddFlowViews(...)`: `RegisterTransient` /
+   `RegisterSingleton` combine view mapping with DI registration in one call
+   (the menu ViewModel is a singleton — it coexists fine with transient
+   pages: the page scope resolves the shared root instance and never
+   disposes it), while the separate `services.AddTransient` + `views.Register`
+   style is kept for Home/Detail to demonstrate the decoupled alternative
+   for custom DI setup (factory, decorators, keyed services, ...).
 2. **Multi-region layout** — the main window hosts a `Sidebar` region (menu)
    and a `MainRegion` (full-page content); both share the singleton
    navigation service but keep separate stacks. Menu buttons switch the
