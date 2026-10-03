@@ -9,6 +9,14 @@ in your IDE and run the sample you need.
 | [ElegantSeries.Flow.Samples.WPF](ElegantSeries.Flow.Samples.WPF) | WPF (`net10.0-windows`) | Open on Windows, run the project |
 | [ElegantSeries.Flow.Samples.Avalonia](ElegantSeries.Flow.Samples.Avalonia) | Avalonia (`net10.0`) | `dotnet run` (any OS) |
 
+Both samples share one ViewModel project
+([ElegantSeries.Flow.Samples.Shared](ElegantSeries.Flow.Samples.Shared)): the
+ViewModels are UI-framework-agnostic, so WPF and Avalonia reuse the exact same
+classes — only the Views (XAML/AXAML) are platform-specific. The shared
+`MenuViewModel` raises `OpenSecondWindowRequested` when the user asks for a
+second window; each sample's `App` wires it to its own platform `SecondWindow`
+(which demonstrates per-window scoped navigation with an isolated DI scope).
+
 Both samples demonstrate the library's full feature set:
 
 1. **DI setup** — `AddFlowNavigation()` (singleton); views + ViewModels

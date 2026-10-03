@@ -2,7 +2,7 @@ using System.Windows;
 using ElegantSeries.Flow.Core.Extensions;
 using ElegantSeries.Flow.WPF.Extensions;
 using Microsoft.Extensions.DependencyInjection;
-using ElegantSeries.Flow.Samples.WPF.ViewModels;
+using ElegantSeries.Flow.Samples.Shared;
 using ElegantSeries.Flow.Samples.WPF.Views;
 
 namespace ElegantSeries.Flow.Samples.WPF;
@@ -73,6 +73,11 @@ public partial class App : Application
         });
 
         Services = services.BuildServiceProvider();
+
+        // Platform-specific wiring: the shared MenuViewModel only raises
+        // OpenSecondWindowRequested; creating the actual Window is the host's job.
+        Services.GetRequiredService<MenuViewModel>().OpenSecondWindowRequested +=
+            () => new SecondWindow().Show();
 
         base.OnStartup(e);
     }

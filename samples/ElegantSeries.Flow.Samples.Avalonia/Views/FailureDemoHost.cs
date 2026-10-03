@@ -1,5 +1,5 @@
 using ElegantSeries.Flow.Core.Navigation;
-using ElegantSeries.Flow.Samples.Avalonia.ViewModels;
+using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;
 

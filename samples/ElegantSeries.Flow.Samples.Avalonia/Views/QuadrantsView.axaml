@@ -1,6 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
              xmlns:flow="clr-namespace:ElegantSeries.Flow.Avalonia.Hosting;assembly=ElegantSeries.Flow.Avalonia"
              x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.QuadrantsView"
              x:DataType="vm:QuadrantsViewModel">

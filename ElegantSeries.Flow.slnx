@@ -13,5 +13,6 @@
   <Folder Name="/samples/">
     <Project Path="samples/ElegantSeries.Flow.Samples.WPF/ElegantSeries.Flow.Samples.WPF.csproj" />
     <Project Path="samples/ElegantSeries.Flow.Samples.Avalonia/ElegantSeries.Flow.Samples.Avalonia.csproj" />
+    <Project Path="samples/ElegantSeries.Flow.Samples.Shared/ElegantSeries.Flow.Samples.Shared.csproj" />
   </Folder>
 </Solution>

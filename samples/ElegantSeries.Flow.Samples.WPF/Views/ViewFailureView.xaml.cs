@@ -2,7 +2,7 @@ using System.Windows;
 using ElegantSeries.Flow.Core.Navigation;
 using ElegantSeries.Flow.WPF.Locating;
 using Microsoft.Extensions.DependencyInjection;
-using ElegantSeries.Flow.Samples.WPF.ViewModels;
+using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 

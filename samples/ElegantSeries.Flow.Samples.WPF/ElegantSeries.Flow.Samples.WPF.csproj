@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Core\ElegantSeries.Flow.Core.csproj" />
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Mvvm\ElegantSeries.Flow.Mvvm.csproj" />
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.WPF\ElegantSeries.Flow.WPF.csproj" />
+    <ProjectReference Include="..\ElegantSeries.Flow.Samples.Shared\ElegantSeries.Flow.Samples.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>
