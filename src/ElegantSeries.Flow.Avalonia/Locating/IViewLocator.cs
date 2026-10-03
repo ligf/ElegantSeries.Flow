@@ -83,6 +83,11 @@ public interface IViewLocator
     /// lifetime for the ViewModel's <i>dependencies</i> (DbContext, drafts,
     /// per-page caches) instead.
     /// </para>
+    /// <para>
+    /// Must be called before the service provider is built (i.e. during
+    /// <c>AddFlowViews</c> startup configuration). Registrations added to the
+    /// service collection afterwards are silently ignored by Microsoft DI.
+    /// </para>
     /// </remarks>
     void RegisterTransient<TView, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>()
         where TView : Control, new()
@@ -109,6 +114,11 @@ public interface IViewLocator
     /// <para>
     /// A singleton ViewModel keeps its state across all navigations. Its
     /// constructor must not depend on scoped services.
+    /// </para>
+    /// <para>
+    /// Must be called before the service provider is built (i.e. during
+    /// <c>AddFlowViews</c> startup configuration). Registrations added to the
+    /// service collection afterwards are silently ignored by Microsoft DI.
     /// </para>
     /// </remarks>
     void RegisterSingleton<TView, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>()

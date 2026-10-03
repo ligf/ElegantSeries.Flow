@@ -57,8 +57,8 @@ public sealed class ViewLocator : IViewLocator
         where TViewModel : class, INavigationViewModel
     {
         EnsureServices(nameof(RegisterTransient));
-        _services!.AddTransient<TViewModel>();
         Register<TView, TViewModel>();
+        _services!.AddTransient<TViewModel>();
     }
 
     /// <inheritdoc />
@@ -67,8 +67,8 @@ public sealed class ViewLocator : IViewLocator
         where TViewModel : class, INavigationViewModel
     {
         EnsureServices(nameof(RegisterSingleton));
-        _services!.AddSingleton<TViewModel>();
         Register<TView, TViewModel>();
+        _services!.AddSingleton<TViewModel>();
     }
 
     /// <inheritdoc />

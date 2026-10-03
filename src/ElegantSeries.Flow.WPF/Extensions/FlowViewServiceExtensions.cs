@@ -24,8 +24,10 @@ public static class FlowViewServiceExtensions
     /// <c>TryAddSingleton</c> and never overrides an existing
     /// <see cref="IViewLocator"/> registration. With <paramref name="configure"/>,
     /// an explicit registration is added; per Microsoft DI rules the last
-    /// registration wins when <see cref="IViewLocator"/> is resolved, so calling
-    /// this method twice with a configuration replaces the earlier one.
+    /// registration wins when <see cref="IViewLocator"/> is resolved, so the
+    /// view <i>mappings</i> of a later call replace those of an earlier one.
+    /// ViewModel lifetime registrations, however, accumulate in call order
+    /// and are not rolled back by a later call.
     /// </para>
     /// <para>
     /// The <paramref name="configure"/> action runs eagerly, i.e. during this
