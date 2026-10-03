@@ -1,10 +1,16 @@
 <Solution>
-  <Project Path="src/ElegantSeries.Flow.Core/ElegantSeries.Flow.Core.csproj" />
-  <Project Path="src/ElegantSeries.Flow.WPF/ElegantSeries.Flow.WPF.csproj" />
-  <Project Path="src/ElegantSeries.Flow.Avalonia/ElegantSeries.Flow.Avalonia.csproj" />
-  <Project Path="tests/ElegantSeries.Flow.Core.Tests/ElegantSeries.Flow.Core.Tests.csproj" />
-  <Project Path="tests/ElegantSeries.Flow.WPF.Tests/ElegantSeries.Flow.WPF.Tests.csproj" />
-  <Project Path="tests/ElegantSeries.Flow.Avalonia.Tests/ElegantSeries.Flow.Avalonia.Tests.csproj" />
-  <Project Path="samples/WpfSample/WpfSample.csproj" />
-  <Project Path="samples/AvaloniaSample/AvaloniaSample.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/ElegantSeries.Flow.Core/ElegantSeries.Flow.Core.csproj" />
+    <Project Path="src/ElegantSeries.Flow.WPF/ElegantSeries.Flow.WPF.csproj" />
+    <Project Path="src/ElegantSeries.Flow.Avalonia/ElegantSeries.Flow.Avalonia.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ElegantSeries.Flow.Core.Tests/ElegantSeries.Flow.Core.Tests.csproj" />
+    <Project Path="tests/ElegantSeries.Flow.WPF.Tests/ElegantSeries.Flow.WPF.Tests.csproj" />
+    <Project Path="tests/ElegantSeries.Flow.Avalonia.Tests/ElegantSeries.Flow.Avalonia.Tests.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/ElegantSeries.Flow.Samples.WPF/ElegantSeries.Flow.Samples.WPF.csproj" />
+    <Project Path="samples/ElegantSeries.Flow.Samples.Avalonia/ElegantSeries.Flow.Samples.Avalonia.csproj" />
+  </Folder>
 </Solution>

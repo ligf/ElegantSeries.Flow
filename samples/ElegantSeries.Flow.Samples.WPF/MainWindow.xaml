@@ -1,0 +1,16 @@
+<Window x:Class="ElegantSeries.Flow.Samples.WPF.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Hosting;assembly=ElegantSeries.Flow.WPF"
+        Title="ElegantSeries.Flow.Samples.WPF" Height="400" Width="600">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="180" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <!-- Sidebar region: menu, navigates independently -->
+        <flow:NavigationHost x:Name="SidebarHost" RegionName="Sidebar" Grid.Column="0" />
+        <!-- Main region: content pages -->
+        <flow:NavigationHost x:Name="MainHost" RegionName="MainRegion" Grid.Column="1" />
+    </Grid>
+</Window>
