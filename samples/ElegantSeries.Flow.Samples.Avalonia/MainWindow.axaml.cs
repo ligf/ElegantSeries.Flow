@@ -18,9 +18,9 @@ public partial class MainWindow : Window
         var navigation = App.Services.GetRequiredService<INavigationService>();
         var views = App.Services.GetRequiredService<IViewLocator>();
 
-        // All regions share the singleton navigation service but keep
+        // Both regions share the singleton navigation service but keep
         // independent stacks.
-        _hosts = [SidebarHost, Q1Host, Q2Host, Q3Host, Q4Host];
+        _hosts = [SidebarHost, MainHost];
         foreach (var host in _hosts)
         {
             host.NavigationService = navigation;
@@ -29,14 +29,8 @@ public partial class MainWindow : Window
 
         // Navigate after the hosts are attached so the first pages are shown.
         // Failures are observed instead of fire-and-forget.
-        // Q1 is the quadrant the menu drives; Q2-Q4 keep independent content
-        // to prove regions navigate in isolation. Q1 and Q4 show the same
-        // ViewModel *type* to prove each region keeps its own instance.
         SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<MenuViewModel>("Sidebar"), ReportError);
-        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<HomeViewModel>("Q1"), ReportError);
-        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<CounterViewModel>("Q2", NavigationMode.KeepAlive), ReportError);
-        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<DetailViewModel, string>("Top-right detail", "Q3"), ReportError);
-        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<HomeViewModel>("Q4"), ReportError);
+        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<HomeViewModel>("MainRegion"), ReportError);
     }
 
     private void ReportError(string message) => ErrorText.Text = message;

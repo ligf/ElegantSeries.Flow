@@ -1,0 +1,21 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.ParamDemoView"
+             x:TypeArguments="vm:ParamDemoViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.WPF.ViewModels"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:ParamDemoViewModel, IsDesignTimeCreatable=False}">
+    <StackPanel Margin="16" VerticalAlignment="Center">
+        <TextBlock Text="参数传递" FontSize="20" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding Message, StringFormat='当前参数: {0}'}" Margin="0,0,0,12" TextWrapping="Wrap" />
+        <Button Content="传递 Hello" Command="{Binding SendHelloCommand}"
+                Width="140" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="传递 World" Command="{Binding SendWorldCommand}"
+                Width="140" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="返回" Command="{Binding GoBackCommand}"
+                Width="140" HorizontalAlignment="Left" />
+    </StackPanel>
+</flow:BaseView>

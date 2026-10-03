@@ -1,0 +1,21 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.KeepAliveDemoView"
+             x:TypeArguments="vm:KeepAliveDemoViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.WPF.ViewModels"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:KeepAliveDemoViewModel, IsDesignTimeCreatable=False}">
+    <StackPanel Margin="16" VerticalAlignment="Center">
+        <TextBlock Text="状态保持" FontSize="20" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding Count}" FontSize="36" Margin="0,0,0,12" />
+        <Button Content="Increment" Command="{Binding IncrementCommand}"
+                Width="140" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="临时离开" Command="{Binding OpenTempPageCommand}"
+                Width="140" HorizontalAlignment="Left" />
+        <TextBlock Text="离开再回来 — 计数保持不变 (KeepAlive)。"
+                   Margin="0,12,0,0" TextWrapping="Wrap" Opacity="0.6" />
+    </StackPanel>
+</flow:BaseView>

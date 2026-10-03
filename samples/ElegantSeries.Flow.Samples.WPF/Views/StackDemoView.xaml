@@ -1,0 +1,19 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.StackDemoView"
+             x:TypeArguments="vm:StackDemoViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.WPF.ViewModels"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:StackDemoViewModel, IsDesignTimeCreatable=False}">
+    <StackPanel Margin="16" VerticalAlignment="Center">
+        <TextBlock Text="页面栈" FontSize="20" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding Depth, StringFormat='当前深度: {0}'}" Margin="0,0,0,12" />
+        <Button Content="Push 一层" Command="{Binding PushDeeperCommand}"
+                Width="140" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="返回" Command="{Binding GoBackCommand}"
+                Width="140" HorizontalAlignment="Left" />
+    </StackPanel>
+</flow:BaseView>
