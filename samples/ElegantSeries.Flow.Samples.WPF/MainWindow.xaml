@@ -10,7 +10,23 @@
         </Grid.ColumnDefinitions>
         <!-- Sidebar region: menu, navigates independently -->
         <flow:NavigationHost x:Name="SidebarHost" RegionName="Sidebar" Grid.Column="0" />
-        <!-- Main region: content pages -->
-        <flow:NavigationHost x:Name="MainHost" RegionName="MainRegion" Grid.Column="1" />
+        <!-- Four quadrant regions: each navigates independently.
+             The menu drives Q1; the other quadrants keep their own content. -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <Border Grid.Row="0" Grid.Column="0" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                <flow:NavigationHost x:Name="Q1Host" RegionName="Q1" />
+            </Border>
+            <Border Grid.Row="0" Grid.Column="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                <flow:NavigationHost x:Name="Q2Host" RegionName="Q2" />
+            </Border>
+            <Border Grid.Row="1" Grid.Column="0" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                <flow:NavigationHost x:Name="Q3Host" RegionName="Q3" />
+            </Border>
+            <Border Grid.Row="1" Grid.Column="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                <flow:NavigationHost x:Name="Q4Host" RegionName="Q4" />
+            </Border>
+        </Grid>
     </Grid>
 </Window>

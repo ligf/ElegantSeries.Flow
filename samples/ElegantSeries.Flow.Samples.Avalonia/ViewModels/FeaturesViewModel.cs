@@ -39,11 +39,11 @@ public sealed partial class FeaturesViewModel : BaseViewModel, INavigationAwareA
     [RelayCommand]
     private Task ReplaceWithDetailAsync()
         => NavigateToAsync<DetailViewModel, string>(
-            "Replaced via NavigationMode.Replace", "MainRegion", NavigationMode.Replace);
+            "Replaced via NavigationMode.Replace", "Q1", NavigationMode.Replace);
 
     [RelayCommand]
     private Task ClearStackToHomeAsync()
-        => NavigateToAsync<HomeViewModel>("MainRegion", NavigationMode.ClearStack);
+        => NavigateToAsync<HomeViewModel>("Q1", NavigationMode.ClearStack);
 
     [RelayCommand]
     private Task RefreshSelfAsync()
@@ -51,14 +51,14 @@ public sealed partial class FeaturesViewModel : BaseViewModel, INavigationAwareA
         RefreshCount++;
         // Already active -> no push, callbacks re-run with the new parameter.
         return NavigateToAsync<FeaturesViewModel, string>(
-            $"refresh #{RefreshCount}", "MainRegion", refreshIfActive: true);
+            $"refresh #{RefreshCount}", "Q1", refreshIfActive: true);
     }
 
     [RelayCommand]
     private void ClearKeepAliveCache()
     {
-        Navigation?.ClearCache("MainRegion");
-        AppendLog("ClearCache(\"MainRegion\") — cached KeepAlive pages disposed.");
+        Navigation?.ClearCache("Q1");
+        AppendLog("ClearCache(\"Q1\") — cached KeepAlive pages disposed.");
     }
 
     [RelayCommand]
@@ -68,7 +68,7 @@ public sealed partial class FeaturesViewModel : BaseViewModel, INavigationAwareA
         cts.Cancel(); // already-cancelled: the API throws before touching the stack
         try
         {
-            await NavigateToAsync<HomeViewModel>("MainRegion", cancellationToken: cts.Token);
+            await NavigateToAsync<HomeViewModel>("Q1", cancellationToken: cts.Token);
             CancelStatus = "Unexpected: navigation succeeded.";
         }
         catch (OperationCanceledException)
