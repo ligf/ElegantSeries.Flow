@@ -14,7 +14,7 @@ public static class FlowViewServiceExtensions
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">
-    /// Optional view registrations, applied once when the locator is first resolved.
+    /// Optional view registrations, applied immediately when this method is called.
     /// </param>
     /// <returns>The service collection, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
@@ -28,8 +28,14 @@ public static class FlowViewServiceExtensions
     /// this method twice with a configuration replaces the earlier one.
     /// </para>
     /// <para>
-    /// The <paramref name="configure"/> action runs lazily inside the singleton
-    /// factory, i.e. once, on first resolution of <see cref="IViewLocator"/>.
+    /// The <paramref name="configure"/> action runs eagerly, i.e. during this
+    /// call rather than on first resolution of <see cref="IViewLocator"/>.
+    /// This is required so that ViewModel lifetime registrations
+    /// (<see cref="IViewLocator.RegisterTransient{TView, TViewModel}"/>,
+    /// <see cref="IViewLocator.RegisterSingleton{TView, TViewModel}"/>) take
+    /// effect before the service provider is built; registrations added after
+    /// <c>BuildServiceProvider()</c> would be silently ignored. As a side
+    /// benefit, configuration errors fail fast at startup.
     /// </para>
     /// </remarks>
     public static IServiceCollection AddFlowViews(
@@ -44,12 +50,9 @@ public static class FlowViewServiceExtensions
         }
         else
         {
-            services.AddSingleton<IViewLocator>(_ =>
-            {
-                var locator = new ViewLocator();
-                configure(locator);
-                return locator;
-            });
+            var locator = new ViewLocator(services);
+            configure(locator);
+            services.AddSingleton<IViewLocator>(locator);
         }
 
         return services;

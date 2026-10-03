@@ -18,14 +18,14 @@ services.AddSingleton<INavigationService>(sp =>
 // WPF view infrastructure: singleton IViewLocator with explicit registrations.
 services.AddFlowViews(views =>
 {
-    views.Register<OrderView, OrderViewModel>();
-    views.Register<CustomerView, CustomerViewModel>();
-    // Views needing constructor arguments:
+    // View mapping + ViewModel DI registration in one call:
+    views.RegisterTransient<OrderView, OrderViewModel>();
+    views.RegisterSingleton<MenuView, MenuViewModel>();
+    // Views needing constructor arguments (mapping only; register the
+    // ViewModel in DI yourself):
     views.Register<ReportViewModel>(vm => new ReportView(vm.Title));
 });
-
-services.AddTransient<OrderViewModel>();
-services.AddTransient<CustomerViewModel>();
+services.AddTransient<ReportViewModel>();
 // ...
 
 var provider = services.BuildServiceProvider();

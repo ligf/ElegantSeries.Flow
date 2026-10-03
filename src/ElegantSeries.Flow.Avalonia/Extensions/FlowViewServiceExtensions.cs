@@ -17,7 +17,7 @@ public static class FlowViewServiceExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configure">
     /// Optional startup configuration that registers view/view-model pairs on the
-    /// locator. Runs once, when the singleton is first resolved.
+    /// locator. Runs immediately, when this method is called.
     /// </param>
     /// <returns>The service collection, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
@@ -31,6 +31,16 @@ public static class FlowViewServiceExtensions
     /// this method twice with a configuration replaces the earlier one.
     /// </para>
     /// <para>
+    /// The <paramref name="configure"/> action runs eagerly, i.e. during this
+    /// call rather than on first resolution of <see cref="IViewLocator"/>.
+    /// This is required so that ViewModel lifetime registrations
+    /// (<see cref="Locating.IViewLocator.RegisterTransient{TView, TViewModel}"/>,
+    /// <see cref="Locating.IViewLocator.RegisterSingleton{TView, TViewModel}"/>)
+    /// take effect before the service provider is built; registrations added
+    /// after <c>BuildServiceProvider()</c> would be silently ignored. As a side
+    /// benefit, configuration errors fail fast at startup.
+    /// </para>
+    /// <para>
     /// The navigation service itself (<c>ElegantSeries.Flow.Core</c>) is registered
     /// separately; this method only covers the Avalonia view layer.
     /// </para>
@@ -39,8 +49,8 @@ public static class FlowViewServiceExtensions
     /// <code>
     /// services.AddFlowViews(locator =>
     /// {
-    ///     locator.Register&lt;HomeView, HomeViewModel&gt;();
-    ///     locator.Register&lt;SettingsView, SettingsViewModel&gt;();
+    ///     locator.RegisterTransient&lt;HomeView, HomeViewModel&gt;();
+    ///     locator.RegisterSingleton&lt;MenuView, MenuViewModel&gt;();
     /// });
     /// </code>
     /// </example>
@@ -54,12 +64,9 @@ public static class FlowViewServiceExtensions
         }
         else
         {
-            services.AddSingleton<IViewLocator>(_ =>
-            {
-                var locator = new ViewLocator();
-                configure(locator);
-                return locator;
-            });
+            var locator = new ViewLocator(services);
+            configure(locator);
+            services.AddSingleton<IViewLocator>(locator);
         }
 
         return services;

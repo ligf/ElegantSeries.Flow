@@ -23,16 +23,17 @@ Requires `ElegantSeries.Flow` **>= 0.1.1** (this package is version 0.1.1).
 ```csharp
 // App startup (e.g. App.axaml.cs / composition root)
 services.AddSingleton<INavigationService, NavigationService>(); // core
-services.AddTransient<HomeViewModel>();
-services.AddTransient<SettingsViewModel>();
 
 services.AddFlowViews(locator =>
 {
-    locator.Register<HomeView, HomeViewModel>();
-    locator.Register<SettingsView, SettingsViewModel>();
-    // Views needing constructor arguments:
+    // View mapping + ViewModel DI registration in one call:
+    locator.RegisterTransient<HomeView, HomeViewModel>();
+    locator.RegisterSingleton<MenuView, MenuViewModel>();
+    // Views needing constructor arguments (mapping only; register the
+    // ViewModel in DI yourself):
     // locator.Register<DashboardViewModel>(vm => new DashboardView(new DashboardTheme()));
 });
+services.AddTransient<DashboardViewModel>();
 ```
 
 ### 2. Place a host in AXAML
