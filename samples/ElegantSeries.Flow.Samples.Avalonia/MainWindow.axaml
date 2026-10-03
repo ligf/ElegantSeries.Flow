@@ -1,0 +1,15 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:flow="clr-namespace:ElegantSeries.Flow.Avalonia.Hosting;assembly=ElegantSeries.Flow.Avalonia"
+        x:Class="ElegantSeries.Flow.Samples.Avalonia.MainWindow"
+        Title="ElegantSeries.Flow.Samples.Avalonia" Width="600" Height="400">
+    <Grid RowDefinitions="Auto,*">
+        <TextBlock x:Name="ErrorText" Foreground="DarkRed" Margin="4" />
+        <Grid Grid.Row="1" ColumnDefinitions="180,*">
+        <!-- Sidebar region: menu, navigates independently -->
+        <flow:NavigationHost x:Name="SidebarHost" RegionName="Sidebar" Grid.Column="0" />
+        <!-- Main region: content pages -->
+        <flow:NavigationHost x:Name="MainHost" RegionName="MainRegion" Grid.Column="1" />
+        </Grid>
+    </Grid>
+</Window>

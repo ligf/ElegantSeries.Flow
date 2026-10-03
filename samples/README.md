@@ -6,8 +6,8 @@ in your IDE and run the sample you need.
 
 | Sample | Framework | How to run |
 |--------|-----------|------------|
-| [WpfSample](WpfSample) | WPF (`net10.0-windows`) | Open on Windows, run the project |
-| [AvaloniaSample](AvaloniaSample) | Avalonia (`net10.0`) | `dotnet run` (any OS) |
+| [ElegantSeries.Flow.Samples.WPF](ElegantSeries.Flow.Samples.WPF) | WPF (`net10.0-windows`) | Open on Windows, run the project |
+| [ElegantSeries.Flow.Samples.Avalonia](ElegantSeries.Flow.Samples.Avalonia) | Avalonia (`net10.0`) | `dotnet run` (any OS) |
 
 Both samples demonstrate the library's full feature set:
 

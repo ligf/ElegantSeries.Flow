@@ -1,0 +1,11 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.HomeView"
+             x:DataType="vm:HomeViewModel">
+    <StackPanel Margin="24" VerticalAlignment="Center">
+        <TextBlock Text="{Binding Title}" FontSize="28" Margin="0,0,0,16" />
+        <Button Content="Go to Detail" Command="{Binding GoToDetailCommand}"
+                Width="160" HorizontalAlignment="Left" />
+    </StackPanel>
+</UserControl>
