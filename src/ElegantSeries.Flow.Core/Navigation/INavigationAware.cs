@@ -6,7 +6,10 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// <remarks>
 /// <para>
 /// Lifecycle callbacks are invoked synchronously during the navigation transition.
-/// Implementations should return quickly and must not throw exceptions.
+/// Implementations should return quickly and avoid throwing: a throwing callback
+/// does not interrupt the other callbacks of the same phase, but its exception is
+/// collected and rethrown after the phase completes — a single exception as-is,
+/// multiple exceptions as an <see cref="AggregateException"/>.
 /// </para>
 /// <para>
 /// When a ViewModel implements <see cref="INavigationAwareAsync"/>, the asynchronous
