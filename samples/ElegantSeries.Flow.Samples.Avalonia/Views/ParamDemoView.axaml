@@ -5,12 +5,11 @@
              x:DataType="vm:ParamDemoViewModel">
     <StackPanel Margin="16" VerticalAlignment="Center">
         <TextBlock Text="Typed Parameters" FontSize="20" Margin="0,0,0,8" />
-        <TextBlock Text="{Binding Message, StringFormat='Current parameter: {0}'}" Margin="0,0,0,12" TextWrapping="Wrap" />
+        <TextBlock Text="Each button pushes the receiver page with a different parameter."
+                   Margin="0,0,0,12" TextWrapping="Wrap" Opacity="0.6" />
         <Button Content="Send Hello" Command="{Binding SendHelloCommand}"
                 Width="140" HorizontalAlignment="Left" Margin="0,0,0,8" />
         <Button Content="Send World" Command="{Binding SendWorldCommand}"
-                Width="140" HorizontalAlignment="Left" Margin="0,0,0,8" />
-        <Button Content="Back" Command="{Binding GoBackCommand}"
                 Width="140" HorizontalAlignment="Left" />
     </StackPanel>
 </UserControl>

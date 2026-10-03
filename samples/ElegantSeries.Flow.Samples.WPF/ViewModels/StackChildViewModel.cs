@@ -6,20 +6,13 @@ using ElegantSeries.Flow.Core.ViewModels;
 namespace ElegantSeries.Flow.Samples.WPF.ViewModels;
 
 /// <summary>
-/// Q1 demo — basic stack navigation inside one quadrant. Push alternates
-/// between this type and <see cref="StackChildViewModel"/>: navigating to
-/// the already-active type is a no-op by design, so a push must target a
-/// different type.
+/// Q1 child page: push alternates back to <see cref="StackDemoViewModel"/>.
 /// </summary>
-public sealed partial class StackDemoViewModel : BaseViewModel, INavigationAware<int>
+public sealed partial class StackChildViewModel : BaseViewModel, INavigationAware<int>
 {
     [ObservableProperty]
     private int _depth;
 
-    /// <summary>
-    /// Proves transient recreation: push, go back, push again — the id
-    /// differs because the popped page scope was disposed.
-    /// </summary>
     public string InstanceId { get; } = Guid.NewGuid().ToString("N")[..8];
 
     public void OnNavigatedTo(int parameter) => Depth = parameter;
@@ -28,7 +21,7 @@ public sealed partial class StackDemoViewModel : BaseViewModel, INavigationAware
 
     [RelayCommand]
     private Task PushDeeperAsync()
-        => NavigateToAsync<StackChildViewModel, int>(Depth + 1, "Q1");
+        => NavigateToAsync<StackDemoViewModel, int>(Depth + 1, "Q1");
 
     [RelayCommand]
     private Task GoBackAsync() => base.GoBackAsync("Q1");

@@ -6,26 +6,16 @@ using ElegantSeries.Flow.Core.ViewModels;
 namespace ElegantSeries.Flow.Samples.Avalonia.ViewModels;
 
 /// <summary>
-/// Q3 demo — strongly-typed navigation parameters: each button pushes a new
-/// page carrying a different parameter; going back reveals the previous one.
+/// Q3 demo — strongly-typed navigation parameters: each button pushes the
+/// receiver page carrying a different parameter.
 /// </summary>
-public sealed partial class ParamDemoViewModel : BaseViewModel, INavigationAware<string>
+public sealed partial class ParamDemoViewModel : BaseViewModel
 {
-    [ObservableProperty]
-    private string _message = string.Empty;
-
-    public void OnNavigatedTo(string parameter) => Message = parameter;
-
-    public void OnNavigatedFrom() { }
-
     [RelayCommand]
     private Task SendHelloAsync()
-        => NavigateToAsync<ParamDemoViewModel, string>("Hello from Q3", "Q3");
+        => NavigateToAsync<ParamReceiverViewModel, string>("Hello from Q3", "Q3");
 
     [RelayCommand]
     private Task SendWorldAsync()
-        => NavigateToAsync<ParamDemoViewModel, string>("World from Q3", "Q3");
-
-    [RelayCommand]
-    private Task GoBackAsync() => base.GoBackAsync("Q3");
+        => NavigateToAsync<ParamReceiverViewModel, string>("World from Q3", "Q3");
 }

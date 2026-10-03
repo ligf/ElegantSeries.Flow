@@ -29,6 +29,10 @@ Both samples demonstrate the library's full feature set:
    - Q5 ClearStack — `NavigationMode.ClearStack` resets to one fresh page;
    - Q6 Refresh — `refreshIfActive: true` re-runs activation on the same
      instance (id stays, activation count grows).
+
+   Note: navigating to the already-active page type is a no-op by design
+   (per MAUI-style semantics), so push demos alternate between two page
+   types rather than pushing the same type.
 4. **Typed parameters** — `NavigateToAsync<DetailViewModel, string>(...)`.
 5. **KeepAlive** — the Counter page is navigated with
    `NavigationMode.KeepAlive`: increment, navigate away and back, the count is

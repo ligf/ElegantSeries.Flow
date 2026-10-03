@@ -1,5 +1,5 @@
-<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.ClearStackDemoView"
-             x:TypeArguments="vm:ClearStackDemoViewModel"
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.ClearStackChildView"
+             x:TypeArguments="vm:ClearStackChildViewModel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -7,17 +7,15 @@
              xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
              xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.WPF.ViewModels"
              mc:Ignorable="d"
-             d:DataContext="{d:DesignInstance Type=vm:ClearStackDemoViewModel, IsDesignTimeCreatable=False}">
+             d:DataContext="{d:DesignInstance Type=vm:ClearStackChildViewModel, IsDesignTimeCreatable=False}">
     <StackPanel Margin="16" VerticalAlignment="Center">
-        <TextBlock Text="ClearStack Mode" FontSize="20" Margin="0,0,0,8" />
+        <TextBlock Text="ClearStack Child" FontSize="20" Margin="0,0,0,8" />
         <TextBlock Text="{Binding InstanceId, StringFormat='Instance: {0}'}" Margin="0,0,0,12" Opacity="0.6" />
-        <Button Content="Push Child Page" Command="{Binding PushChildCommand}"
+        <Button Content="Push Demo Page" Command="{Binding PushDemoCommand}"
                 Width="160" HorizontalAlignment="Left" Margin="0,0,0,8" />
         <Button Content="ClearStack" Command="{Binding ClearStackCommand}"
                 Width="160" HorizontalAlignment="Left" Margin="0,0,0,8" />
         <Button Content="Back" Command="{Binding GoBackCommand}"
                 Width="160" HorizontalAlignment="Left" />
-        <TextBlock Text="Push a few pages, then ClearStack: the stack resets to one fresh page."
-                   Margin="0,12,0,0" TextWrapping="Wrap" Opacity="0.6" />
     </StackPanel>
 </flow:BaseView>

@@ -5,18 +5,15 @@ using ElegantSeries.Flow.Core.ViewModels;
 namespace ElegantSeries.Flow.Samples.WPF.ViewModels;
 
 /// <summary>
-/// Q5 demo — <see cref="NavigationMode.ClearStack"/>: push a few pages, then
-/// clear the stack back to a single fresh page. Push alternates with
-/// <see cref="ClearStackChildViewModel"/> because pushing the already-active
-/// type is a no-op by design.
+/// Q5 child page: push back to the demo type, or clear the whole stack.
 /// </summary>
-public sealed partial class ClearStackDemoViewModel : BaseViewModel
+public sealed partial class ClearStackChildViewModel : BaseViewModel
 {
     public string InstanceId { get; } = Guid.NewGuid().ToString("N")[..8];
 
     [RelayCommand]
-    private Task PushChildAsync()
-        => NavigateToAsync<ClearStackChildViewModel>("Q5");
+    private Task PushDemoAsync()
+        => NavigateToAsync<ClearStackDemoViewModel>("Q5");
 
     [RelayCommand]
     private Task ClearStackAsync()

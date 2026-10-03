@@ -1,0 +1,14 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.ReplaceTargetView"
+             x:DataType="vm:ReplaceTargetViewModel">
+    <StackPanel Margin="16" VerticalAlignment="Center">
+        <TextBlock Text="Replace Target" FontSize="20" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding InstanceId, StringFormat='Instance: {0}'}" Margin="0,0,0,12" Opacity="0.6" />
+        <Button Content="Replace with Demo" Command="{Binding ReplaceWithDemoCommand}"
+                Width="160" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="Back" Command="{Binding GoBackCommand}"
+                Width="160" HorizontalAlignment="Left" />
+    </StackPanel>
+</UserControl>
