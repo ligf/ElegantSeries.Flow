@@ -148,8 +148,10 @@ dotnet add package ElegantSeries.Flow.Avalonia   # Avalonia apps
 // 1. Register views (AOT-safe: no runtime reflection)
 services.AddFlowViews(locator =>
 {
-    locator.Register<HomeView, HomeViewModel>();
-    locator.Register<DetailView, DetailViewModel>();
+    locator.RegisterTransient<HomeView, HomeViewModel>();   // view mapping + AddTransient
+    locator.RegisterTransient<DetailView, DetailViewModel>();
+    // Or map only and register the ViewModel in DI yourself:
+    // locator.Register<HomeView, HomeViewModel>();
 });
 
 // 2. Attach the host (typically in the window's code-behind)

@@ -17,7 +17,7 @@ public static class FlowViewServiceExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configure">
     /// Optional startup configuration that registers view/view-model pairs on the
-    /// locator. Runs once, when the singleton is first resolved.
+    /// locator. Runs immediately, when this method is called.
     /// </param>
     /// <returns>The service collection, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
@@ -27,8 +27,20 @@ public static class FlowViewServiceExtensions
     /// <c>TryAddSingleton</c> and never overrides an existing
     /// <see cref="IViewLocator"/> registration. With <paramref name="configure"/>,
     /// an explicit registration is added; per Microsoft DI rules the last
-    /// registration wins when <see cref="IViewLocator"/> is resolved, so calling
-    /// this method twice with a configuration replaces the earlier one.
+    /// registration wins when <see cref="IViewLocator"/> is resolved, so the
+    /// view <i>mappings</i> of a later call replace those of an earlier one.
+    /// ViewModel lifetime registrations, however, accumulate in call order
+    /// and are not rolled back by a later call.
+    /// </para>
+    /// <para>
+    /// The <paramref name="configure"/> action runs eagerly, i.e. during this
+    /// call rather than on first resolution of <see cref="IViewLocator"/>.
+    /// This is required so that ViewModel lifetime registrations
+    /// (<see cref="Locating.IViewLocator.RegisterTransient{TView, TViewModel}"/>,
+    /// <see cref="Locating.IViewLocator.RegisterSingleton{TView, TViewModel}"/>)
+    /// take effect before the service provider is built; registrations added
+    /// after <c>BuildServiceProvider()</c> would be silently ignored. As a side
+    /// benefit, configuration errors fail fast at startup.
     /// </para>
     /// <para>
     /// The navigation service itself (<c>ElegantSeries.Flow.Core</c>) is registered
@@ -39,8 +51,8 @@ public static class FlowViewServiceExtensions
     /// <code>
     /// services.AddFlowViews(locator =>
     /// {
-    ///     locator.Register&lt;HomeView, HomeViewModel&gt;();
-    ///     locator.Register&lt;SettingsView, SettingsViewModel&gt;();
+    ///     locator.RegisterTransient&lt;HomeView, HomeViewModel&gt;();
+    ///     locator.RegisterSingleton&lt;MenuView, MenuViewModel&gt;();
     /// });
     /// </code>
     /// </example>
@@ -54,12 +66,9 @@ public static class FlowViewServiceExtensions
         }
         else
         {
-            services.AddSingleton<IViewLocator>(_ =>
-            {
-                var locator = new ViewLocator();
-                configure(locator);
-                return locator;
-            });
+            var locator = new ViewLocator(services);
+            configure(locator);
+            services.AddSingleton<IViewLocator>(locator);
         }
 
         return services;

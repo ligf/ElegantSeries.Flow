@@ -1,5 +1,7 @@
 using ElegantSeries.Flow.Core.Navigation;
 using Avalonia.Controls;
+using System.Diagnostics.CodeAnalysis;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Avalonia.Locating;
 
@@ -15,6 +17,36 @@ public sealed class ViewLocator : IViewLocator
 {
     private readonly Dictionary<Type, Func<INavigationViewModel, Control>> _factories = new();
     private readonly Lock _lock = new();
+    // Held for the application's lifetime (the locator is registered as a singleton).
+    // Intentional: ViewModel registrations only happen during startup configuration,
+    // before the service provider is built.
+    private readonly IServiceCollection? _services;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ViewLocator"/> class.
+    /// </summary>
+    /// <remarks>
+    /// A directly constructed locator has no access to a service collection,
+    /// so <see cref="RegisterTransient{TView, TViewModel}"/> and
+    /// <see cref="RegisterSingleton{TView, TViewModel}"/> throw
+    /// <see cref="InvalidOperationException"/> on it. Prefer
+    /// <c>AddFlowViews(configure)</c>, which wires the service collection
+    /// automatically.
+    /// </remarks>
+    public ViewLocator()
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ViewLocator"/> class with
+    /// access to the service collection, enabling ViewModel lifetime
+    /// registration. Used by <c>AddFlowViews(configure)</c>.
+    /// </summary>
+    /// <param name="services">The service collection ViewModel registrations are written to.</param>
+    internal ViewLocator(IServiceCollection services)
+    {
+        _services = services;
+    }
 
     /// <inheritdoc />
     public void Register<TView, TViewModel>()
@@ -23,11 +55,30 @@ public sealed class ViewLocator : IViewLocator
         => Register<TViewModel>(_ => new TView());
 
     /// <inheritdoc />
+    public void RegisterTransient<TView, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>()
+        where TView : Control, new()
+        where TViewModel : class, INavigationViewModel
+    {
+        EnsureServices(nameof(RegisterTransient));
+        Register<TView, TViewModel>();
+        _services!.AddTransient<TViewModel>();
+    }
+
+    /// <inheritdoc />
+    public void RegisterSingleton<TView, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>()
+        where TView : Control, new()
+        where TViewModel : class, INavigationViewModel
+    {
+        EnsureServices(nameof(RegisterSingleton));
+        Register<TView, TViewModel>();
+        _services!.AddSingleton<TViewModel>();
+    }
+
+    /// <inheritdoc />
     public void Register<TViewModel>(Func<TViewModel, Control> viewFactory)
         where TViewModel : INavigationViewModel
     {
         ArgumentNullException.ThrowIfNull(viewFactory);
-
         // The lookup key is the ViewModel's exact runtime type, so this cast is
         // guaranteed to succeed; it only adapts the strongly-typed factory to the
         // weakly-typed dictionary without reflection.
@@ -81,6 +132,18 @@ public sealed class ViewLocator : IViewLocator
         lock (_lock)
         {
             return _factories.ContainsKey(typeof(TViewModel));
+        }
+    }
+
+    private void EnsureServices(string methodName)
+    {
+        if (_services is null)
+        {
+            throw new InvalidOperationException(
+                $"{methodName} requires the locator to be created by AddFlowViews(configure), " +
+                "which provides access to the service collection. A directly constructed ViewLocator " +
+                "can only map views: use Register<TView, TViewModel>() and register the ViewModel " +
+                "in dependency injection separately.");
         }
     }
 }

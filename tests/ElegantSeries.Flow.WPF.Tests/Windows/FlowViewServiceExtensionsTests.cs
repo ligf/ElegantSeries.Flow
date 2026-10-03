@@ -83,4 +83,103 @@ public sealed class FlowViewServiceExtensionsTests
 
         Assert.Same(services, result);
     }
+
+    [Fact]
+    public void RegisterTransient_RegistersViewModelAsTransient_AndMapsView()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowViews(views => views.RegisterTransient<TestView, StubViewModel>());
+
+        using var provider = services.BuildServiceProvider();
+        var first = provider.GetRequiredService<StubViewModel>();
+        var second = provider.GetRequiredService<StubViewModel>();
+
+        Assert.NotSame(first, second);
+        Assert.True(provider.GetRequiredService<IViewLocator>().IsRegistered<StubViewModel>());
+    }
+
+    [Fact]
+    public void RegisterSingleton_RegistersViewModelAsSingleton_AndMapsView()
+    {
+        var services = new ServiceCollection();
+        services.AddFlowViews(views => views.RegisterSingleton<TestView, StubViewModel>());
+
+        using var provider = services.BuildServiceProvider();
+        var first = provider.GetRequiredService<StubViewModel>();
+        var second = provider.GetRequiredService<StubViewModel>();
+
+        Assert.Same(first, second);
+        Assert.True(provider.GetRequiredService<IViewLocator>().IsRegistered<StubViewModel>());
+    }
+
+    [Fact]
+    public void RegisterTransient_OnDirectlyConstructedLocator_ThrowsInvalidOperationException()
+    {
+        var locator = new ViewLocator();
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => locator.RegisterTransient<TestView, StubViewModel>());
+
+        Assert.Contains("AddFlowViews", ex.Message);
+        Assert.False(locator.IsRegistered<StubViewModel>());
+    }
+
+    [Fact]
+    public void RegisterSingleton_OnDirectlyConstructedLocator_ThrowsInvalidOperationException()
+    {
+        var locator = new ViewLocator();
+
+        Assert.Throws<InvalidOperationException>(
+            () => locator.RegisterSingleton<TestView, StubViewModel>());
+    }
+
+    [Fact]
+    public void AddFlowViews_ConfigureRunsEagerly_BeforeProviderIsBuilt()
+    {
+        var services = new ServiceCollection();
+        var ran = false;
+        services.AddFlowViews(_ => ran = true);
+
+        // Eager: registrations (including ViewModel DI lifetimes) must take
+        // effect before BuildServiceProvider(), not on first resolution.
+        Assert.True(ran);
+    }
+
+    [Fact]
+    public void RegisterTransient_DuplicateMapping_ThrowsWithoutWritingDiDescriptor()
+    {
+        var services = new ServiceCollection();
+        IViewLocator? locator = null;
+        services.AddFlowViews(views =>
+        {
+            locator = views;
+            views.Register<TestView, StubViewModel>();
+        });
+        var before = services.Count;
+
+        Assert.Throws<InvalidOperationException>(
+            () => locator!.RegisterTransient<TestView, StubViewModel>());
+
+        // The view mapping threw first, so no DI descriptor was written: no half-state.
+        Assert.Equal(before, services.Count);
+        Assert.DoesNotContain(services, d => d.ServiceType == typeof(StubViewModel));
+    }
+
+    [Fact]
+    public void Register_DuplicateAfterRegisterTransient_ThrowsWithoutChangingServices()
+    {
+        var services = new ServiceCollection();
+        IViewLocator? locator = null;
+        services.AddFlowViews(views =>
+        {
+            locator = views;
+            views.RegisterTransient<TestView, StubViewModel>();
+        });
+        var before = services.Count;
+
+        Assert.Throws<InvalidOperationException>(
+            () => locator!.Register<TestView, StubViewModel>());
+
+        Assert.Equal(before, services.Count);
+    }
 }

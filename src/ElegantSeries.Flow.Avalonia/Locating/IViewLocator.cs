@@ -1,5 +1,7 @@
 using ElegantSeries.Flow.Core.Navigation;
 using Avalonia.Controls;
+using System.Diagnostics.CodeAnalysis;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Avalonia.Locating;
 
@@ -55,6 +57,73 @@ public interface IViewLocator
     /// </exception>
     void Register<TViewModel>(Func<TViewModel, Control> viewFactory)
         where TViewModel : INavigationViewModel;
+
+    /// <summary>
+    /// Registers a view type for a ViewModel type and registers the ViewModel
+    /// as <see cref="ServiceLifetime.Transient"/> in the dependency-injection
+    /// container. Equivalent to <see cref="Register{TView, TViewModel}"/> plus
+    /// <c>services.AddTransient&lt;TViewModel&gt;()</c>.
+    /// </summary>
+    /// <typeparam name="TView">The view type. Must have a public parameterless constructor (XAML requirement).</typeparam>
+    /// <typeparam name="TViewModel">The ViewModel type.</typeparam>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown if the locator was constructed directly instead of through
+    /// <c>AddFlowViews(configure)</c> and therefore has no access to the
+    /// service collection; or if a view is already registered for
+    /// <typeparamref name="TViewModel"/>.
+    /// </exception>
+    /// <remarks>
+    /// The lifetime applies to the ViewModel's service registration only.
+    /// Views are always created per ViewModel instance (and cached while the
+    /// instance is alive), independently of this lifetime.
+    /// <para>
+    /// There is intentionally no <c>RegisterScoped</c>: the navigation service
+    /// creates a new <see cref="IServiceScope"/> per page, so a scoped
+    /// ViewModel would behave exactly like a transient one. Use scoped
+    /// lifetime for the ViewModel's <i>dependencies</i> (DbContext, drafts,
+    /// per-page caches) instead.
+    /// </para>
+    /// <para>
+    /// Must be called before the service provider is built (i.e. during
+    /// <c>AddFlowViews</c> startup configuration). Registrations added to the
+    /// service collection afterwards are silently ignored by Microsoft DI.
+    /// </para>
+    /// </remarks>
+    void RegisterTransient<TView, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>()
+        where TView : Control, new()
+        where TViewModel : class, INavigationViewModel;
+
+    /// <summary>
+    /// Registers a view type for a ViewModel type and registers the ViewModel
+    /// as <see cref="ServiceLifetime.Singleton"/> in the dependency-injection
+    /// container. Equivalent to <see cref="Register{TView, TViewModel}"/> plus
+    /// <c>services.AddSingleton&lt;TViewModel&gt;()</c>.
+    /// </summary>
+    /// <typeparam name="TView">The view type. Must have a public parameterless constructor (XAML requirement).</typeparam>
+    /// <typeparam name="TViewModel">The ViewModel type.</typeparam>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown if the locator was constructed directly instead of through
+    /// <c>AddFlowViews(configure)</c> and therefore has no access to the
+    /// service collection; or if a view is already registered for
+    /// <typeparamref name="TViewModel"/>.
+    /// </exception>
+    /// <remarks>
+    /// The lifetime applies to the ViewModel's service registration only.
+    /// Views are always created per ViewModel instance (and cached while the
+    /// instance is alive), independently of this lifetime.
+    /// <para>
+    /// A singleton ViewModel keeps its state across all navigations. Its
+    /// constructor must not depend on scoped services.
+    /// </para>
+    /// <para>
+    /// Must be called before the service provider is built (i.e. during
+    /// <c>AddFlowViews</c> startup configuration). Registrations added to the
+    /// service collection afterwards are silently ignored by Microsoft DI.
+    /// </para>
+    /// </remarks>
+    void RegisterSingleton<TView, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>()
+        where TView : Control, new()
+        where TViewModel : class, INavigationViewModel;
 
     /// <summary>
     /// Creates the view registered for the runtime type of <paramref name="viewModel"/>.
