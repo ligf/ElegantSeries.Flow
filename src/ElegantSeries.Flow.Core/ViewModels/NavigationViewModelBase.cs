@@ -15,7 +15,8 @@ namespace ElegantSeries.Flow.Core.ViewModels;
 /// the <see cref="Navigation"/> property plus protected navigation helpers.
 /// </para>
 /// <para>
-/// Prefer <see cref="BaseViewModel"/> when you use CommunityToolkit.Mvvm source
+/// Prefer <c>ElegantSeries.Flow.Mvvm.BaseViewModel</c> (in the optional
+/// <c>ElegantSeries.Flow.Mvvm</c> package) when you use CommunityToolkit.Mvvm source
 /// generation (<c>[ObservableProperty]</c> and friends); prefer this class when the
 /// toolkit dependency is unwanted.
 /// </para>

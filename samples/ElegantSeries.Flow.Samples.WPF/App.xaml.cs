@@ -2,7 +2,7 @@ using System.Windows;
 using ElegantSeries.Flow.Core.Extensions;
 using ElegantSeries.Flow.WPF.Extensions;
 using Microsoft.Extensions.DependencyInjection;
-using ElegantSeries.Flow.Samples.WPF.ViewModels;
+using ElegantSeries.Flow.Samples.Shared;
 using ElegantSeries.Flow.Samples.WPF.Views;
 
 namespace ElegantSeries.Flow.Samples.WPF;
@@ -26,6 +26,11 @@ public partial class App : Application
         // services, ...).
         services.AddTransient<HomeViewModel>();
         services.AddTransient<DetailViewModel>();
+        services.AddTransient<AsyncDisposeDemoViewModel>();
+        services.AddTransient<FactoryDemoViewModel>();
+        // DI only: deliberately no view registered — navigating to it
+        // exercises the host's view-creation-failure path.
+        services.AddTransient<UnregisteredDemoViewModel>();
 
         // AOT-safe view registration: no runtime reflection.
         services.AddFlowViews(views =>
@@ -53,9 +58,26 @@ public partial class App : Application
             views.RegisterTransient<ClearStackDemoView, ClearStackDemoViewModel>();
             views.RegisterTransient<ClearStackChildView, ClearStackChildViewModel>();
             views.RegisterTransient<RefreshDemoView, RefreshDemoViewModel>();
+            views.RegisterTransient<AsyncDisposeView, AsyncDisposeDemoViewModel>();
+            // Custom view factory: the factory overload does not touch DI, so
+            // the ViewModel needs its own DI registration (see above). Use a
+            // factory when the view needs constructor arguments or other
+            // custom construction logic.
+            views.Register<FactoryDemoViewModel>(_ =>
+            {
+                var view = new FactoryDemoView();
+                view.ApplyFactoryBadge();
+                return view;
+            });
+            views.RegisterTransient<ViewFailureView, ViewFailureViewModel>();
         });
 
         Services = services.BuildServiceProvider();
+
+        // Platform-specific wiring: the shared MenuViewModel only raises
+        // OpenSecondWindowRequested; creating the actual Window is the host's job.
+        Services.GetRequiredService<MenuViewModel>().OpenSecondWindowRequested +=
+            () => new SecondWindow().Show();
 
         base.OnStartup(e);
     }

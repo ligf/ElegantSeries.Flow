@@ -6,8 +6,9 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// <remarks>
 /// <para>
 /// Implement this interface — usually by deriving from
-/// <see cref="ViewModels.NavigationViewModelBase"/> (no MVVM toolkit dependency) or
-/// <see cref="ViewModels.BaseViewModel"/> (CommunityToolkit.Mvvm) — to make a ViewModel
+/// <see cref="ViewModels.NavigationViewModelBase"/> (no MVVM toolkit dependency, in this
+/// package) or <c>ElegantSeries.Flow.Mvvm.BaseViewModel</c> (CommunityToolkit.Mvvm, in the
+/// optional <c>ElegantSeries.Flow.Mvvm</c> package) — to make a ViewModel
 /// navigable via <see cref="INavigationService.NavigateToAsync{TViewModel}"/>.
 /// </para>
 /// <para>

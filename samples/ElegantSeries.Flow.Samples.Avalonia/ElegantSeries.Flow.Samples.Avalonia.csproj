@@ -6,11 +6,17 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- The framework's AOT story is proven by publishing this sample as
+         Native AOT (see CI). WPF cannot be NativeAOT-published (framework
+         limitation), so the Avalonia sample carries the AOT proof. -->
+    <PublishAot>true</PublishAot>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Core\ElegantSeries.Flow.Core.csproj" />
+    <ProjectReference Include="..\..\src\ElegantSeries.Flow.Mvvm\ElegantSeries.Flow.Mvvm.csproj" />
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Avalonia\ElegantSeries.Flow.Avalonia.csproj" />
+    <ProjectReference Include="..\ElegantSeries.Flow.Samples.Shared\ElegantSeries.Flow.Samples.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>

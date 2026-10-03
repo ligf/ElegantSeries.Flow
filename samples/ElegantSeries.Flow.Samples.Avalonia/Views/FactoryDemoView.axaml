@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.FactoryDemoView"
+             x:DataType="vm:FactoryDemoViewModel">
+    <StackPanel Margin="24" VerticalAlignment="Center">
+        <TextBlock Text="Custom Factory" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="This view was not created with new TView(). It was built by a custom factory registered via views.Register&lt;TViewModel&gt;(Func&lt;TViewModel, TView&gt;). Use a factory when the view needs constructor arguments or other custom construction logic."
+                   TextWrapping="Wrap" Margin="0,0,0,12" Opacity="0.7" />
+        <TextBlock x:Name="FactoryBadgeText" FontSize="16" Foreground="DarkGreen" TextWrapping="Wrap" />
+    </StackPanel>
+</UserControl>

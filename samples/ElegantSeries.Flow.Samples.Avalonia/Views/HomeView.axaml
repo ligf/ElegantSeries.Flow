@@ -1,6 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
              x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.HomeView"
              x:DataType="vm:HomeViewModel">
     <StackPanel Margin="24" VerticalAlignment="Center">

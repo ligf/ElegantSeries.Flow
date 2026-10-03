@@ -80,7 +80,7 @@ var windowNavigation = new NavigationService(windowScope.ServiceProvider);
 ### 2. Write a ViewModel
 
 ```csharp
-using ElegantSeries.Flow.Core.ViewModels;
+using ElegantSeries.Flow.Mvvm;
 using ElegantSeries.Flow.Core.Navigation;
 
 public partial class HomeViewModel : BaseViewModel, INavigationAware
@@ -97,9 +97,10 @@ public partial class HomeViewModel : BaseViewModel, INavigationAware
 page and cleared when it is navigated away from, so the `protected NavigateToAsync` /
 `GoBackAsync` helpers can be called directly from the ViewModel.
 
-`BaseViewModel` builds on CommunityToolkit.Mvvm. If you don't want the toolkit
-dependency, derive from `NavigationViewModelBase` instead — same navigation plumbing
-with a plain `INotifyPropertyChanged` implementation.
+`BaseViewModel` lives in the optional `ElegantSeries.Flow.Mvvm` package and builds on
+CommunityToolkit.Mvvm. If you don't want the toolkit dependency, derive from
+`NavigationViewModelBase` (in the core `ElegantSeries.Flow` package) instead — same
+navigation plumbing with a plain `INotifyPropertyChanged` implementation.
 
 Register your ViewModels with DI (transient is the typical lifetime):
 
@@ -127,8 +128,20 @@ var current = navigation.GetCurrentViewModel();
 ElegantSeries.Flow is UI-agnostic: it manages ViewModels, and your platform layer maps the
 active ViewModel to a View. The typical pattern is a `ContentControl`-style host bound to
 `GetCurrentViewModel()` and refreshed on the `RegionNavigated` event. For AOT-safe
-ViewModel→View mapping, decorate ViewModels with `[AotRoute(typeof(DetailView))]` from
-the `ElegantSeries.Flow.Core.Routing` namespace.
+ViewModel→View mapping, register views explicitly via `views.Register` /
+`views.RegisterTransient` / `views.RegisterSingleton` inside `services.AddFlowViews(...)`
+— no runtime reflection, no naming conventions. (The `[AotRoute]` attribute in
+`ElegantSeries.Flow.Core.Routing` is a reserved compile-time contract for a future source
+generator; it is not consumed at runtime today.)
+
+## Packages
+
+| Package | Contents |
+|---------|----------|
+| `ElegantSeries.Flow` | Core: navigation service, regions, page DI scopes, KeepAlive cache, guards, lifecycle — no MVVM toolkit dependency |
+| `ElegantSeries.Flow.Mvvm` | Optional CommunityToolkit.Mvvm integration: `BaseViewModel` (`ElegantSeries.Flow.Mvvm`) |
+| `ElegantSeries.Flow.WPF` | WPF host: `NavigationHost`, `BaseView<TViewModel>`, `ViewLocator` |
+| `ElegantSeries.Flow.Avalonia` | Avalonia host: `NavigationHost`, `BaseView<TViewModel>`, `ViewLocator` |
 
 ## UI integration
 
@@ -332,8 +345,11 @@ are serialized with an async lock; shared state is guarded by a dedicated lock.
 The library sets `IsAotCompatible=true` and annotates generic ViewModel parameters with
 `[DynamicallyAccessedMembers(PublicConstructors)]`. ViewModels are resolved through
 `IServiceProvider` — register them in DI and avoid `Activator.CreateInstance` at the
-app layer. The `[AotRoute]` attribute exists for source-generator-based View resolution
-in platform-specific layers.
+app layer. The `[AotRoute]` attribute is a reserved compile-time contract for a future
+source generator; it is not consumed at runtime today. Note: the WPF sample app itself
+cannot be NativeAOT-published (WPF as a framework does not support Native AOT); the
+Avalonia sample has `PublishAot=true` in its csproj as the proof of the
+framework's AOT story (a Native AOT publish smoke test in CI is planned).
 
 ## API overview
 

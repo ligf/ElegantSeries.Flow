@@ -32,11 +32,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
-  <!-- net10.0 leg: logic tests, runnable on Linux. -->
+  <!-- net10.0 leg: logic tests, runnable on Linux. Shared host internals are
+       exercised through InternalsVisibleTo (see Core/Properties/AssemblyInfo.cs). -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
-    <Compile Include="..\..\src\ElegantSeries.Flow.WPF\Locating\ViewRegistry.cs" Link="SharedSources\ViewRegistry.cs" />
-    <Compile Include="..\..\src\ElegantSeries.Flow.WPF\Hosting\NavigationHostController.cs" Link="SharedSources\NavigationHostController.cs" />
-    <Compile Include="..\..\src\ElegantSeries.Flow.WPF\Threading\IDispatcher.cs" Link="SharedSources\IDispatcher.cs" />
     <Compile Include="Shared\TestDoubles.cs" />
     <Compile Include="Logic\*.cs" />
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Core\ElegantSeries.Flow.Core.csproj" />

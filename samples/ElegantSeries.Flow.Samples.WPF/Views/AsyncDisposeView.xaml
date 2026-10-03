@@ -1,0 +1,22 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.AsyncDisposeView"
+             x:TypeArguments="vm:AsyncDisposeDemoViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:AsyncDisposeDemoViewModel, IsDesignTimeCreatable=False}">
+    <StackPanel Margin="24" VerticalAlignment="Center">
+        <TextBlock Text="Async Dispose" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="This page implements IAsyncDisposable only (no IDisposable). When you leave, the framework disposes its page scope through the async path."
+                   TextWrapping="Wrap" Margin="0,0,0,12" Opacity="0.7" />
+        <TextBlock Text="{Binding InstanceId, StringFormat='Instance: {0}'}" Margin="0,0,0,4" />
+        <TextBlock Text="{Binding AsyncDisposals, StringFormat='Async disposals so far: {0}'}" Margin="0,0,0,12" />
+        <Button Content="Open Home" Command="{Binding OpenHomeCommand}"
+                Width="200" HorizontalAlignment="Left" Margin="0,0,0,12" />
+        <TextBlock Text="Script: note the InstanceId, open Home, come back here — the InstanceId changed and 'Async disposals' grew by 1, proving the old instance was disposed asynchronously."
+                   TextWrapping="Wrap" Opacity="0.6" />
+    </StackPanel>
+</flow:BaseView>

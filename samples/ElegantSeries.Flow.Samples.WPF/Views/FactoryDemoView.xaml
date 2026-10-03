@@ -1,0 +1,17 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.FactoryDemoView"
+             x:TypeArguments="vm:FactoryDemoViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:FactoryDemoViewModel, IsDesignTimeCreatable=False}">
+    <StackPanel Margin="24" VerticalAlignment="Center">
+        <TextBlock Text="Custom Factory" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="This view was not created with new TView(). It was built by a custom factory registered via views.Register&lt;TViewModel&gt;(Func&lt;TViewModel, TView&gt;). Use a factory when the view needs constructor arguments or other custom construction logic."
+                   TextWrapping="Wrap" Margin="0,0,0,12" Opacity="0.7" />
+        <TextBlock x:Name="FactoryBadgeText" FontSize="16" Foreground="DarkGreen" TextWrapping="Wrap" />
+    </StackPanel>
+</flow:BaseView>

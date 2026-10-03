@@ -1,9 +1,9 @@
 using Avalonia;
 using Avalonia.Controls;
+using ElegantSeries.Flow.Core.Hosting;
 using ElegantSeries.Flow.Core.Navigation;
 using ElegantSeries.Flow.Avalonia.Locating;
 using ElegantSeries.Flow.Avalonia.Threading;
-using System.Runtime.CompilerServices;
 
 namespace ElegantSeries.Flow.Avalonia.Hosting;
 
@@ -18,16 +18,22 @@ namespace ElegantSeries.Flow.Avalonia.Hosting;
 /// and shows it as <see cref="ContentControl.Content"/>.
 /// </para>
 /// <para>
+/// Region filtering, UI-thread marshaling, view caching, and failure handling are
+/// implemented by the shared <c>NavigationHostController&lt;Control&gt;</c> in
+/// <c>ElegantSeries.Flow.Core</c> (the same logic the WPF host uses); this class
+/// only adapts it to Avalonia's property system and visual-tree lifetime.
+/// </para>
+/// <para>
 /// Threading: the navigation service may raise <c>RegionNavigated</c> on any thread
 /// (library code uses <c>ConfigureAwait(false)</c>). All UI work is marshalled to the
 /// UI thread through <see cref="IDispatcher"/>; view creation therefore always happens
 /// on the UI thread. The default constructor uses <see cref="AvaloniaDispatcher"/>.
 /// </para>
 /// <para>
-/// View caching: views are cached in a <see cref="ConditionalWeakTable{TKey, TValue}"/>
-/// keyed by ViewModel instance, so a view's lifetime is bound to its ViewModel's.
-/// A KeepAlive ViewModel automatically reuses its view; once a non-KeepAlive ViewModel
-/// is released by the navigation service, its view becomes eligible for garbage
+/// View caching: views are cached per ViewModel instance with a weak reference to
+/// the ViewModel, so a view's lifetime is bound to its ViewModel's. A KeepAlive
+/// ViewModel automatically reuses its view; once a non-KeepAlive ViewModel is
+/// released by the navigation service, its view becomes eligible for garbage
 /// collection with no manual cleanup.
 /// </para>
 /// <para>
@@ -66,8 +72,7 @@ public class NavigationHost : ContentControl, IDisposable
     public static readonly StyledProperty<IViewLocator?> ViewLocatorProperty =
         AvaloniaProperty.Register<NavigationHost, IViewLocator?>(nameof(ViewLocator));
 
-    private readonly IDispatcher _dispatcher;
-    private readonly ConditionalWeakTable<INavigationViewModel, Control> _viewCache = new();
+    private readonly NavigationHostController<Control> _controller;
     private INavigationService? _subscribedService;
     private bool _disposed;
 
@@ -101,7 +106,17 @@ public class NavigationHost : ContentControl, IDisposable
     public NavigationHost(IDispatcher dispatcher)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
-        _dispatcher = dispatcher;
+
+        _controller = new NavigationHostController<Control>(
+            dispatcher,
+            regionNameProvider: () => _regionName,
+            viewFactory: CreateView,
+            showView: (view, viewModel) =>
+            {
+                view.DataContext = viewModel;
+                Content = view;
+            },
+            onViewCreationFailed: (viewModel, exception) => OnViewCreationFailed(viewModel, exception));
     }
 
     /// <summary>
@@ -153,7 +168,8 @@ public class NavigationHost : ContentControl, IDisposable
         }
 
         _disposed = true;
-        Unsubscribe();
+        _controller.Detach();
+        _subscribedService = null;
     }
 
     /// <summary>
@@ -207,7 +223,20 @@ public class NavigationHost : ContentControl, IDisposable
         base.OnDetachedFromVisualTree(e);
         // The host may be discarded while the (singleton) service lives on;
         // dropping the subscription here prevents the service from keeping the host alive.
-        Unsubscribe();
+        _controller.Detach();
+        _subscribedService = null;
+    }
+
+    private Control CreateView(INavigationViewModel viewModel)
+    {
+        if (ViewLocator is null)
+        {
+            throw new InvalidOperationException(
+                $"NavigationHost for region '{_regionName}' cannot display a page because {nameof(ViewLocator)} is not set. " +
+                $"Assign an {nameof(IViewLocator)} before navigation occurs.");
+        }
+
+        return ViewLocator.CreateView(viewModel);
     }
 
     private void UpdateSubscription()
@@ -223,84 +252,15 @@ public class NavigationHost : ContentControl, IDisposable
             return;
         }
 
-        Unsubscribe();
-
+        _subscribedService = service;
         if (service is not null)
         {
-            service.RegionNavigated += OnRegionNavigated;
-            _subscribedService = service;
-        }
-    }
-
-    private void Unsubscribe()
-    {
-        if (_subscribedService is not null)
-        {
-            _subscribedService.RegionNavigated -= OnRegionNavigated;
-            _subscribedService = null;
-        }
-    }
-
-    private void OnRegionNavigated(string regionName, INavigationViewModel viewModel)
-    {
-        // The navigation service may raise this on any thread: compare against the
-        // mirrored _regionName field, never the StyledProperty (see the field docs).
-        if (!string.Equals(regionName, _regionName, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        if (_dispatcher.CheckAccess())
-        {
-            ApplyNavigation(viewModel);
+            // Attach replaces any previous subscription inside the controller.
+            _controller.Attach(service);
         }
         else
         {
-            _dispatcher.Post(() => ApplyNavigation(viewModel));
+            _controller.Detach();
         }
-    }
-
-    /// <summary>
-    /// Switches the displayed content to the view for <paramref name="viewModel"/>.
-    /// Must be called on the UI thread.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="ContentControl.Content"/> is assigned only after the view was
-    /// successfully created and bound, so a throwing view factory can never leave
-    /// the host in a half-updated state: the previous content stays visible and the
-    /// failure is reported through <see cref="OnViewCreationFailed"/>.
-    /// </remarks>
-    private void ApplyNavigation(INavigationViewModel viewModel)
-    {
-        Control view;
-        try
-        {
-            var locator = ViewLocator
-                ?? throw new InvalidOperationException(
-                    $"NavigationHost for region '{RegionName}' cannot display a page because {nameof(ViewLocator)} is not set. " +
-                    $"Assign an {nameof(IViewLocator)} before navigation occurs.");
-
-            if (!_viewCache.TryGetValue(viewModel, out var cached))
-            {
-                // User code (view factory) may throw: nothing is cached below,
-                // so the host keeps showing the previous page and a later
-                // navigation retries creation instead of poisoning the cache.
-                cached = locator.CreateView(viewModel);
-                cached.DataContext = viewModel;
-                _viewCache.Add(viewModel, cached);
-            }
-
-            view = cached;
-        }
-        catch (Exception ex)
-        {
-            // One bad view must not corrupt the host: keep showing the previous
-            // content and report the failure through the hook (see remarks above
-            // for why it is not rethrown).
-            OnViewCreationFailed(viewModel, ex);
-            return;
-        }
-
-        Content = view;
     }
 }

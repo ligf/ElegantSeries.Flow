@@ -5,7 +5,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
-             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.WPF.ViewModels"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:MenuViewModel, IsDesignTimeCreatable=False}">
     <StackPanel Margin="12">
@@ -17,7 +17,10 @@
         <Button Content="Guarded" Command="{Binding GoGuardedCommand}" Margin="0,0,0,8" />
         <Button Content="Async Lifecycle" Command="{Binding GoAsyncDemoCommand}" Margin="0,0,0,8" />
         <Button Content="Clear Cache" Command="{Binding GoCacheDemoCommand}" Margin="0,0,0,8" />
-        <Button Content="Cancellation" Command="{Binding GoCancelDemoCommand}" Margin="0,0,0,12" />
+        <Button Content="Cancellation" Command="{Binding GoCancelDemoCommand}" Margin="0,0,0,8" />
+        <Button Content="Async Dispose" Command="{Binding GoAsyncDisposeDemoCommand}" Margin="0,0,0,8" />
+        <Button Content="Custom Factory" Command="{Binding GoFactoryDemoCommand}" Margin="0,0,0,8" />
+        <Button Content="View Failure" Command="{Binding GoViewFailureDemoCommand}" Margin="0,0,0,12" />
         <TextBlock Text="Quadrants" Opacity="0.6" Margin="0,0,0,4" />
         <Button Content="Quadrants Demo (Q1-Q6)" Command="{Binding GoQuadrantsCommand}" Margin="0,0,0,12" />
         <Button Content="Second window" Command="{Binding OpenSecondWindowCommand}" />

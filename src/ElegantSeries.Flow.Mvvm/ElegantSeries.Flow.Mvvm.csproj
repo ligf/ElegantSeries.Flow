@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- NuGet package metadata -->
+    <PackageId>ElegantSeries.Flow.Mvvm</PackageId>
+    <Version>0.1.1</Version>
+    <Authors>ligf</Authors>
+    <Description>Optional CommunityToolkit.Mvvm integration for ElegantSeries.Flow: a toolkit-based ViewModel base class on top of the toolkit-independent navigation core.</Description>
+    <PackageTags>navigation;mvvm;viewmodel;aot;trimming;communitytoolkit</PackageTags>
+    <PackageProjectUrl>https://github.com/ligf/ElegantSeries.Flow</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ligf/ElegantSeries.Flow</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!-- Documentation and symbols -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <!-- NU1902: known moderate vulnerability in Microsoft.Build.Tasks.Git, a build-time-only
+         SourceLink dependency (PrivateAssets=All); it never ships to package consumers. -->
+    <NoWarn>$(NoWarn);NU1902</NoWarn>
+    <ContinuousIntegrationBuild Condition="'$(ContinuousIntegrationBuild)' == ''">false</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Local development uses a project reference.
+      Before publishing to NuGet, replace with:
+        <PackageReference Include="ElegantSeries.Flow" Version="0.1.1" />
+    -->
+    <ProjectReference Include="..\ElegantSeries.Flow.Core\ElegantSeries.Flow.Core.csproj" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.401" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

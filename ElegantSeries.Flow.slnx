@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/ElegantSeries.Flow.Core/ElegantSeries.Flow.Core.csproj" />
+    <Project Path="src/ElegantSeries.Flow.Mvvm/ElegantSeries.Flow.Mvvm.csproj" />
     <Project Path="src/ElegantSeries.Flow.WPF/ElegantSeries.Flow.WPF.csproj" />
     <Project Path="src/ElegantSeries.Flow.Avalonia/ElegantSeries.Flow.Avalonia.csproj" />
   </Folder>
@@ -12,5 +13,6 @@
   <Folder Name="/samples/">
     <Project Path="samples/ElegantSeries.Flow.Samples.WPF/ElegantSeries.Flow.Samples.WPF.csproj" />
     <Project Path="samples/ElegantSeries.Flow.Samples.Avalonia/ElegantSeries.Flow.Samples.Avalonia.csproj" />
+    <Project Path="samples/ElegantSeries.Flow.Samples.Shared/ElegantSeries.Flow.Samples.Shared.csproj" />
   </Folder>
 </Solution>

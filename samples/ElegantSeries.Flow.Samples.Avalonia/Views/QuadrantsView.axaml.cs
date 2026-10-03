@@ -1,7 +1,7 @@
 using ElegantSeries.Flow.Avalonia.Hosting;
 using ElegantSeries.Flow.Avalonia.Locating;
 using ElegantSeries.Flow.Core.Navigation;
-using ElegantSeries.Flow.Samples.Avalonia.ViewModels;
+using ElegantSeries.Flow.Samples.Shared;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;
