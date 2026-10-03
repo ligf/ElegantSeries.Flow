@@ -16,6 +16,9 @@ namespace ElegantSeries.Flow.WPF.Locating;
 public sealed class ViewLocator : IViewLocator
 {
     private readonly ViewRegistry<FrameworkElement> _registry = new();
+    // Held for the application's lifetime (the locator is registered as a singleton).
+    // Intentional: ViewModel registrations only happen during startup configuration,
+    // before the service provider is built.
     private readonly IServiceCollection? _services;
 
     /// <summary>

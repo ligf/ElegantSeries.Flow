@@ -144,4 +144,42 @@ public sealed class FlowViewServiceExtensionsTests
         // effect before BuildServiceProvider(), not on first resolution.
         Assert.True(ran);
     }
+
+    [Fact]
+    public void RegisterTransient_DuplicateMapping_ThrowsWithoutWritingDiDescriptor()
+    {
+        var services = new ServiceCollection();
+        IViewLocator? locator = null;
+        services.AddFlowViews(views =>
+        {
+            locator = views;
+            views.Register<TestView, StubViewModel>();
+        });
+        var before = services.Count;
+
+        Assert.Throws<InvalidOperationException>(
+            () => locator!.RegisterTransient<TestView, StubViewModel>());
+
+        // The view mapping threw first, so no DI descriptor was written: no half-state.
+        Assert.Equal(before, services.Count);
+        Assert.DoesNotContain(services, d => d.ServiceType == typeof(StubViewModel));
+    }
+
+    [Fact]
+    public void Register_DuplicateAfterRegisterTransient_ThrowsWithoutChangingServices()
+    {
+        var services = new ServiceCollection();
+        IViewLocator? locator = null;
+        services.AddFlowViews(views =>
+        {
+            locator = views;
+            views.RegisterTransient<TestView, StubViewModel>();
+        });
+        var before = services.Count;
+
+        Assert.Throws<InvalidOperationException>(
+            () => locator!.Register<TestView, StubViewModel>());
+
+        Assert.Equal(before, services.Count);
+    }
 }
