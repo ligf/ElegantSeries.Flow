@@ -31,11 +31,15 @@ public partial class App : Application
         services.AddTransient<CancelDemoViewModel>();
         services.AddTransient<QuadrantsViewModel>();
         services.AddTransient<StackDemoViewModel>();
+        services.AddTransient<StackChildViewModel>();
         services.AddTransient<KeepAliveDemoViewModel>();
         services.AddTransient<KeepAliveTempViewModel>();
         services.AddTransient<ParamDemoViewModel>();
+        services.AddTransient<ParamReceiverViewModel>();
         services.AddTransient<ReplaceDemoViewModel>();
+        services.AddTransient<ReplaceTargetViewModel>();
         services.AddTransient<ClearStackDemoViewModel>();
+        services.AddTransient<ClearStackChildViewModel>();
         services.AddTransient<RefreshDemoViewModel>();
 
         // AOT-safe view registration: no runtime reflection.
@@ -51,11 +55,15 @@ public partial class App : Application
             views.Register<CancelDemoView, CancelDemoViewModel>();
             views.Register<QuadrantsView, QuadrantsViewModel>();
             views.Register<StackDemoView, StackDemoViewModel>();
+            views.Register<StackChildView, StackChildViewModel>();
             views.Register<KeepAliveDemoView, KeepAliveDemoViewModel>();
             views.Register<KeepAliveTempView, KeepAliveTempViewModel>();
             views.Register<ParamDemoView, ParamDemoViewModel>();
+            views.Register<ParamReceiverView, ParamReceiverViewModel>();
             views.Register<ReplaceDemoView, ReplaceDemoViewModel>();
+            views.Register<ReplaceTargetView, ReplaceTargetViewModel>();
             views.Register<ClearStackDemoView, ClearStackDemoViewModel>();
+            views.Register<ClearStackChildView, ClearStackChildViewModel>();
             views.Register<RefreshDemoView, RefreshDemoViewModel>();
         });
 

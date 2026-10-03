@@ -6,21 +6,19 @@ namespace ElegantSeries.Flow.Samples.Avalonia.ViewModels;
 
 /// <summary>
 /// Q4 demo — <see cref="NavigationMode.Replace"/>: the current page is
-/// swapped for a new one without growing the stack. The instance id proves
-/// a new page was created; going back is a no-op when nothing is below.
+/// swapped for the target type without growing the stack. Replace targets
+/// a different type because replacing with the already-active type is a
+/// no-op by design. The instance id proves a new page was created.
 /// </summary>
 public sealed partial class ReplaceDemoViewModel : BaseViewModel
 {
     public string InstanceId { get; } = Guid.NewGuid().ToString("N")[..8];
 
     [RelayCommand]
-    private Task ReplaceSelfAsync()
-        => NavigateToAsync<ReplaceDemoViewModel>("Q4", NavigationMode.Replace);
+    private Task ReplaceWithTargetAsync()
+        => NavigateToAsync<ReplaceTargetViewModel>("Q4", NavigationMode.Replace);
 
     [RelayCommand]
-    private Task PushSelfAsync()
-        => NavigateToAsync<ReplaceDemoViewModel>("Q4");
-
-    [RelayCommand]
-    private Task GoBackAsync() => base.GoBackAsync("Q4");
+    private Task PushTargetAsync()
+        => NavigateToAsync<ReplaceTargetViewModel>("Q4");
 }

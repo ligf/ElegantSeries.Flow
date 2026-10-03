@@ -4,9 +4,16 @@
              xmlns:flow="clr-namespace:ElegantSeries.Flow.Avalonia.Hosting;assembly=ElegantSeries.Flow.Avalonia"
              x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.QuadrantsView"
              x:DataType="vm:QuadrantsViewModel">
-    <Grid RowDefinitions="Auto,*">
+    <Grid RowDefinitions="Auto,Auto,*">
         <TextBlock Text="{Binding Title}" FontSize="20" Margin="8,4" />
-        <Grid Grid.Row="1" RowDefinitions="*,*" ColumnDefinitions="*,*,*">
+        <StackPanel Orientation="Horizontal" Grid.Row="1" Margin="8,0,8,4" VerticalAlignment="Center">
+            <TextBlock Text="External control → Q1:" VerticalAlignment="Center" Opacity="0.6" Margin="0,0,8,0" />
+            <Button Content="Push Q1" Command="{Binding ExternalPushQ1Command}" Width="90" Margin="0,0,8,0" />
+            <Button Content="Back Q1" Command="{Binding ExternalBackQ1Command}" Width="90" Margin="0,0,8,0" />
+            <TextBlock Text="{Binding ExternalStatus}" VerticalAlignment="Center"
+                       FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+        </StackPanel>
+        <Grid Grid.Row="2" RowDefinitions="*,*" ColumnDefinitions="*,*,*">
             <Grid Grid.Row="0" Grid.Column="0" RowDefinitions="Auto,*">
                 <TextBlock Text="Q1 · Stack" Opacity="0.6" Margin="8,0" />
                 <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">

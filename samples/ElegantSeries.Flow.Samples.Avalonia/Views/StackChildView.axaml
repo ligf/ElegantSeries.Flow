@@ -1,17 +1,15 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
-             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.StackDemoView"
-             x:DataType="vm:StackDemoViewModel">
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.StackChildView"
+             x:DataType="vm:StackChildViewModel">
     <StackPanel Margin="16" VerticalAlignment="Center">
-        <TextBlock Text="Navigation Stack" FontSize="20" Margin="0,0,0,8" />
+        <TextBlock Text="Navigation Stack (Child)" FontSize="20" Margin="0,0,0,8" />
         <TextBlock Text="{Binding Depth, StringFormat='Depth: {0}'}" Margin="0,0,0,4" />
         <TextBlock Text="{Binding InstanceId, StringFormat='Instance: {0}'}" Margin="0,0,0,12" Opacity="0.6" />
         <Button Content="Push Deeper" Command="{Binding PushDeeperCommand}"
                 Width="140" HorizontalAlignment="Left" Margin="0,0,0,8" />
         <Button Content="Back" Command="{Binding GoBackCommand}"
                 Width="140" HorizontalAlignment="Left" />
-        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap"
-                   FontSize="12" Opacity="0.6" />
     </StackPanel>
 </UserControl>
