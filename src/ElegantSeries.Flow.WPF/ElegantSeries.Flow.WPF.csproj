@@ -34,14 +34,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!--
-      Local development uses a project reference.
-      Before publishing to NuGet, replace with:
-        <PackageReference Include="ElegantSeries.Flow" Version="0.1.1" />
-    -->
     <ProjectReference Include="../ElegantSeries.Flow.Core/ElegantSeries.Flow.Core.csproj" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.401" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>

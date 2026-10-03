@@ -6,19 +6,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsAotCompatible>true</IsAotCompatible>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- Sample infrastructure: never packed or published to NuGet. -->
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <!--
-      Local development uses project references.
-      The samples are not published to NuGet, so no PackageReference
-      swap is needed here.
-    -->
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Core\ElegantSeries.Flow.Core.csproj" />
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Mvvm\ElegantSeries.Flow.Mvvm.csproj" />
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
 
 </Project>
