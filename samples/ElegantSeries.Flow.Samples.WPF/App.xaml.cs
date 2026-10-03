@@ -70,7 +70,6 @@ public partial class App : Application
                 return view;
             });
             views.RegisterTransient<ViewFailureView, ViewFailureViewModel>();
->>>>>>> adc9780 (Samples: fill demo gaps (IAsyncDisposable, ClearAllCache, plain guard, custom factory, view failure); converge App registrations to RegisterTransient/Singleton)
         });
 
         Services = services.BuildServiceProvider();

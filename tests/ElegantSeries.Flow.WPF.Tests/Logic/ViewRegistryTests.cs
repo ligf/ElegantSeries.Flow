@@ -4,8 +4,8 @@ using ElegantSeries.Flow.Core.Locating;
 namespace ElegantSeries.Flow.WPF.Tests.Logic;
 
 /// <summary>
-/// Linux-runnable tests for <see cref="ViewRegistry{TView}"/> (compiled from the
-/// library source; <c>object</c> stands in for the view type).
+/// Linux-runnable tests for <see cref="ViewRegistry{TView}"/> (internal in Core,
+/// visible via InternalsVisibleTo; <c>object</c> stands in for the view type).
 /// </summary>
 public sealed class ViewRegistryTests
 {
@@ -123,5 +123,17 @@ public sealed class ViewRegistryTests
         Assert.Equal(1, succeeded);
         Assert.Equal(15, rejected);
         Assert.True(registry.IsRegistered<StubViewModel>());
+    }
+
+    [Fact]
+    public void CreateView_FactoryReturnsNull_ThrowsInvalidOperationException()
+    {
+        var registry = new ViewRegistry<object>();
+        registry.Register<StubViewModel>(_ => null!);
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => registry.CreateView(new StubViewModel()));
+
+        Assert.Contains(typeof(StubViewModel).FullName!, ex.Message);
     }
 }

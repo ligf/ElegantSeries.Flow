@@ -338,8 +338,8 @@ The library sets `IsAotCompatible=true` and annotates generic ViewModel paramete
 app layer. The `[AotRoute]` attribute is a reserved compile-time contract for a future
 source generator; it is not consumed at runtime today. Note: the WPF sample app itself
 cannot be NativeAOT-published (WPF as a framework does not support Native AOT); the
-Avalonia sample is published with `PublishAot=true` in CI as the proof of the
-framework's AOT story.
+Avalonia sample has `PublishAot=true` in its csproj as the proof of the
+framework's AOT story (a Native AOT publish smoke test in CI is planned).
 
 ## API overview
 
