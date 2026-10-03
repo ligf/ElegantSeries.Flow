@@ -1,0 +1,16 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.ParamDemoView"
+             x:DataType="vm:ParamDemoViewModel">
+    <StackPanel Margin="16" VerticalAlignment="Center">
+        <TextBlock Text="参数传递" FontSize="20" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding Message, StringFormat='当前参数: {0}'}" Margin="0,0,0,12" TextWrapping="Wrap" />
+        <Button Content="传递 Hello" Command="{Binding SendHelloCommand}"
+                Width="140" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="传递 World" Command="{Binding SendWorldCommand}"
+                Width="140" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="返回" Command="{Binding GoBackCommand}"
+                Width="140" HorizontalAlignment="Left" />
+    </StackPanel>
+</UserControl>

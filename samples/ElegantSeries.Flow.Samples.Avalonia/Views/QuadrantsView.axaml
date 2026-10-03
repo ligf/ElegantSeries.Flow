@@ -1,0 +1,36 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.Avalonia.Hosting;assembly=ElegantSeries.Flow.Avalonia"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.QuadrantsView"
+             x:DataType="vm:QuadrantsViewModel">
+    <Grid RowDefinitions="Auto,*">
+        <TextBlock Text="{Binding Title}" FontSize="20" Margin="8,4" />
+        <Grid Grid.Row="1" RowDefinitions="*,*" ColumnDefinitions="*,*">
+            <Grid Grid.Row="0" Grid.Column="0" RowDefinitions="Auto,*">
+                <TextBlock Text="Q1 · 页面栈" Opacity="0.6" Margin="8,0" />
+                <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                    <flow:NavigationHost x:Name="Q1Host" RegionName="Q1" />
+                </Border>
+            </Grid>
+            <Grid Grid.Row="0" Grid.Column="1" RowDefinitions="Auto,*">
+                <TextBlock Text="Q2 · 状态保持 (KeepAlive)" Opacity="0.6" Margin="8,0" />
+                <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                    <flow:NavigationHost x:Name="Q2Host" RegionName="Q2" />
+                </Border>
+            </Grid>
+            <Grid Grid.Row="1" Grid.Column="0" RowDefinitions="Auto,*">
+                <TextBlock Text="Q3 · 参数传递" Opacity="0.6" Margin="8,0" />
+                <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                    <flow:NavigationHost x:Name="Q3Host" RegionName="Q3" />
+                </Border>
+            </Grid>
+            <Grid Grid.Row="1" Grid.Column="1" RowDefinitions="Auto,*">
+                <TextBlock Text="Q4 · 导航模式" Opacity="0.6" Margin="8,0" />
+                <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                    <flow:NavigationHost x:Name="Q4Host" RegionName="Q4" />
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</UserControl>

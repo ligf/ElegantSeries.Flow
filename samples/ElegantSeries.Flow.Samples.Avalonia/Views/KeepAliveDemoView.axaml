@@ -1,0 +1,16 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.KeepAliveDemoView"
+             x:DataType="vm:KeepAliveDemoViewModel">
+    <StackPanel Margin="16" VerticalAlignment="Center">
+        <TextBlock Text="状态保持" FontSize="20" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding Count}" FontSize="36" Margin="0,0,0,12" />
+        <Button Content="Increment" Command="{Binding IncrementCommand}"
+                Width="140" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="临时离开" Command="{Binding OpenTempPageCommand}"
+                Width="140" HorizontalAlignment="Left" />
+        <TextBlock Text="离开再回来 — 计数保持不变 (KeepAlive)。"
+                   Margin="0,12,0,0" TextWrapping="Wrap" Opacity="0.6" />
+    </StackPanel>
+</UserControl>

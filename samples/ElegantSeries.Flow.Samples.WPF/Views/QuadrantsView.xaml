@@ -1,0 +1,48 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.QuadrantsView"
+             x:TypeArguments="vm:QuadrantsViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.WPF.ViewModels"
+             xmlns:host="clr-namespace:ElegantSeries.Flow.WPF.Hosting;assembly=ElegantSeries.Flow.WPF"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:QuadrantsViewModel, IsDesignTimeCreatable=False}">
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <TextBlock Text="{Binding Title}" FontSize="20" Margin="8,4" Grid.Row="0" />
+        <Grid Grid.Row="1">
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <Grid Grid.Row="0" Grid.Column="0">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <TextBlock Text="Q1 · 页面栈" Opacity="0.6" Margin="8,0" />
+                <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                    <host:NavigationHost x:Name="Q1Host" RegionName="Q1" />
+                </Border>
+            </Grid>
+            <Grid Grid.Row="0" Grid.Column="1">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <TextBlock Text="Q2 · 状态保持 (KeepAlive)" Opacity="0.6" Margin="8,0" />
+                <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                    <host:NavigationHost x:Name="Q2Host" RegionName="Q2" />
+                </Border>
+            </Grid>
+            <Grid Grid.Row="1" Grid.Column="0">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <TextBlock Text="Q3 · 参数传递" Opacity="0.6" Margin="8,0" />
+                <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                    <host:NavigationHost x:Name="Q3Host" RegionName="Q3" />
+                </Border>
+            </Grid>
+            <Grid Grid.Row="1" Grid.Column="1">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <TextBlock Text="Q4 · 导航模式" Opacity="0.6" Margin="8,0" />
+                <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                    <host:NavigationHost x:Name="Q4Host" RegionName="Q4" />
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</flow:BaseView>

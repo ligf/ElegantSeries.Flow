@@ -13,23 +13,27 @@ public sealed partial class MenuViewModel : BaseViewModel
 {
     [RelayCommand]
     private Task GoHomeAsync()
-        => NavigateToAsync<HomeViewModel>("Q1");
+        => NavigateToAsync<HomeViewModel>("MainRegion");
 
     [RelayCommand]
     private Task GoDetailAsync()
-        => NavigateToAsync<DetailViewModel, string>("Hello from Menu", "Q1");
+        => NavigateToAsync<DetailViewModel, string>("Hello from Menu", "MainRegion");
 
     [RelayCommand]
     private Task GoCounterAsync()
-        => NavigateToAsync<CounterViewModel>("Q1", NavigationMode.KeepAlive);
+        => NavigateToAsync<CounterViewModel>("MainRegion", NavigationMode.KeepAlive);
+
+    [RelayCommand]
+    private Task GoQuadrantsAsync()
+        => NavigateToAsync<QuadrantsViewModel>("MainRegion");
 
     [RelayCommand]
     private Task GoGuardedAsync()
-        => NavigateToAsync<GuardedViewModel>("Q1");
+        => NavigateToAsync<GuardedViewModel>("MainRegion");
 
     [RelayCommand]
     private Task GoFeaturesAsync()
-        => NavigateToAsync<FeaturesViewModel>("Q1");
+        => NavigateToAsync<FeaturesViewModel>("MainRegion");
 
     [RelayCommand]
     private void OpenSecondWindow() => new SecondWindow().Show();
