@@ -35,3 +35,23 @@ jobs:
       - name: Test (Windows)
         if: runner.os == 'Windows'
         run: dotnet test ElegantSeries.Flow.slnx -c Release --no-build        
+  aot-publish:
+    name: AOT publish smoke test (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: windows-latest
+            rid: win-x64
+    steps:
+      - uses: actions/checkout@v4
+  
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+  
+      - name: Publish Avalonia sample (Native AOT)
+        run: dotnet publish samples/ElegantSeries.Flow.Samples.Avalonia -c Release -r ${{ matrix.rid }} --self-contained
