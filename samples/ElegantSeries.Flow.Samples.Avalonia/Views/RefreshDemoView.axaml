@@ -1,0 +1,15 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.RefreshDemoView"
+             x:DataType="vm:RefreshDemoViewModel">
+    <StackPanel Margin="16" VerticalAlignment="Center">
+        <TextBlock Text="Refresh (refreshIfActive)" FontSize="20" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding InstanceId, StringFormat='Instance: {0}'}" Margin="0,0,0,4" Opacity="0.6" />
+        <TextBlock Text="{Binding ActivationCount, StringFormat='Activations: {0}'}" Margin="0,0,0,12" />
+        <Button Content="Refresh" Command="{Binding RefreshCommand}"
+                Width="160" HorizontalAlignment="Left" />
+        <TextBlock Text="Refresh re-runs activation on the same instance: the id stays, the count grows."
+                   Margin="0,12,0,0" TextWrapping="Wrap" Opacity="0.6" />
+    </StackPanel>
+</UserControl>

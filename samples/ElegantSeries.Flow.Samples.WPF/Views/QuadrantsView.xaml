@@ -14,33 +14,47 @@
         <TextBlock Text="{Binding Title}" FontSize="20" Margin="8,4" Grid.Row="0" />
         <Grid Grid.Row="1">
             <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
             <Grid Grid.Row="0" Grid.Column="0">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                <TextBlock Text="Q1 · 页面栈" Opacity="0.6" Margin="8,0" />
+                <TextBlock Text="Q1 · Stack" Opacity="0.6" Margin="8,0" />
                 <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
                     <host:NavigationHost x:Name="Q1Host" RegionName="Q1" />
                 </Border>
             </Grid>
             <Grid Grid.Row="0" Grid.Column="1">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                <TextBlock Text="Q2 · 状态保持 (KeepAlive)" Opacity="0.6" Margin="8,0" />
+                <TextBlock Text="Q2 · KeepAlive" Opacity="0.6" Margin="8,0" />
                 <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
                     <host:NavigationHost x:Name="Q2Host" RegionName="Q2" />
                 </Border>
             </Grid>
-            <Grid Grid.Row="1" Grid.Column="0">
+            <Grid Grid.Row="0" Grid.Column="2">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                <TextBlock Text="Q3 · 参数传递" Opacity="0.6" Margin="8,0" />
+                <TextBlock Text="Q3 · Typed Parameters" Opacity="0.6" Margin="8,0" />
                 <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
                     <host:NavigationHost x:Name="Q3Host" RegionName="Q3" />
                 </Border>
             </Grid>
-            <Grid Grid.Row="1" Grid.Column="1">
+            <Grid Grid.Row="1" Grid.Column="0">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                <TextBlock Text="Q4 · 导航模式" Opacity="0.6" Margin="8,0" />
+                <TextBlock Text="Q4 · Replace" Opacity="0.6" Margin="8,0" />
                 <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
                     <host:NavigationHost x:Name="Q4Host" RegionName="Q4" />
+                </Border>
+            </Grid>
+            <Grid Grid.Row="1" Grid.Column="1">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <TextBlock Text="Q5 · ClearStack" Opacity="0.6" Margin="8,0" />
+                <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                    <host:NavigationHost x:Name="Q5Host" RegionName="Q5" />
+                </Border>
+            </Grid>
+            <Grid Grid.Row="1" Grid.Column="2">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <TextBlock Text="Q6 · Refresh" Opacity="0.6" Margin="8,0" />
+                <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
+                    <host:NavigationHost x:Name="Q6Host" RegionName="Q6" />
                 </Border>
             </Grid>
         </Grid>

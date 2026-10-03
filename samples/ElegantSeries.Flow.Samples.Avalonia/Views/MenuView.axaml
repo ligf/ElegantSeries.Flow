@@ -5,14 +5,16 @@
              x:DataType="vm:MenuViewModel">
     <StackPanel Margin="12">
         <TextBlock Text="Menu" FontSize="18" Margin="0,0,0,12" />
-        <TextBlock Text="整页切换" Opacity="0.6" Margin="0,0,0,4" />
+        <TextBlock Text="Full Page" Opacity="0.6" Margin="0,0,0,4" />
         <Button Content="Home" Command="{Binding GoHomeCommand}" Margin="0,0,0,8" />
         <Button Content="Detail" Command="{Binding GoDetailCommand}" Margin="0,0,0,8" />
         <Button Content="Counter (KeepAlive)" Command="{Binding GoCounterCommand}" Margin="0,0,0,8" />
         <Button Content="Guarded" Command="{Binding GoGuardedCommand}" Margin="0,0,0,8" />
-        <Button Content="Features" Command="{Binding GoFeaturesCommand}" Margin="0,0,0,12" />
-        <TextBlock Text="四宫格" Opacity="0.6" Margin="0,0,0,4" />
-        <Button Content="四宫格演示 (Q1-Q4)" Command="{Binding GoQuadrantsCommand}" Margin="0,0,0,12" />
+        <Button Content="Async Lifecycle" Command="{Binding GoAsyncDemoCommand}" Margin="0,0,0,8" />
+        <Button Content="Clear Cache" Command="{Binding GoCacheDemoCommand}" Margin="0,0,0,8" />
+        <Button Content="Cancellation" Command="{Binding GoCancelDemoCommand}" Margin="0,0,0,12" />
+        <TextBlock Text="Quadrants" Opacity="0.6" Margin="0,0,0,4" />
+        <Button Content="Quadrants Demo (Q1-Q6)" Command="{Binding GoQuadrantsCommand}" Margin="0,0,0,12" />
         <Button Content="Second window" Command="{Binding OpenSecondWindowCommand}" />
     </StackPanel>
 </UserControl>

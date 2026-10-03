@@ -1,0 +1,17 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.CancelDemoView"
+             x:TypeArguments="vm:CancelDemoViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.WPF.ViewModels"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:CancelDemoViewModel, IsDesignTimeCreatable=False}">
+    <StackPanel Margin="24" VerticalAlignment="Center">
+        <TextBlock Text="Cancellation" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="{Binding Status}" Margin="0,0,0,12" TextWrapping="Wrap" />
+        <Button Content="Start Cancelled Navigation" Command="{Binding CancelledNavigationCommand}"
+                Width="200" HorizontalAlignment="Left" />
+    </StackPanel>
+</flow:BaseView>

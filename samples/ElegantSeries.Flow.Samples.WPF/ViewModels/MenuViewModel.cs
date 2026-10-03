@@ -32,8 +32,16 @@ public sealed partial class MenuViewModel : BaseViewModel
         => NavigateToAsync<GuardedViewModel>("MainRegion");
 
     [RelayCommand]
-    private Task GoFeaturesAsync()
-        => NavigateToAsync<FeaturesViewModel>("MainRegion");
+    private Task GoAsyncDemoAsync()
+        => NavigateToAsync<AsyncDemoViewModel>("MainRegion");
+
+    [RelayCommand]
+    private Task GoCacheDemoAsync()
+        => NavigateToAsync<CacheDemoViewModel>("MainRegion");
+
+    [RelayCommand]
+    private Task GoCancelDemoAsync()
+        => NavigateToAsync<CancelDemoViewModel>("MainRegion");
 
     [RelayCommand]
     private void OpenSecondWindow() => new SecondWindow().Show();

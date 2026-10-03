@@ -13,7 +13,7 @@ public partial class QuadrantsView : ElegantSeries.Flow.Avalonia.Views.BaseView<
     public QuadrantsView()
     {
         InitializeComponent();
-        _hosts = [Q1Host, Q2Host, Q3Host, Q4Host];
+        _hosts = [Q1Host, Q2Host, Q3Host, Q4Host, Q5Host, Q6Host];
         AttachedToVisualTree += OnAttached;
         DetachedFromVisualTree += OnDetached;
     }
@@ -40,8 +40,10 @@ public partial class QuadrantsView : ElegantSeries.Flow.Avalonia.Views.BaseView<
         // the others.
         await TryNavigate(() => navigation.NavigateToAsync<StackDemoViewModel, int>(0, "Q1", refreshIfActive: true));
         await TryNavigate(() => navigation.NavigateToAsync<KeepAliveDemoViewModel>("Q2", NavigationMode.KeepAlive, refreshIfActive: true));
-        await TryNavigate(() => navigation.NavigateToAsync<ParamDemoViewModel, string>("初始参数", "Q3", refreshIfActive: true));
-        await TryNavigate(() => navigation.NavigateToAsync<ModesDemoViewModel>("Q4", refreshIfActive: true));
+        await TryNavigate(() => navigation.NavigateToAsync<ParamDemoViewModel, string>("Initial parameter", "Q3", refreshIfActive: true));
+        await TryNavigate(() => navigation.NavigateToAsync<ReplaceDemoViewModel>("Q4", refreshIfActive: true));
+        await TryNavigate(() => navigation.NavigateToAsync<ClearStackDemoViewModel>("Q5", refreshIfActive: true));
+        await TryNavigate(() => navigation.NavigateToAsync<RefreshDemoViewModel>("Q6", refreshIfActive: true));
 
         static async Task TryNavigate(Func<Task<bool>> navigate)
         {

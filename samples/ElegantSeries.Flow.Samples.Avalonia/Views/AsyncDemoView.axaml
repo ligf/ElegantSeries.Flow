@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.AsyncDemoView"
+             x:DataType="vm:AsyncDemoViewModel">
+    <StackPanel Margin="24">
+        <TextBlock Text="Async Lifecycle" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="Navigate to another page and back — watch the async callbacks fire."
+                   Margin="0,0,0,12" TextWrapping="Wrap" Opacity="0.6" />
+        <TextBox Text="{Binding Log}" IsReadOnly="True" AcceptsReturn="True" Height="200" FontFamily="Consolas" />
+    </StackPanel>
+</UserControl>

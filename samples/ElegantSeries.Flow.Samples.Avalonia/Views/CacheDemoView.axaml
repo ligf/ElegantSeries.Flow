@@ -1,0 +1,16 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Avalonia.ViewModels"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.CacheDemoView"
+             x:DataType="vm:CacheDemoViewModel">
+    <StackPanel Margin="24">
+        <TextBlock Text="Clear Cache" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="1. Open the Counter and Increment. 2. Come back here. 3. ClearCache. 4. Open the Counter again — the count is reset."
+                   Margin="0,0,0,12" TextWrapping="Wrap" Opacity="0.6" />
+        <Button Content="Open Counter (KeepAlive)" Command="{Binding OpenCounterCommand}"
+                Width="200" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="ClearCache" Command="{Binding ClearKeepAliveCacheCommand}"
+                Width="200" HorizontalAlignment="Left" Margin="0,0,0,12" />
+        <TextBox Text="{Binding Log}" IsReadOnly="True" AcceptsReturn="True" Height="120" FontFamily="Consolas" />
+    </StackPanel>
+</UserControl>

@@ -14,6 +14,12 @@ public sealed partial class StackDemoViewModel : BaseViewModel, INavigationAware
     [ObservableProperty]
     private int _depth;
 
+    /// <summary>
+    /// Proves transient recreation: push, go back, push again — the id
+    /// differs because the popped page scope was disposed.
+    /// </summary>
+    public string InstanceId { get; } = Guid.NewGuid().ToString("N")[..8];
+
     public void OnNavigatedTo(int parameter) => Depth = parameter;
 
     public void OnNavigatedFrom() { }
