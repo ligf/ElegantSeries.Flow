@@ -19,7 +19,7 @@ second window; each sample's `App` wires it to its own platform `SecondWindow`
 
 Both samples demonstrate the library's full feature set:
 
-1. **DI setup** — `AddFlowNavigation()` (singleton); views + ViewModels
+1. **DI setup** — `AddSingletonFlowNavigation()` (singleton); views + ViewModels
    registered AOT-safely via `AddFlowViews(...)`: `RegisterTransient` /
    `RegisterSingleton` combine view mapping with DI registration in one call
    (the menu ViewModel is a singleton — it coexists fine with transient
@@ -99,7 +99,7 @@ Both samples demonstrate the library's full feature set:
     scope and manually-constructed `NavigationService`; its stacks are fully
     isolated from the main window's. (This is the manual form of
     `services.AddScopedFlowNavigation()`: the extension is a root-container
-    registration and cannot be combined with the app's `AddFlowNavigation()`
+    registration and cannot be combined with the app's `AddSingletonFlowNavigation()`
     singleton on the same container, since both use `TryAdd`.)
 17. **Bound RegionName** — the Bound Region page data-binds a single
     `NavigationHost`'s `RegionName` (and `NavigationService`) instead of
@@ -112,3 +112,12 @@ Both samples demonstrate the library's full feature set:
 19. **Navigation events** — `RegionNavigated`, `ViewModelReleased`, and
     `RegionCacheCleared` observed live: push/pop a temp page in region A and
     clear its KeepAlive cache while this page stays subscribed.
+20. **Toolkit-free ViewModel** — the Toolkit-Free page's ViewModel derives from
+    `NavigationViewModelBase` (core package): manual `SetProperty`
+    notification, no CommunityToolkit.Mvvm; its buttons call public methods
+    from code-behind.
+21. **`ViewFor` attribute** — `HomeView` carries `[ViewFor(typeof(HomeViewModel))]`
+    as the compile-time view→ViewModel declaration for the future source
+    generator. The runtime still uses the manual `views.Register` call (it never
+    scans the attribute); when the generator ships, the manual call goes away —
+    never both.

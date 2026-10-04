@@ -24,7 +24,7 @@ public partial class SecondWindow : Window
         // Per-window scope -> per-window navigation service. This is the manual form of
         // services.AddScopedFlowNavigation() (one scoped INavigationService per window scope
         // with isolated region stacks). The extension itself is a root-container
-        // registration and cannot be combined with this app's AddFlowNavigation()
+        // registration and cannot be combined with this app's AddSingletonFlowNavigation()
         // singleton on the same container (both use TryAdd), so the second window
         // builds the scoped service directly from its own scope: same object graph,
         // same lifetime, same disposal semantics.
