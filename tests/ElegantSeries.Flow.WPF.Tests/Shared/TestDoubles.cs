@@ -102,7 +102,9 @@ internal sealed class FakeNavigationService : INavigationService
         => RegionCacheCleared?.Invoke(regionName);
 
     public bool CanGoBack(string regionName = "MainRegion") => throw new NotImplementedException();
-    public INavigationViewModel? GetCurrentViewModel(string regionName = "MainRegion") => throw new NotImplementedException();
+    public Dictionary<string, INavigationViewModel> CurrentByRegion { get; } = new();
+    public INavigationViewModel? GetCurrentViewModel(string regionName = "MainRegion")
+        => CurrentByRegion.TryGetValue(regionName, out var vm) ? vm : null;
     public bool IsActive<TViewModel>(string regionName = "MainRegion") where TViewModel : INavigationViewModel => throw new NotImplementedException();
     public NavigationMode? GetCurrentMode(string regionName = "MainRegion") => throw new NotImplementedException();
     public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(string regionName = "MainRegion", NavigationMode mode = NavigationMode.New, bool refreshIfActive = false, CancellationToken cancellationToken = default) where TViewModel : INavigationViewModel => throw new NotImplementedException();

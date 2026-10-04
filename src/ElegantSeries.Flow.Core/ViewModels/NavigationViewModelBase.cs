@@ -29,6 +29,8 @@ namespace ElegantSeries.Flow.Core.ViewModels;
 /// </remarks>
 public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPropertyChanged
 {
+    private INavigationService? _navigation;
+
     /// <summary>
     /// Gets the navigation service attached to this ViewModel, or <see langword="null"/>
     /// if the ViewModel is not currently the active page.
@@ -36,8 +38,15 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     /// <remarks>
     /// Assigned by the navigation service only; application code should call the
     /// protected navigation methods instead of touching this property.
+    /// Raises <see cref="PropertyChanged"/> when changed, so it can be data-bound
+    /// (e.g. <c>NavigationService="{Binding Navigation}"</c> on a
+    /// <c>NavigationHost</c>).
     /// </remarks>
-    public INavigationService? Navigation { get; private set; }
+    public INavigationService? Navigation
+    {
+        get => _navigation;
+        private set => SetProperty(ref _navigation, value);
+    }
 
     /// <inheritdoc />
     INavigationService? INavigationViewModel.Navigation

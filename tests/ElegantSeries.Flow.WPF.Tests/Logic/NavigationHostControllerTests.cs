@@ -20,6 +20,7 @@ public sealed class NavigationHostControllerTests
         public Func<INavigationViewModel, object> ViewFactory = _ => new object();
         public List<(object View, INavigationViewModel ViewModel)> Shown { get; } = new();
         public List<(INavigationViewModel ViewModel, Exception Error)> Failures { get; } = new();
+        public int ClearedCount { get; private set; }
         public NavigationHostController<object> Controller { get; }
 
         public Harness()
@@ -29,6 +30,7 @@ public sealed class NavigationHostControllerTests
                 regionNameProvider: () => RegionName,
                 viewFactory: vm => ViewFactory(vm),
                 showView: (view, vm) => Shown.Add((view, vm)),
+                clearView: () => ClearedCount++,
                 onViewCreationFailed: (vm, ex) => Failures.Add((vm, ex)));
         }
 
@@ -119,7 +121,8 @@ public sealed class NavigationHostControllerTests
             dispatcher,
             regionNameProvider: () => "MainRegion",
             viewFactory: _ => new object(),
-            showView: (view, vm) => shown.Add((view, vm)));
+            showView: (view, vm) => shown.Add((view, vm)),
+            clearView: () => { });
         var service = new FakeNavigationService();
         controller.Attach(service);
 
@@ -249,12 +252,90 @@ public sealed class NavigationHostControllerTests
         var dispatcher = new FakeDispatcher();
 
         Assert.Throws<ArgumentNullException>(() =>
-            new NavigationHostController<object>(null!, () => "r", _ => new object(), (_, _) => { }));
+            new NavigationHostController<object>(null!, () => "r", _ => new object(), (_, _) => { }, () => { }));
         Assert.Throws<ArgumentNullException>(() =>
-            new NavigationHostController<object>(dispatcher, null!, _ => new object(), (_, _) => { }));
+            new NavigationHostController<object>(dispatcher, null!, _ => new object(), (_, _) => { }, () => { }));
         Assert.Throws<ArgumentNullException>(() =>
-            new NavigationHostController<object>(dispatcher, () => "r", null!, (_, _) => { }));
+            new NavigationHostController<object>(dispatcher, () => "r", null!, (_, _) => { }, () => { }));
         Assert.Throws<ArgumentNullException>(() =>
-            new NavigationHostController<object>(dispatcher, () => "r", _ => new object(), null!));
+            new NavigationHostController<object>(dispatcher, () => "r", _ => new object(), null!, () => { }));
+        Assert.Throws<ArgumentNullException>(() =>
+            new NavigationHostController<object>(dispatcher, () => "r", _ => new object(), (_, _) => { }, null!));
+    }
+
+    [Fact]
+    public void Refresh_AfterRename_ShowsNewRegionsCurrentView()
+    {
+        var harness = new Harness();
+        harness.Attach();
+        var oldVm = new StubViewModel();
+        harness.Service.RaiseNavigated("MainRegion", oldVm);
+        Assert.Single(harness.Shown);
+
+        var newVm = new OtherViewModel();
+        harness.Service.CurrentByRegion["OtherRegion"] = newVm;
+        harness.RegionName = "OtherRegion"; // Simulates the bound RegionName changing.
+        harness.Controller.Refresh();
+
+        var shown = Assert.Single(harness.Shown.Skip(1));
+        Assert.Same(newVm, shown.ViewModel);
+    }
+
+    [Fact]
+    public void Refresh_EmptyRegion_ClearsContent()
+    {
+        var harness = new Harness();
+        harness.Attach();
+        harness.Service.RaiseNavigated("MainRegion", new StubViewModel());
+        Assert.Single(harness.Shown);
+
+        harness.RegionName = "EmptyRegion";
+        harness.Controller.Refresh();
+
+        Assert.Equal(1, harness.ClearedCount);
+        Assert.Single(harness.Shown); // No new view shown.
+    }
+
+    [Fact]
+    public void Refresh_ReusesCachedView()
+    {
+        var harness = new Harness();
+        harness.Attach();
+        var vm = new StubViewModel();
+        harness.Service.CurrentByRegion["MainRegion"] = vm;
+        int factoryCalls = 0;
+        harness.ViewFactory = _ => { factoryCalls++; return new object(); };
+
+        harness.Controller.Refresh();
+        harness.Controller.Refresh();
+
+        Assert.Equal(1, factoryCalls);
+        Assert.Equal(2, harness.Shown.Count);
+    }
+
+    [Fact]
+    public void Refresh_WhenDetached_DoesNothing()
+    {
+        var harness = new Harness();
+        harness.Service.CurrentByRegion["MainRegion"] = new StubViewModel();
+
+        harness.Controller.Refresh(); // Never attached.
+
+        Assert.Empty(harness.Shown);
+        Assert.Equal(0, harness.ClearedCount);
+    }
+
+    [Fact]
+    public void Refresh_BlankRegionName_ClearsInsteadOfThrowing()
+    {
+        var harness = new Harness();
+        harness.Attach();
+        harness.Service.RaiseNavigated("MainRegion", new StubViewModel());
+        Assert.Single(harness.Shown);
+
+        harness.RegionName = "  "; // Transient empty binding value.
+        harness.Controller.Refresh(); // Must not throw.
+
+        Assert.Equal(1, harness.ClearedCount);
     }
 }

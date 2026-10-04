@@ -58,6 +58,9 @@ public partial class App : Application
             views.RegisterTransient<ClearStackDemoView, ClearStackDemoViewModel>();
             views.RegisterTransient<ClearStackChildView, ClearStackChildViewModel>();
             views.RegisterTransient<RefreshDemoView, RefreshDemoViewModel>();
+            views.RegisterTransient<RegionSwitchView, RegionSwitchDemoViewModel>();
+            views.RegisterTransient<StateInspectorView, StateInspectorViewModel>();
+            views.RegisterTransient<EventsView, EventsDemoViewModel>();
             views.RegisterTransient<AsyncDisposeView, AsyncDisposeDemoViewModel>();
             // Custom view factory: the factory overload does not touch DI, so
             // the ViewModel needs its own DI registration (see above). Use a

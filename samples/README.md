@@ -70,8 +70,8 @@ Both samples demonstrate the library's full feature set:
    when implemented, so the checkbox demonstrates the observable difference
    (the plain guard cannot name the target page/region).
 10. **Async lifecycle** — the Async Lifecycle page implements
-    `INavigationAwareAsync` with a visible log of `OnNavigatedToAsync` /
-    `OnNavigatedFromAsync`.
+    `INavigationAwareAsync<string>` with a visible log of `OnNavigatedToAsync` /
+    `OnNavigatedFromAsync` and the strongly-typed navigation parameter.
 11. **Async dispose** — the Async Dispose page implements `IAsyncDisposable`
     only: leave and come back, the instance id changed and the "async
     disposals" counter grew, proving the old page scope was disposed through
@@ -80,7 +80,8 @@ Both samples demonstrate the library's full feature set:
     KeepAlive Counter, increment, come back, `ClearCache("MainRegion")`,
     open the Counter again — the count is reset because the cached page was
     disposed. "Clear All Caches" calls `ClearAllCache()` for every region at
-    once.
+    once. The `...Async` buttons demonstrate the `ClearCacheAsync` /
+    `ClearAllCacheAsync` variants.
 13. **Cancellation** — the Cancellation page runs a navigation with an
     already-cancelled token, showing the `OperationCanceledException`
     contract.
@@ -96,4 +97,18 @@ Both samples demonstrate the library's full feature set:
     the UI.
 16. **Scoped multi-window** — "Second window" opens a window with its own DI
     scope and manually-constructed `NavigationService`; its stacks are fully
-    isolated from the main window's.
+    isolated from the main window's. (This is the manual form of
+    `services.AddScopedFlowNavigation()`: the extension is a root-container
+    registration and cannot be combined with the app's `AddFlowNavigation()`
+    singleton on the same container, since both use `TryAdd`.)
+17. **Bound RegionName** — the Bound Region page data-binds a single
+    `NavigationHost`'s `RegionName` (and `NavigationService`) instead of
+    wiring them in code-behind. Flipping the bound region immediately
+    re-displays the other region's current page; switching to an empty region
+    clears the host.
+18. **State inspector** — read-only navigation-state queries for MainRegion:
+    `CanGoBack`, `IsActive<T>`, `GetCurrentMode`, `GetCurrentViewModel`, and
+    `IViewLocator.IsRegistered<T>`.
+19. **Navigation events** — `RegionNavigated`, `ViewModelReleased`, and
+    `RegionCacheCleared` observed live: push/pop a temp page in region A and
+    clear its KeepAlive cache while this page stays subscribed.

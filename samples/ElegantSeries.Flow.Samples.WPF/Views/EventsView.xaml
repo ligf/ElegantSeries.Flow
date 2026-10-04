@@ -1,0 +1,28 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.EventsView"
+             x:TypeArguments="vm:EventsDemoViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:EventsDemoViewModel, IsDesignTimeCreatable=False}">
+    <StackPanel Margin="24">
+        <TextBlock Text="Navigation Events" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="RegionNavigated, ViewModelReleased and RegionCacheCleared, observed live. Everything happens in region A so this page stays subscribed."
+                   Margin="0,0,0,12" TextWrapping="Wrap" Opacity="0.6" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <Button Content="Push Temp to A" Command="{Binding PushTempCommand}"
+                    Width="140" Margin="0,0,8,0" />
+            <Button Content="Back A (releases temp)" Command="{Binding BackTempCommand}"
+                    Width="170" Margin="0,0,8,0" />
+            <Button Content="Push KeepAlive to A" Command="{Binding PushKeepAliveTempCommand}"
+                    Width="170" Margin="0,0,8,0" />
+            <Button Content="Clear A Cache" Command="{Binding ClearTempCacheCommand}"
+                    Width="140" />
+        </StackPanel>
+        <TextBox Text="{Binding Log}" IsReadOnly="True" AcceptsReturn="True"
+                 VerticalScrollBarVisibility="Auto" Height="240" FontFamily="Consolas" />
+    </StackPanel>
+</flow:BaseView>

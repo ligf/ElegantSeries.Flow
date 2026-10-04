@@ -1,0 +1,49 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.StateInspectorView"
+             x:TypeArguments="vm:StateInspectorViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:StateInspectorViewModel, IsDesignTimeCreatable=False}">
+    <StackPanel Margin="24">
+        <TextBlock Text="State Inspector" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="Read-only navigation-state queries for MainRegion. Push pages around, then Refresh to see the state."
+                   Margin="0,0,0,12" TextWrapping="Wrap" Opacity="0.6" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <Button Content="Push Home" Command="{Binding PushHomeCommand}"
+                    Width="140" Margin="0,0,8,0" />
+            <Button Content="Push Counter (KeepAlive)" Command="{Binding PushCounterCommand}"
+                    Width="180" Margin="0,0,8,0" />
+            <Button Content="Go Back" Command="{Binding GoBackCommand}"
+                    Width="100" Margin="0,0,8,0" />
+            <Button Content="Refresh" Command="{Binding RefreshStateCommand}" Width="100" />
+        </StackPanel>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="220" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
+                <RowDefinition /><RowDefinition /><RowDefinition />
+            </Grid.RowDefinitions>
+            <TextBlock Text="CanGoBack(MainRegion)" Grid.Row="0" Opacity="0.6" Margin="0,2" />
+            <TextBlock Text="{Binding CanGoBack}" Grid.Row="0" Grid.Column="1" Margin="0,2" FontFamily="Consolas" />
+            <TextBlock Text="IsActive&lt;HomeViewModel&gt;" Grid.Row="1" Opacity="0.6" Margin="0,2" />
+            <TextBlock Text="{Binding IsHomeActive}" Grid.Row="1" Grid.Column="1" Margin="0,2" FontFamily="Consolas" />
+            <TextBlock Text="IsActive&lt;CounterViewModel&gt;" Grid.Row="2" Opacity="0.6" Margin="0,2" />
+            <TextBlock Text="{Binding IsCounterActive}" Grid.Row="2" Grid.Column="1" Margin="0,2" FontFamily="Consolas" />
+            <TextBlock Text="GetCurrentMode" Grid.Row="3" Opacity="0.6" Margin="0,2" />
+            <TextBlock Text="{Binding CurrentMode}" Grid.Row="3" Grid.Column="1" Margin="0,2" FontFamily="Consolas" />
+            <TextBlock Text="GetCurrentViewModel" Grid.Row="4" Opacity="0.6" Margin="0,2" />
+            <TextBlock Text="{Binding CurrentViewModel}" Grid.Row="4" Grid.Column="1" Margin="0,2" FontFamily="Consolas" />
+            <TextBlock Text="IsRegistered&lt;HomeViewModel&gt;" Grid.Row="5" Opacity="0.6" Margin="0,2" />
+            <TextBlock Text="{Binding IsHomeRegistered}" Grid.Row="5" Grid.Column="1" Margin="0,2" FontFamily="Consolas" />
+            <TextBlock Text="IsRegistered&lt;UnregisteredDemoViewModel&gt;" Grid.Row="6" Opacity="0.6" Margin="0,2" />
+            <TextBlock Text="{Binding IsUnregisteredDemoRegistered}" Grid.Row="6" Grid.Column="1" Margin="0,2" FontFamily="Consolas" />
+        </Grid>
+    </StackPanel>
+</flow:BaseView>

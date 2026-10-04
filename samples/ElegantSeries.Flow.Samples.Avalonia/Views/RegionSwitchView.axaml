@@ -1,0 +1,24 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.Avalonia.Hosting;assembly=ElegantSeries.Flow.Avalonia"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.RegionSwitchView"
+             x:DataType="vm:RegionSwitchDemoViewModel">
+    <StackPanel Margin="12">
+        <TextBlock Text="Bound RegionName" FontSize="20" Margin="0,0,0,4" />
+        <TextBlock Text="The host below binds RegionName and NavigationService — no code-behind wiring for them. Flip the bound region: the host immediately shows the other region's current page."
+                   Opacity="0.6" TextWrapping="Wrap" Margin="0,0,0,8" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+            <Button Content="Push Counter to A" Command="{Binding PushCounterToACommand}" Margin="0,0,8,0" />
+            <Button Content="Push Detail to B" Command="{Binding PushDetailToBCommand}" Margin="0,0,8,0" />
+            <Button Content="Show A" Command="{Binding ShowACommand}" Margin="0,0,8,0" />
+            <Button Content="Show B" Command="{Binding ShowBCommand}" Margin="0,0,8,0" />
+            <TextBlock Text="{Binding DisplayedRegion, StringFormat='Showing: {0}'}" VerticalAlignment="Center" Opacity="0.6" />
+        </StackPanel>
+        <Border BorderBrush="Gray" BorderThickness="1" Height="300">
+            <flow:NavigationHost x:Name="SwitchHost"
+                                RegionName="{Binding DisplayedRegion}"
+                                NavigationService="{Binding Navigation}" />
+        </Border>
+    </StackPanel>
+</UserControl>

@@ -33,7 +33,7 @@ public sealed partial class MenuViewModel : BaseViewModel
 
     [RelayCommand]
     private Task GoAsyncDemoAsync()
-        => NavigateToAsync<AsyncDemoViewModel>(RegionNames.MainRegion);
+        => NavigateToAsync<AsyncDemoViewModel, string>("Async demo parameter", RegionNames.MainRegion);
 
     [RelayCommand]
     private Task GoCacheDemoAsync()
@@ -54,6 +54,18 @@ public sealed partial class MenuViewModel : BaseViewModel
     [RelayCommand]
     private Task GoViewFailureDemoAsync()
         => NavigateToAsync<ViewFailureViewModel>(RegionNames.MainRegion);
+
+    [RelayCommand]
+    private Task GoRegionSwitchDemoAsync()
+        => NavigateToAsync<RegionSwitchDemoViewModel>(RegionNames.MainRegion);
+
+    [RelayCommand]
+    private Task GoStateInspectorAsync()
+        => NavigateToAsync<StateInspectorViewModel>(RegionNames.MainRegion);
+
+    [RelayCommand]
+    private Task GoEventsDemoAsync()
+        => NavigateToAsync<EventsDemoViewModel>(RegionNames.MainRegion);
 
     /// <summary>
     /// Raised when the user asks for a second window. Window creation is

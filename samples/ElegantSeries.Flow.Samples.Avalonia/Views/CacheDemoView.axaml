@@ -12,6 +12,10 @@
         <Button Content="ClearCache" Command="{Binding ClearKeepAliveCacheCommand}"
                 Width="200" HorizontalAlignment="Left" Margin="0,0,0,8" />
         <Button Content="Clear All Caches" Command="{Binding ClearAllCachesCommand}"
+                Width="200" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="ClearCacheAsync" Command="{Binding ClearCacheCommand}"
+                Width="200" HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <Button Content="ClearAllCachesAsync" Command="{Binding ClearAllCacheCommand}"
                 Width="200" HorizontalAlignment="Left" Margin="0,0,0,12" />
         <TextBox Text="{Binding Log}" IsReadOnly="True" AcceptsReturn="True" Height="120" FontFamily="Consolas" />
     </StackPanel>

@@ -37,4 +37,24 @@ public sealed partial class CacheDemoViewModel : BaseViewModel
         Navigation?.ClearAllCache();
         AppendLog("ClearAllCache() — every region's KeepAlive cache cleared.");
     }
+
+    [RelayCommand]
+    private async Task ClearCacheAsync()
+    {
+        if (Navigation is not null)
+        {
+            await Navigation.ClearCacheAsync(RegionNames.MainRegion);
+        }
+        AppendLog("ClearCacheAsync(\"MainRegion\") — async variant, same effect.");
+    }
+
+    [RelayCommand]
+    private async Task ClearAllCacheAsync()
+    {
+        if (Navigation is not null)
+        {
+            await Navigation.ClearAllCacheAsync();
+        }
+        AppendLog("ClearAllCacheAsync() — async variant, same effect.");
+    }
 }

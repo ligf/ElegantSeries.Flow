@@ -116,13 +116,16 @@ public class NavigationHost : ContentControl, IDisposable
                 view.DataContext = viewModel;
                 Content = view;
             },
+            clearView: () => Content = null,
             onViewCreationFailed: (viewModel, exception) => OnViewCreationFailed(viewModel, exception));
     }
 
     /// <summary>
     /// Gets or sets the name of the navigation region this host displays.
     /// Only <c>RegionNavigated</c> events whose region matches (ordinal comparison)
-    /// are processed. Defaults to <c>"MainRegion"</c>.
+    /// are processed. Defaults to <c>"MainRegion"</c>. Changing the value
+    /// immediately re-displays the new region's current page (or clears the host
+    /// when the region is empty), so it can be data-bound.
     /// </summary>
     public string RegionName
     {
@@ -205,8 +208,16 @@ public class NavigationHost : ContentControl, IDisposable
         {
             // Runs on the UI thread (SetValue verifies access); mirrors the value
             // into _regionName so background event threads never touch the
-            // property system.
+            // property system, then re-displays the new region's content.
             _regionName = change.GetNewValue<string>() ?? "MainRegion";
+            _controller.Refresh();
+        }
+
+        if (change.Property == ViewLocatorProperty)
+        {
+            // Views can now be created (or can no longer be created):
+            // re-display the region's current page.
+            _controller.Refresh();
         }
     }
 
@@ -262,5 +273,9 @@ public class NavigationHost : ContentControl, IDisposable
         {
             _controller.Detach();
         }
+
+        // The host reflects its region: show the current page immediately
+        // instead of waiting for the next navigation event.
+        _controller.Refresh();
     }
 }

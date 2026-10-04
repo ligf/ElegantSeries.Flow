@@ -1,0 +1,22 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.EventsView"
+             x:DataType="vm:EventsDemoViewModel">
+    <StackPanel Margin="24">
+        <TextBlock Text="Navigation Events" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="RegionNavigated, ViewModelReleased and RegionCacheCleared, observed live. Everything happens in region A so this page stays subscribed."
+                   Margin="0,0,0,12" TextWrapping="Wrap" Opacity="0.6" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <Button Content="Push Temp to A" Command="{Binding PushTempCommand}"
+                    Width="140" Margin="0,0,8,0" />
+            <Button Content="Back A (releases temp)" Command="{Binding BackTempCommand}"
+                    Width="170" Margin="0,0,8,0" />
+            <Button Content="Push KeepAlive to A" Command="{Binding PushKeepAliveTempCommand}"
+                    Width="170" Margin="0,0,8,0" />
+            <Button Content="Clear A Cache" Command="{Binding ClearTempCacheCommand}"
+                    Width="140" />
+        </StackPanel>
+        <TextBox Text="{Binding Log}" IsReadOnly="True" AcceptsReturn="True" Height="240" FontFamily="Consolas" />
+    </StackPanel>
+</UserControl>
