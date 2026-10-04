@@ -38,7 +38,7 @@ public static class FlowServiceCollectionExtensions
     /// on the region's stack pops back to the shared instance instead of pushing a duplicate.
     /// </para>
     /// </remarks>
-    public static IServiceCollection AddFlowNavigation(this IServiceCollection services)
+    public static IServiceCollection AddSingletonFlowNavigation(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
         services.TryAddSingleton<INavigationService, NavigationService>();
@@ -69,7 +69,7 @@ public static class FlowServiceCollectionExtensions
     /// hand it to another window's navigation service — a page scope belongs to exactly
     /// one navigation service.
     /// </para>
-    /// <para>See <see cref="AddFlowNavigation"/> for the registration conventions.</para>
+    /// <para>See <see cref="AddSingletonFlowNavigation"/> for the registration conventions.</para>
     /// </remarks>
     public static IServiceCollection AddScopedFlowNavigation(this IServiceCollection services)
     {

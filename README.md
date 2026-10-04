@@ -43,9 +43,9 @@ Requires **.NET 10** or later.
 ```csharp
 using ElegantSeries.Flow.Core.Extensions;
 
-services.AddFlowNavigation();          // singleton — single-window apps
+services.AddSingletonFlowNavigation();   // singleton — single-window apps
 // or
-services.AddScopedFlowNavigation();    // scoped — each window gets its own navigation stack
+services.AddScopedFlowNavigation();      // scoped — each window gets its own navigation stack
 ```
 
 **Singleton or scoped?** A *region* is a named navigation slot — typically one
@@ -53,7 +53,7 @@ services.AddScopedFlowNavigation();    // scoped — each window gets its own na
 stack (see [Regions](#regions)). This choice only decides the *scope of those
 stacks*:
 
-- `AddFlowNavigation()` registers one app-wide `INavigationService`. Every window
+- `AddSingletonFlowNavigation()` registers one app-wide `INavigationService`. Every window
   shares the same region stacks: two windows each hosting a `"MainRegion"` would
   interfere with each other.
 - `AddScopedFlowNavigation()` gives each DI scope (typically one per window) its
@@ -70,7 +70,7 @@ window's scope (they are not registered in DI). The scope must live as long as
 the window — dispose it when the window closes, not earlier:
 
 ```csharp
-services.AddFlowNavigation(); // global stack
+services.AddSingletonFlowNavigation(); // global stack
 
 // Per-window isolated stack:
 var windowScope = rootProvider.CreateScope(); // dispose when the window closes
@@ -366,7 +366,7 @@ framework's AOT story (a Native AOT publish smoke test in CI is planned).
 | `ClearCache(region?)` / `ClearCacheAsync(region?)` | Clear one region's KeepAlive cache |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | Clear all KeepAlive caches |
 | `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` | Events |
-| `AddFlowNavigation()` / `AddScopedFlowNavigation()` | DI registration |
+| `AddSingletonFlowNavigation()` / `AddScopedFlowNavigation()` | DI registration |
 
 ## Contributing
 

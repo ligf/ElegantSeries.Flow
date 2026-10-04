@@ -21,7 +21,7 @@ public partial class App : Application
         var services = new ServiceCollection();
 
         // Core navigation.
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
 
         // The combined RegisterTransient/RegisterSingleton calls below cover
         // the common cases (view mapping + DI registration in one). The

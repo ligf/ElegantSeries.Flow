@@ -203,7 +203,7 @@ public class NavigationServiceTests
     public NavigationServiceTests()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddTransient<TestHomeViewModel>();
         services.AddTransient<TestDetailViewModel>();
         services.AddTransient<SimpleAwareViewModel>();
@@ -490,7 +490,7 @@ public class NavigationServiceTests
     public async Task NavigateToAsync_WhenSingletonOnAnotherRegionStack_ThrowsInvalidOperationException()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddSingleton<SingletonViewModel>();
         var serviceProvider = services.BuildServiceProvider();
         var navigationService = (NavigationService)serviceProvider.GetRequiredService<INavigationService>();
@@ -514,7 +514,7 @@ public class NavigationServiceTests
     public async Task ClearCache_WhenSingletonCachedInTwoRegions_ShouldNeverDisposeIt()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddSingleton<KeepAliveViewModel>();
         services.AddTransient<TestHomeViewModel>();
         var serviceProvider = services.BuildServiceProvider();
@@ -692,7 +692,7 @@ public class NavigationServiceTests
     public async Task Dispose_Sync_ShouldDisposeStacksAndCaches()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddTransient<TestHomeViewModel>();
         services.AddTransient<KeepAliveViewModel>();
         var sp = services.BuildServiceProvider();
@@ -791,7 +791,7 @@ public class NavigationServiceTests
     [Fact]
     public void ServiceCollectionExtensions_ShouldThrowOnNullServices()
     {
-        Assert.Throws<ArgumentNullException>(() => FlowServiceCollectionExtensions.AddFlowNavigation(null!));
+        Assert.Throws<ArgumentNullException>(() => FlowServiceCollectionExtensions.AddSingletonFlowNavigation(null!));
         Assert.Throws<ArgumentNullException>(() => FlowServiceCollectionExtensions.AddScopedFlowNavigation(null!));
     }
 
@@ -897,7 +897,7 @@ public class NavigationServiceTests
     public async Task DisposeAsync_ShouldRaiseEventsOutOfLock_AndNotDeadlock()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddTransient<KeepAliveViewModel>();
         var sp = services.BuildServiceProvider();
         var navService = (NavigationService)sp.GetRequiredService<INavigationService>();
@@ -1045,7 +1045,7 @@ public class NavigationServiceTests
     public async Task Dispose_WhenStackViewModelThrows_ShouldStillDisposeRemainingStackViewModels()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddTransient<ThrowingKeepAliveViewModel>();
         services.AddTransient<KeepAliveViewModel>();
         services.AddTransient<TestHomeViewModel>();
@@ -1079,7 +1079,7 @@ public class NavigationServiceTests
     public async Task SingletonViewModel_WhenNavigatedAway_ShouldNeverBeDisposed()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddSingleton<SingletonViewModel>();
         services.AddTransient<TestHomeViewModel>();
         var serviceProvider = services.BuildServiceProvider();
@@ -1104,7 +1104,7 @@ public class NavigationServiceTests
     public async Task NavigateToAsync_WhenSingletonDeeperOnStack_PopsBackToExistingInstance()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddSingleton<SingletonViewModel>();
         services.AddTransient<TestHomeViewModel>();
         var inner = services.BuildServiceProvider();
@@ -1136,7 +1136,7 @@ public class NavigationServiceTests
     public async Task NavigateToAsync_WhenTargetIsAlreadyActive_ShouldBeNoOp_AndReleaseAbandonedScope()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddTransient<TestHomeViewModel>();
         var inner = services.BuildServiceProvider();
         var tracking = new TrackingScopeFactory(inner.GetRequiredService<IServiceScopeFactory>());
@@ -1161,7 +1161,7 @@ public class NavigationServiceTests
     public async Task TransientDependencyGraph_ShouldBeDisposedWhenPageIsPopped()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddTransient<DisposableService>();
         services.AddTransient<ServiceDependentViewModel>();
         services.AddTransient<TestHomeViewModel>();
@@ -1187,7 +1187,7 @@ public class NavigationServiceTests
     public async Task ScopedViewModel_ShouldHaveOneInstancePerPage_WithIndependentDisposal()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddScoped<ScopedViewModel>();
         services.AddTransient<TestHomeViewModel>();
         var serviceProvider = services.BuildServiceProvider();
@@ -1219,7 +1219,7 @@ public class NavigationServiceTests
     public async Task PageScopeDisposal_WhenViewModelThrows_ShouldAbortThatScope_ButIsolateAcrossPages()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddTransient<DisposableService>();
         services.AddTransient<ThrowingDependencyViewModel>();
         services.AddTransient<KeepAliveViewModel>();
@@ -1250,7 +1250,7 @@ public class NavigationServiceTests
     public async Task ClearCache_WithSingletonKeepAlive_ShouldNotDisposeSingleton_AndAllowRenavigation()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddSingleton<KeepAliveViewModel>();
         var serviceProvider = services.BuildServiceProvider();
         var navigationService = (NavigationService)serviceProvider.GetRequiredService<INavigationService>();
@@ -1275,7 +1275,7 @@ public class NavigationServiceTests
     public async Task ClearCache_Sync_WithAsyncOnlyViewModel_ShouldThrowInvalidOperationException_PinPlatformBehavior()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddTransient<TestDetailViewModel>();
         services.AddTransient<TestHomeViewModel>();
         var serviceProvider = services.BuildServiceProvider();
@@ -1303,7 +1303,7 @@ public class NavigationServiceTests
     public async Task ConcurrentNavigationsAndClearCache_ShouldNotLeakScopes_OrThrow()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddTransient<TestHomeViewModel>();
         services.AddTransient<TestDetailViewModel>();
         services.AddTransient<KeepAliveViewModel>();
@@ -1372,7 +1372,7 @@ public class NavigationServiceTests
         TrackedDisposeViewModel.DisposeCount = 0;
 
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddTransient<TrackedDisposeViewModel>();
         var innerProvider = services.BuildServiceProvider();
         using var cts = new CancellationTokenSource();
@@ -1606,7 +1606,7 @@ public class NavigationServiceTests
     public async Task ViewModelReleased_FiresForSingletonPageTeardown_ButInstanceSurvives()
     {
         var services = new ServiceCollection();
-        services.AddFlowNavigation();
+        services.AddSingletonFlowNavigation();
         services.AddSingleton<SingletonViewModel>();
         services.AddTransient<TestHomeViewModel>();
         var serviceProvider = services.BuildServiceProvider();
