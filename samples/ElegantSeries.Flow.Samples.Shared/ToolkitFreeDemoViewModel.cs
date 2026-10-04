@@ -21,6 +21,8 @@ public sealed class ToolkitFreeDemoViewModel : NavigationViewModelBase, INavigat
         private set => SetProperty(ref _count, value);
     }
 
+    // INavigationAware requires both callbacks; this demo has nothing to do on
+    // activation/deactivation, so they are intentionally empty.
     public void OnNavigatedTo(object? parameter) { }
 
     public void OnNavigatedFrom() { }

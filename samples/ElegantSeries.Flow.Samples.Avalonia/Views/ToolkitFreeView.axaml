@@ -12,5 +12,6 @@
             <Button Content="Increment" Click="OnIncrementClicked" Width="120" Margin="0,0,8,0" />
             <Button Content="Back" Click="OnBackClicked" Width="120" />
         </StackPanel>
+        <TextBlock x:Name="ErrorText" Foreground="Red" Margin="0,8,0,0" />
     </StackPanel>
 </UserControl>

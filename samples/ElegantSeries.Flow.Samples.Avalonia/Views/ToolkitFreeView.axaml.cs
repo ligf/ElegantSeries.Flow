@@ -13,7 +13,9 @@ public partial class ToolkitFreeView : ElegantSeries.Flow.Avalonia.Views.BaseVie
     {
         if (ViewModel is not null)
         {
-            SampleHelpers.ObserveNavigation(ViewModel.LeaveAsync(), _ => { });
+            SampleHelpers.ObserveNavigation(ViewModel.LeaveAsync(), ReportError);
         }
     }
+
+    private void ReportError(string message) => ErrorText.Text = message;
 }
