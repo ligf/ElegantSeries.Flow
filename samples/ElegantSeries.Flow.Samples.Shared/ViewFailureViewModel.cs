@@ -17,7 +17,7 @@ public sealed partial class ViewFailureViewModel : BaseViewModel
 
     [RelayCommand]
     private Task NavigateToUnregisteredAsync()
-        => NavigateToAsync<UnregisteredDemoViewModel>("FailureRegion");
+        => NavigateToAsync<UnregisteredDemoViewModel>(RegionNames.FailureRegion);
 
     /// <summary>
     /// Called by <c>FailureDemoHost</c> when view creation fails. Runs on the

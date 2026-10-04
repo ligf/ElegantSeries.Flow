@@ -39,12 +39,12 @@ public partial class QuadrantsView : ElegantSeries.Flow.WPF.Views.BaseView<Quadr
         // pushing a duplicate when this page is revisited.
         // Each quadrant navigates independently: one failure must not block
         // the others.
-        await TryNavigate(() => navigation.NavigateToAsync<StackDemoViewModel, int>(0, "Q1", refreshIfActive: true));
-        await TryNavigate(() => navigation.NavigateToAsync<KeepAliveDemoViewModel>("Q2", NavigationMode.KeepAlive, refreshIfActive: true));
-        await TryNavigate(() => navigation.NavigateToAsync<ParamDemoViewModel, string>("Initial parameter", "Q3", refreshIfActive: true));
-        await TryNavigate(() => navigation.NavigateToAsync<ReplaceDemoViewModel>("Q4", refreshIfActive: true));
-        await TryNavigate(() => navigation.NavigateToAsync<ClearStackDemoViewModel>("Q5", refreshIfActive: true));
-        await TryNavigate(() => navigation.NavigateToAsync<RefreshDemoViewModel>("Q6", refreshIfActive: true));
+        await TryNavigate(() => navigation.NavigateToAsync<StackDemoViewModel, int>(0, RegionNames.Q1, refreshIfActive: true));
+        await TryNavigate(() => navigation.NavigateToAsync<KeepAliveDemoViewModel>(RegionNames.Q2, NavigationMode.KeepAlive, refreshIfActive: true));
+        await TryNavigate(() => navigation.NavigateToAsync<ParamDemoViewModel, string>("Initial parameter", RegionNames.Q3, refreshIfActive: true));
+        await TryNavigate(() => navigation.NavigateToAsync<ReplaceDemoViewModel>(RegionNames.Q4, refreshIfActive: true));
+        await TryNavigate(() => navigation.NavigateToAsync<ClearStackDemoViewModel>(RegionNames.Q5, refreshIfActive: true));
+        await TryNavigate(() => navigation.NavigateToAsync<RefreshDemoViewModel>(RegionNames.Q6, refreshIfActive: true));
 
         static async Task TryNavigate(Func<Task<bool>> navigate)
         {

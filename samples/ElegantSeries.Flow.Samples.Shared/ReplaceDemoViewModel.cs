@@ -16,9 +16,9 @@ public sealed partial class ReplaceDemoViewModel : BaseViewModel
 
     [RelayCommand]
     private Task ReplaceWithTargetAsync()
-        => NavigateToAsync<ReplaceTargetViewModel>("Q4", NavigationMode.Replace);
+        => NavigateToAsync<ReplaceTargetViewModel>(RegionNames.Q4, NavigationMode.Replace);
 
     [RelayCommand]
     private Task PushTargetAsync()
-        => NavigateToAsync<ReplaceTargetViewModel>("Q4");
+        => NavigateToAsync<ReplaceTargetViewModel>(RegionNames.Q4);
 }

@@ -19,5 +19,5 @@ public sealed partial class KeepAliveDemoViewModel : BaseViewModel
 
     [RelayCommand]
     private Task OpenTempPageAsync()
-        => NavigateToAsync<KeepAliveTempViewModel>("Q2");
+        => NavigateToAsync<KeepAliveTempViewModel>(RegionNames.Q2);
 }

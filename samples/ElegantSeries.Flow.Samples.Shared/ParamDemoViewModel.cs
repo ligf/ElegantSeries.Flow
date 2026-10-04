@@ -11,9 +11,9 @@ public sealed partial class ParamDemoViewModel : BaseViewModel
 {
     [RelayCommand]
     private Task SendHelloAsync()
-        => NavigateToAsync<ParamReceiverViewModel, string>("Hello from Q3", "Q3");
+        => NavigateToAsync<ParamReceiverViewModel, string>("Hello from Q3", RegionNames.Q3);
 
     [RelayCommand]
     private Task SendWorldAsync()
-        => NavigateToAsync<ParamReceiverViewModel, string>("World from Q3", "Q3");
+        => NavigateToAsync<ParamReceiverViewModel, string>("World from Q3", RegionNames.Q3);
 }

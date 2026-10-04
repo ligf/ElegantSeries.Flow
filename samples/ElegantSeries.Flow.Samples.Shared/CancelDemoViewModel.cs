@@ -21,7 +21,7 @@ public sealed partial class CancelDemoViewModel : BaseViewModel
         cts.Cancel(); // already-cancelled: the API throws before touching the stack
         try
         {
-            await NavigateToAsync<HomeViewModel>("MainRegion", cancellationToken: cts.Token);
+            await NavigateToAsync<HomeViewModel>(RegionNames.MainRegion, cancellationToken: cts.Token);
             Status = "Unexpected: navigation succeeded.";
         }
         catch (OperationCanceledException)

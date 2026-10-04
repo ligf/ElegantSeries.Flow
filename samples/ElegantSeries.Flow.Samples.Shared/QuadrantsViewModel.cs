@@ -28,7 +28,7 @@ public sealed partial class QuadrantsViewModel : BaseViewModel
     private Task ExternalPushQ1Async()
     {
         ExternalStatus = string.Empty;
-        var current = Navigation?.GetCurrentViewModel("Q1");
+        var current = Navigation?.GetCurrentViewModel(RegionNames.Q1);
         var depth = current switch
         {
             StackDemoViewModel root => root.Depth + 1,
@@ -37,14 +37,14 @@ public sealed partial class QuadrantsViewModel : BaseViewModel
         };
 
         return current is StackDemoViewModel
-            ? NavigateToAsync<StackChildViewModel, int>(depth, "Q1")
-            : NavigateToAsync<StackDemoViewModel, int>(depth, "Q1");
+            ? NavigateToAsync<StackChildViewModel, int>(depth, RegionNames.Q1)
+            : NavigateToAsync<StackDemoViewModel, int>(depth, RegionNames.Q1);
     }
 
     [RelayCommand]
     private async Task ExternalBackQ1Async()
     {
-        if (await base.GoBackAsync("Q1"))
+        if (await base.GoBackAsync(RegionNames.Q1))
             ExternalStatus = string.Empty;
         else
             ExternalStatus = "Q1 is already at its root — nothing to go back to.";

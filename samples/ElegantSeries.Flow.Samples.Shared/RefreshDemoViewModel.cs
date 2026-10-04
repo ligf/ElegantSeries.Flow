@@ -23,5 +23,5 @@ public sealed partial class RefreshDemoViewModel : BaseViewModel, INavigationAwa
 
     [RelayCommand]
     private Task RefreshAsync()
-        => NavigateToAsync<RefreshDemoViewModel>("Q6", refreshIfActive: true);
+        => NavigateToAsync<RefreshDemoViewModel>(RegionNames.Q6, refreshIfActive: true);
 }

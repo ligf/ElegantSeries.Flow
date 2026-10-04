@@ -13,12 +13,12 @@ public sealed partial class ClearStackChildViewModel : BaseViewModel
 
     [RelayCommand]
     private Task PushDemoAsync()
-        => NavigateToAsync<ClearStackDemoViewModel>("Q5");
+        => NavigateToAsync<ClearStackDemoViewModel>(RegionNames.Q5);
 
     [RelayCommand]
     private Task ClearStackAsync()
-        => NavigateToAsync<ClearStackDemoViewModel>("Q5", NavigationMode.ClearStack);
+        => NavigateToAsync<ClearStackDemoViewModel>(RegionNames.Q5, NavigationMode.ClearStack);
 
     [RelayCommand]
-    private Task GoBackAsync() => base.GoBackAsync("Q5");
+    private Task GoBackAsync() => base.GoBackAsync(RegionNames.Q5);
 }

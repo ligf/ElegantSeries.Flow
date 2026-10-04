@@ -17,37 +17,37 @@
             <Grid Grid.Row="0" Grid.Column="0" RowDefinitions="Auto,*">
                 <TextBlock Text="Q1 · Stack" Opacity="0.6" Margin="8,0" />
                 <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
-                    <flow:NavigationHost x:Name="Q1Host" RegionName="Q1" />
+                    <flow:NavigationHost x:Name="Q1Host" RegionName="{x:Static vm:RegionNames.Q1}" />
                 </Border>
             </Grid>
             <Grid Grid.Row="0" Grid.Column="1" RowDefinitions="Auto,*">
                 <TextBlock Text="Q2 · KeepAlive" Opacity="0.6" Margin="8,0" />
                 <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
-                    <flow:NavigationHost x:Name="Q2Host" RegionName="Q2" />
+                    <flow:NavigationHost x:Name="Q2Host" RegionName="{x:Static vm:RegionNames.Q2}" />
                 </Border>
             </Grid>
             <Grid Grid.Row="0" Grid.Column="2" RowDefinitions="Auto,*">
                 <TextBlock Text="Q3 · Typed Parameters" Opacity="0.6" Margin="8,0" />
                 <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
-                    <flow:NavigationHost x:Name="Q3Host" RegionName="Q3" />
+                    <flow:NavigationHost x:Name="Q3Host" RegionName="{x:Static vm:RegionNames.Q3}" />
                 </Border>
             </Grid>
             <Grid Grid.Row="1" Grid.Column="0" RowDefinitions="Auto,*">
                 <TextBlock Text="Q4 · Replace" Opacity="0.6" Margin="8,0" />
                 <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
-                    <flow:NavigationHost x:Name="Q4Host" RegionName="Q4" />
+                    <flow:NavigationHost x:Name="Q4Host" RegionName="{x:Static vm:RegionNames.Q4}" />
                 </Border>
             </Grid>
             <Grid Grid.Row="1" Grid.Column="1" RowDefinitions="Auto,*">
                 <TextBlock Text="Q5 · ClearStack" Opacity="0.6" Margin="8,0" />
                 <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
-                    <flow:NavigationHost x:Name="Q5Host" RegionName="Q5" />
+                    <flow:NavigationHost x:Name="Q5Host" RegionName="{x:Static vm:RegionNames.Q5}" />
                 </Border>
             </Grid>
             <Grid Grid.Row="1" Grid.Column="2" RowDefinitions="Auto,*">
                 <TextBlock Text="Q6 · Refresh" Opacity="0.6" Margin="8,0" />
                 <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="4">
-                    <flow:NavigationHost x:Name="Q6Host" RegionName="Q6" />
+                    <flow:NavigationHost x:Name="Q6Host" RegionName="{x:Static vm:RegionNames.Q6}" />
                 </Border>
             </Grid>
         </Grid>

@@ -29,8 +29,8 @@ public partial class MainWindow : Window
 
         // Navigate after the hosts are attached so the first pages are shown.
         // Failures are observed instead of fire-and-forget.
-        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<MenuViewModel>("Sidebar"), ReportError);
-        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<HomeViewModel>("MainRegion"), ReportError);
+        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<MenuViewModel>(RegionNames.Sidebar), ReportError);
+        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<HomeViewModel>(RegionNames.MainRegion), ReportError);
     }
 
     private void ReportError(string message) =>

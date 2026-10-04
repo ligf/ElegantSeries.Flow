@@ -780,12 +780,12 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void AotRouteAttribute_ShouldStoreViewType_AndThrowOnNull()
+    public void ViewForAttribute_ShouldStoreViewModelType_AndThrowOnNull()
     {
-        var attr = new AotRouteAttribute(typeof(TestView));
-        Assert.Equal(typeof(TestView), attr.ViewType);
+        var attr = new ViewForAttribute(typeof(TestHomeViewModel));
+        Assert.Equal(typeof(TestHomeViewModel), attr.ViewModelType);
 
-        Assert.Throws<ArgumentNullException>(() => new AotRouteAttribute(null!));
+        Assert.Throws<ArgumentNullException>(() => new ViewForAttribute(null!));
     }
 
     [Fact]
