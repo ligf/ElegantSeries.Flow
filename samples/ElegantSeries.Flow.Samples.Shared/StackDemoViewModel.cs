@@ -39,12 +39,12 @@ public sealed partial class StackDemoViewModel : BaseViewModel, INavigationAware
 
     [RelayCommand]
     private Task PushDeeperAsync()
-        => NavigateToAsync<StackChildViewModel, int>(Depth + 1, "Q1");
+        => NavigateToAsync<StackChildViewModel, int>(Depth + 1, RegionNames.Q1);
 
     [RelayCommand]
     private async Task GoBackAsync()
     {
-        if (await base.GoBackAsync("Q1"))
+        if (await base.GoBackAsync(RegionNames.Q1))
             StatusMessage = string.Empty;
         else
             StatusMessage = "Already at the root — nothing to go back to.";

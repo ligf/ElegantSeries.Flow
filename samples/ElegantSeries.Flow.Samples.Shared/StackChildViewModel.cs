@@ -21,8 +21,8 @@ public sealed partial class StackChildViewModel : BaseViewModel, INavigationAwar
 
     [RelayCommand]
     private Task PushDeeperAsync()
-        => NavigateToAsync<StackDemoViewModel, int>(Depth + 1, "Q1");
+        => NavigateToAsync<StackDemoViewModel, int>(Depth + 1, RegionNames.Q1);
 
     [RelayCommand]
-    private Task GoBackAsync() => base.GoBackAsync("Q1");
+    private Task GoBackAsync() => base.GoBackAsync(RegionNames.Q1);
 }

@@ -19,5 +19,5 @@ public sealed partial class ParamReceiverViewModel : BaseViewModel, INavigationA
     public void OnNavigatedFrom() { }
 
     [RelayCommand]
-    private Task GoBackAsync() => base.GoBackAsync("Q3");
+    private Task GoBackAsync() => base.GoBackAsync(RegionNames.Q3);
 }

@@ -24,7 +24,7 @@ public sealed partial class AsyncDisposeDemoViewModel : BaseViewModel, IAsyncDis
 
     [RelayCommand]
     private Task OpenHomeAsync()
-        => NavigateToAsync<HomeViewModel>("MainRegion");
+        => NavigateToAsync<HomeViewModel>(RegionNames.MainRegion);
 
     public ValueTask DisposeAsync()
     {

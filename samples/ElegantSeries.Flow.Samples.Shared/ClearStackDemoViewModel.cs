@@ -29,24 +29,24 @@ public sealed partial class ClearStackDemoViewModel : BaseViewModel, INavigation
 
     [RelayCommand]
     private Task PushChildAsync()
-        => NavigateToAsync<ClearStackChildViewModel>("Q5");
+        => NavigateToAsync<ClearStackChildViewModel>(RegionNames.Q5);
 
     [RelayCommand]
     private Task ClearStackAsync()
     {
-        if (Navigation?.GetCurrentViewModel("Q5") is ClearStackDemoViewModel)
+        if (Navigation?.GetCurrentViewModel(RegionNames.Q5) is ClearStackDemoViewModel)
         {
             StatusMessage = "Already the active page — ClearStack ignored (no-op).";
             return Task.CompletedTask;
         }
 
-        return NavigateToAsync<ClearStackDemoViewModel>("Q5", NavigationMode.ClearStack);
+        return NavigateToAsync<ClearStackDemoViewModel>(RegionNames.Q5, NavigationMode.ClearStack);
     }
 
     [RelayCommand]
     private async Task GoBackAsync()
     {
-        if (await base.GoBackAsync("Q5"))
+        if (await base.GoBackAsync(RegionNames.Q5))
             StatusMessage = string.Empty;
         else
             StatusMessage = "Already at the root — nothing to go back to.";

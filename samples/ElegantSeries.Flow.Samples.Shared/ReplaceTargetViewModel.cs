@@ -21,12 +21,12 @@ public sealed partial class ReplaceTargetViewModel : BaseViewModel
 
     [RelayCommand]
     private Task ReplaceWithDemoAsync()
-        => NavigateToAsync<ReplaceDemoViewModel>("Q4", NavigationMode.Replace);
+        => NavigateToAsync<ReplaceDemoViewModel>(RegionNames.Q4, NavigationMode.Replace);
 
     [RelayCommand]
     private async Task GoBackAsync()
     {
-        if (await base.GoBackAsync("Q4"))
+        if (await base.GoBackAsync(RegionNames.Q4))
             StatusMessage = string.Empty;
         else
             StatusMessage = "Nowhere to go back to — Replace does not grow the stack.";

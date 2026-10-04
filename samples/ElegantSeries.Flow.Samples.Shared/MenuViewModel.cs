@@ -13,47 +13,47 @@ public sealed partial class MenuViewModel : BaseViewModel
 {
     [RelayCommand]
     private Task GoHomeAsync()
-        => NavigateToAsync<HomeViewModel>("MainRegion");
+        => NavigateToAsync<HomeViewModel>(RegionNames.MainRegion);
 
     [RelayCommand]
     private Task GoDetailAsync()
-        => NavigateToAsync<DetailViewModel, string>("Hello from Menu", "MainRegion");
+        => NavigateToAsync<DetailViewModel, string>("Hello from Menu", RegionNames.MainRegion);
 
     [RelayCommand]
     private Task GoCounterAsync()
-        => NavigateToAsync<CounterViewModel>("MainRegion", NavigationMode.KeepAlive);
+        => NavigateToAsync<CounterViewModel>(RegionNames.MainRegion, NavigationMode.KeepAlive);
 
     [RelayCommand]
     private Task GoQuadrantsAsync()
-        => NavigateToAsync<QuadrantsViewModel>("MainRegion");
+        => NavigateToAsync<QuadrantsViewModel>(RegionNames.MainRegion);
 
     [RelayCommand]
     private Task GoGuardedAsync()
-        => NavigateToAsync<GuardedViewModel>("MainRegion");
+        => NavigateToAsync<GuardedViewModel>(RegionNames.MainRegion);
 
     [RelayCommand]
     private Task GoAsyncDemoAsync()
-        => NavigateToAsync<AsyncDemoViewModel>("MainRegion");
+        => NavigateToAsync<AsyncDemoViewModel>(RegionNames.MainRegion);
 
     [RelayCommand]
     private Task GoCacheDemoAsync()
-        => NavigateToAsync<CacheDemoViewModel>("MainRegion");
+        => NavigateToAsync<CacheDemoViewModel>(RegionNames.MainRegion);
 
     [RelayCommand]
     private Task GoCancelDemoAsync()
-        => NavigateToAsync<CancelDemoViewModel>("MainRegion");
+        => NavigateToAsync<CancelDemoViewModel>(RegionNames.MainRegion);
 
     [RelayCommand]
     private Task GoAsyncDisposeDemoAsync()
-        => NavigateToAsync<AsyncDisposeDemoViewModel>("MainRegion");
+        => NavigateToAsync<AsyncDisposeDemoViewModel>(RegionNames.MainRegion);
 
     [RelayCommand]
     private Task GoFactoryDemoAsync()
-        => NavigateToAsync<FactoryDemoViewModel>("MainRegion");
+        => NavigateToAsync<FactoryDemoViewModel>(RegionNames.MainRegion);
 
     [RelayCommand]
     private Task GoViewFailureDemoAsync()
-        => NavigateToAsync<ViewFailureViewModel>("MainRegion");
+        => NavigateToAsync<ViewFailureViewModel>(RegionNames.MainRegion);
 
     /// <summary>
     /// Raised when the user asks for a second window. Window creation is

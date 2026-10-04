@@ -22,12 +22,12 @@ public sealed partial class CacheDemoViewModel : BaseViewModel
 
     [RelayCommand]
     private Task OpenCounterAsync()
-        => NavigateToAsync<CounterViewModel>("MainRegion", NavigationMode.KeepAlive);
+        => NavigateToAsync<CounterViewModel>(RegionNames.MainRegion, NavigationMode.KeepAlive);
 
     [RelayCommand]
     private void ClearKeepAliveCache()
     {
-        Navigation?.ClearCache("MainRegion");
+        Navigation?.ClearCache(RegionNames.MainRegion);
         AppendLog("ClearCache(\"MainRegion\") — cached KeepAlive pages disposed.");
     }
 

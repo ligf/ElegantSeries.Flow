@@ -13,7 +13,7 @@
                     Width="240" HorizontalAlignment="Left" Margin="0,0,0,12" />
         </StackPanel>
         <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1" Margin="0,0,0,12">
-            <views:FailureDemoHost x:Name="FailureHost" RegionName="FailureRegion" />
+            <views:FailureDemoHost x:Name="FailureHost" RegionName="{x:Static vm:RegionNames.FailureRegion}" />
         </Border>
         <TextBlock Grid.Row="2" Text="{Binding StatusMessage}" TextWrapping="Wrap" FontSize="12" Opacity="0.7" />
     </Grid>

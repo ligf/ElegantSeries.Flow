@@ -9,5 +9,5 @@ namespace ElegantSeries.Flow.Samples.Shared;
 public sealed partial class KeepAliveTempViewModel : BaseViewModel
 {
     [RelayCommand]
-    private Task GoBackAsync() => base.GoBackAsync("Q2");
+    private Task GoBackAsync() => base.GoBackAsync(RegionNames.Q2);
 }
