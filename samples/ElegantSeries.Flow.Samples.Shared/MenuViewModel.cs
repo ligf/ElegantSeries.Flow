@@ -67,6 +67,10 @@ public sealed partial class MenuViewModel : BaseViewModel
     private Task GoEventsDemoAsync()
         => NavigateToAsync<EventsDemoViewModel>(RegionNames.MainRegion);
 
+    [RelayCommand]
+    private Task GoToolkitFreeDemoAsync()
+        => NavigateToAsync<ToolkitFreeDemoViewModel>(RegionNames.MainRegion);
+
     /// <summary>
     /// Raised when the user asks for a second window. Window creation is
     /// platform-specific, so the host app wires this up (see App startup):

@@ -112,3 +112,12 @@ Both samples demonstrate the library's full feature set:
 19. **Navigation events** — `RegionNavigated`, `ViewModelReleased`, and
     `RegionCacheCleared` observed live: push/pop a temp page in region A and
     clear its KeepAlive cache while this page stays subscribed.
+20. **Toolkit-free ViewModel** — the Toolkit-Free page's ViewModel derives from
+    `NavigationViewModelBase` (core package): manual `SetProperty`
+    notification, no CommunityToolkit.Mvvm; its buttons call public methods
+    from code-behind.
+21. **`ViewFor` attribute** — `HomeView` carries `[ViewFor(typeof(HomeViewModel))]`
+    as the compile-time view→ViewModel declaration for the future source
+    generator. The runtime still uses the manual `views.Register` call (it never
+    scans the attribute); when the generator ships, the manual call goes away —
+    never both.

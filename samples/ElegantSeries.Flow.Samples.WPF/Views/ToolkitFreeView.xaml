@@ -1,0 +1,21 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.ToolkitFreeView"
+             x:TypeArguments="vm:ToolkitFreeDemoViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:ToolkitFreeDemoViewModel, IsDesignTimeCreatable=False}">
+    <StackPanel Margin="24">
+        <TextBlock Text="Toolkit-Free ViewModel" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="This page's ViewModel derives from NavigationViewModelBase (core package): manual SetProperty notification, no CommunityToolkit.Mvvm. The buttons call its public methods from code-behind."
+                   Margin="0,0,0,12" TextWrapping="Wrap" Opacity="0.6" />
+        <TextBlock Text="{Binding Count, StringFormat='Count: {0}'}" FontSize="20" Margin="0,0,0,8" />
+        <StackPanel Orientation="Horizontal">
+            <Button Content="Increment" Click="OnIncrementClicked" Width="120" Margin="0,0,8,0" />
+            <Button Content="Back" Click="OnBackClicked" Width="120" />
+        </StackPanel>
+    </StackPanel>
+</flow:BaseView>
