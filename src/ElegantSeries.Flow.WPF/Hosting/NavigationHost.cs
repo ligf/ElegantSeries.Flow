@@ -54,8 +54,27 @@ public class NavigationHost : ContentControl, IDisposable
             typeof(NavigationHost),
             new PropertyMetadata("MainRegion", OnRegionNameChanged));
 
+    /// <summary>
+    /// Identifies the <see cref="NavigationService"/> dependency property.
+    /// </summary>
+    public static readonly DependencyProperty NavigationServiceProperty =
+        DependencyProperty.Register(
+            nameof(NavigationService),
+            typeof(INavigationService),
+            typeof(NavigationHost),
+            new PropertyMetadata(null, OnNavigationServiceChanged));
+
+    /// <summary>
+    /// Identifies the <see cref="ViewLocator"/> dependency property.
+    /// </summary>
+    public static readonly DependencyProperty ViewLocatorProperty =
+        DependencyProperty.Register(
+            nameof(ViewLocator),
+            typeof(IViewLocator),
+            typeof(NavigationHost),
+            new PropertyMetadata(null, OnViewLocatorChanged));
+
     private readonly NavigationHostController<FrameworkElement> _controller;
-    private INavigationService? _navigationService;
     private bool _disposed;
 
     // Mirrors RegionNameProperty in a plain field: the navigation service may raise
@@ -92,12 +111,15 @@ public class NavigationHost : ContentControl, IDisposable
                 view.DataContext = viewModel;
                 Content = view;
             },
+            clearView: () => Content = null,
             onViewCreationFailed: (viewModel, exception) => OnViewCreationFailed(viewModel, exception));
     }
 
     /// <summary>
     /// Gets or sets the navigation region this host displays. Defaults to <c>"MainRegion"</c>.
     /// Only <see cref="INavigationService.RegionNavigated"/> events for this region are handled.
+    /// Changing the value immediately re-displays the new region's current page
+    /// (or clears the host when the region is empty), so it can be data-bound.
     /// </summary>
     public string RegionName
     {
@@ -108,31 +130,22 @@ public class NavigationHost : ContentControl, IDisposable
     /// <summary>
     /// Gets or sets the navigation service to observe. Setting a new service
     /// unsubscribes from the previous one; setting <see langword="null"/> detaches.
+    /// This is a dependency property, so it can be data-bound.
     /// </summary>
     /// <exception cref="ObjectDisposedException">The host has been disposed.</exception>
     public INavigationService? NavigationService
     {
-        get => _navigationService;
+        get => (INavigationService?)GetValue(NavigationServiceProperty);
         set
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-
-            if (ReferenceEquals(_navigationService, value))
-            {
-                return;
-            }
-
-            _controller.Detach();
-            _navigationService = value;
-            if (value is not null)
-            {
-                _controller.Attach(value);
-            }
+            SetValue(NavigationServiceProperty, value);
         }
     }
 
     /// <summary>
     /// Gets or sets the view locator used to create views for navigated ViewModels.
+    /// This is a dependency property, so it can be data-bound.
     /// </summary>
     /// <remarks>
     /// Must be set before navigation occurs. If a navigation event arrives while
@@ -142,7 +155,11 @@ public class NavigationHost : ContentControl, IDisposable
     /// subscribers and swallows their exceptions by design, so the hook is the
     /// observable channel.)
     /// </remarks>
-    public IViewLocator? ViewLocator { get; set; }
+    public IViewLocator? ViewLocator
+    {
+        get => (IViewLocator?)GetValue(ViewLocatorProperty);
+        set => SetValue(ViewLocatorProperty, value);
+    }
 
     /// <summary>
     /// Called when view creation fails for a navigated ViewModel: the ViewModel
@@ -175,7 +192,9 @@ public class NavigationHost : ContentControl, IDisposable
 
         _disposed = true;
         _controller.Detach();
-        _navigationService = null;
+        // Bypass the CLR setter (which throws once disposed): the guarded
+        // callback ignores post-dispose changes, so this only drops the reference.
+        SetValue(NavigationServiceProperty, null);
     }
 
     private FrameworkElement CreateView(INavigationViewModel viewModel)
@@ -193,6 +212,39 @@ public class NavigationHost : ContentControl, IDisposable
     private static void OnRegionNameChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         // Runs on the UI thread (dependency properties have thread affinity).
-        ((NavigationHost)d)._regionName = (string?)e.NewValue ?? "MainRegion";
+        var host = (NavigationHost)d;
+        host._regionName = (string?)e.NewValue ?? "MainRegion";
+        host._controller.Refresh();
+    }
+
+    private static void OnNavigationServiceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        // Runs on the UI thread (dependency properties have thread affinity).
+        // Post-dispose changes (e.g. a stale binding update, or Dispose itself
+        // clearing the property) are ignored; explicit code-behind sets after
+        // dispose still fail fast via the CLR setter's ObjectDisposedException.
+        var host = (NavigationHost)d;
+        if (host._disposed)
+        {
+            return;
+        }
+
+        host._controller.Detach();
+        if (e.NewValue is INavigationService service)
+        {
+            host._controller.Attach(service);
+        }
+
+        // The host reflects its region: show the current page immediately
+        // instead of waiting for the next navigation event.
+        host._controller.Refresh();
+    }
+
+    private static void OnViewLocatorChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        // Runs on the UI thread (dependency properties have thread affinity).
+        // Views can now be created (or can no longer be created): re-display
+        // the region's current page.
+        ((NavigationHost)d)._controller.Refresh();
     }
 }

@@ -1,0 +1,29 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.RegionSwitchView"
+             x:TypeArguments="vm:RegionSwitchDemoViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
+             xmlns:host="clr-namespace:ElegantSeries.Flow.WPF.Hosting;assembly=ElegantSeries.Flow.WPF"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:RegionSwitchDemoViewModel, IsDesignTimeCreatable=False}">
+    <StackPanel Margin="12">
+        <TextBlock Text="Bound RegionName" FontSize="20" Margin="0,0,0,4" />
+        <TextBlock Text="The host below binds RegionName and NavigationService — no code-behind wiring for them. Flip the bound region: the host immediately shows the other region's current page."
+                   Opacity="0.6" TextWrapping="Wrap" Margin="0,0,0,8" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+            <Button Content="Push Counter to A" Command="{Binding PushCounterToACommand}" Margin="0,0,8,0" />
+            <Button Content="Push Detail to B" Command="{Binding PushDetailToBCommand}" Margin="0,0,8,0" />
+            <Button Content="Show A" Command="{Binding ShowACommand}" Margin="0,0,8,0" />
+            <Button Content="Show B" Command="{Binding ShowBCommand}" Margin="0,0,8,0" />
+            <TextBlock Text="{Binding DisplayedRegion, StringFormat='Showing: {0}'}" VerticalAlignment="Center" Opacity="0.6" />
+        </StackPanel>
+        <Border BorderBrush="Gray" BorderThickness="1" Height="300">
+            <host:NavigationHost x:Name="SwitchHost"
+                                RegionName="{Binding DisplayedRegion}"
+                                NavigationService="{Binding Navigation}" />
+        </Border>
+    </StackPanel>
+</flow:BaseView>

@@ -17,4 +17,6 @@ public static class RegionNames
     public const string Q4 = "Q4";
     public const string Q5 = "Q5";
     public const string Q6 = "Q6";
+    public const string SwitchA = "SwitchA";
+    public const string SwitchB = "SwitchB";
 }

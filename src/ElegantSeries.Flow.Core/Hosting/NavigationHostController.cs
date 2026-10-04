@@ -44,6 +44,7 @@ internal sealed class NavigationHostController<TView> where TView : class
     private readonly Func<string> _regionNameProvider;
     private readonly Func<INavigationViewModel, TView> _viewFactory;
     private readonly Action<TView, INavigationViewModel> _showView;
+    private readonly Action _clearView;
     private readonly Action<INavigationViewModel, Exception>? _onViewCreationFailed;
     // StrongBox works around a trim-analysis papercut: ConditionalWeakTable<TKey, TValue>
     // demands a public parameterless constructor on TValue (for GetOrCreateValue),
@@ -64,18 +65,21 @@ internal sealed class NavigationHostController<TView> where TView : class
     /// previously shown content is kept.
     /// </param>
     /// <param name="showView">Displays a view for a ViewModel. Always runs on the UI thread.</param>
+    /// <param name="clearView">Clears the displayed content. Always runs on the UI thread.</param>
     /// <param name="onViewCreationFailed">Optional hook invoked when <paramref name="viewFactory"/> throws.</param>
     public NavigationHostController(
         IDispatcher dispatcher,
         Func<string> regionNameProvider,
         Func<INavigationViewModel, TView> viewFactory,
         Action<TView, INavigationViewModel> showView,
+        Action clearView,
         Action<INavigationViewModel, Exception>? onViewCreationFailed = null)
     {
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _regionNameProvider = regionNameProvider ?? throw new ArgumentNullException(nameof(regionNameProvider));
         _viewFactory = viewFactory ?? throw new ArgumentNullException(nameof(viewFactory));
         _showView = showView ?? throw new ArgumentNullException(nameof(showView));
+        _clearView = clearView ?? throw new ArgumentNullException(nameof(clearView));
         _onViewCreationFailed = onViewCreationFailed;
     }
 
@@ -106,6 +110,45 @@ internal sealed class NavigationHostController<TView> where TView : class
         {
             DetachLocked();
         }
+    }
+
+    /// <summary>
+    /// Re-displays the current page of the region returned by the region-name
+    /// provider. Call when the region name changes: the host immediately shows
+    /// the new region's current content instead of keeping the previous region's
+    /// stale view; a region with no pages clears the host. Must be called on the
+    /// UI thread. Does nothing when detached.
+    /// </summary>
+    public void Refresh()
+    {
+        INavigationService? service;
+        lock (_eventLock)
+        {
+            service = _navigationService;
+        }
+
+        if (service is null)
+        {
+            return;
+        }
+
+        var regionName = _regionNameProvider();
+        if (string.IsNullOrWhiteSpace(regionName))
+        {
+            // A transient empty binding value clears the host instead of
+            // throwing from GetCurrentViewModel's argument validation.
+            _clearView();
+            return;
+        }
+
+        var viewModel = service.GetCurrentViewModel(regionName);
+        if (viewModel is null)
+        {
+            _clearView();
+            return;
+        }
+
+        ApplyNavigation(viewModel);
     }
 
     private void DetachLocked()
