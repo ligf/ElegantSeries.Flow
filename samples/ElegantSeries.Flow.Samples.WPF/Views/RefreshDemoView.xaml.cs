@@ -3,7 +3,7 @@ using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
-[ViewFor(typeof(RefreshDemoViewModel))]
+[ViewFor]
 public partial class RefreshDemoView : ElegantSeries.Flow.WPF.Views.BaseView<RefreshDemoViewModel>
 {
     public RefreshDemoView() => InitializeComponent();

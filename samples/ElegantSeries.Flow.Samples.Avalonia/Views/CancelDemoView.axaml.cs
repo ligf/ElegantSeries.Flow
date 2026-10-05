@@ -3,7 +3,7 @@ using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;
 
-[ViewFor(typeof(CancelDemoViewModel))]
+[ViewFor]
 public partial class CancelDemoView : ElegantSeries.Flow.Avalonia.Views.BaseView<CancelDemoViewModel>
 {
     public CancelDemoView() => InitializeComponent();

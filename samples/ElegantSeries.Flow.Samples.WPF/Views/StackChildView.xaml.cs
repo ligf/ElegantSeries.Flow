@@ -3,7 +3,7 @@ using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
-[ViewFor(typeof(StackChildViewModel))]
+[ViewFor]
 public partial class StackChildView : ElegantSeries.Flow.WPF.Views.BaseView<StackChildViewModel>
 {
     public StackChildView() => InitializeComponent();

@@ -12,7 +12,7 @@ namespace ElegantSeries.Flow.Samples.WPF.Views;
 /// (see <c>App</c>); never register the same ViewModel both manually and via
 /// the attribute — duplicate registration throws at startup.
 /// </summary>
-[ViewFor(typeof(HomeViewModel), Lifetime = ViewModelLifetime.ViewOnly)]
+[ViewFor(Lifetime = ViewModelLifetime.ViewOnly)]
 public partial class HomeView : ElegantSeries.Flow.WPF.Views.BaseView<HomeViewModel>
 {
     public HomeView() => InitializeComponent();

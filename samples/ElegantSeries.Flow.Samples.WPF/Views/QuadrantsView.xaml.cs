@@ -8,7 +8,7 @@ using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
-[ViewFor(typeof(QuadrantsViewModel))]
+[ViewFor]
 public partial class QuadrantsView : ElegantSeries.Flow.WPF.Views.BaseView<QuadrantsViewModel>
 {
     private readonly NavigationHost[] _hosts;

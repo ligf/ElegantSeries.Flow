@@ -15,13 +15,24 @@ public class ViewForGeneratorTests
         namespace ElegantSeries.Flow.Core.Routing
         {
             [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-            public sealed class ViewForAttribute(System.Type viewModelType) : System.Attribute
+            public sealed class ViewForAttribute : System.Attribute
             {
-                public System.Type ViewModelType { get; } = viewModelType;
+                public ViewForAttribute() { }
+                public ViewForAttribute(System.Type viewModelType) { ViewModelType = viewModelType; }
+                public System.Type? ViewModelType { get; }
                 public ViewModelLifetime Lifetime { get; set; } = ViewModelLifetime.Transient;
             }
 
             public enum ViewModelLifetime { Transient, Singleton, ViewOnly }
+        }
+        """;
+
+    private const string AvaloniaBaseViewStub = """
+        namespace ElegantSeries.Flow.Avalonia.Views
+        {
+            public abstract class BaseView<TViewModel>
+            {
+            }
         }
         """;
 
@@ -206,6 +217,144 @@ public class ViewForGeneratorTests
 
         Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
         Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void InfersViewModelFromBaseView()
+    {
+        var sources = AttributeStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel { }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Core.Routing.ViewFor]
+                public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel>
+                {
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "views.RegisterTransient<global::TestApp.Views.HomeView, global::TestApp.ViewModels.HomeViewModel>();",
+            generated.SourceText.ToString());
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
+    public void InfersViewModelFromIndirectBaseView()
+    {
+        var sources = AttributeStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel { }
+            }
+
+            namespace TestApp.Views
+            {
+                public class MiddleView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel>
+                {
+                }
+
+                [ElegantSeries.Flow.Core.Routing.ViewFor]
+                public class HomeView : MiddleView
+                {
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "views.RegisterTransient<global::TestApp.Views.HomeView, global::TestApp.ViewModels.HomeViewModel>();",
+            generated.SourceText.ToString());
+    }
+
+    [Fact]
+    public void MissingBaseView_ReportsFlowGen004()
+    {
+        var sources = AttributeStub + AvaloniaLocatorStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Core.Routing.ViewFor]
+                public class HomeView
+                {
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN004");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void ConflictingViewModel_ReportsFlowGen005()
+    {
+        var sources = AttributeStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel { }
+                public class OtherViewModel { }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Core.Routing.ViewFor(typeof(TestApp.ViewModels.OtherViewModel))]
+                public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel>
+                {
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN005");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void MatchingExplicitViewModel_NoDiagnostic()
+    {
+        var sources = AttributeStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel { }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Core.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel>
+                {
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "views.RegisterTransient<global::TestApp.Views.HomeView, global::TestApp.ViewModels.HomeViewModel>();",
+            generated.SourceText.ToString());
     }
 
     private static (GeneratorRunResult RunResult, ImmutableArray<Diagnostic> Diagnostics, Compilation UpdatedCompilation)

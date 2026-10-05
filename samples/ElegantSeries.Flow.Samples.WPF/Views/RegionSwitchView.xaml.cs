@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
-[ViewFor(typeof(RegionSwitchDemoViewModel))]
+[ViewFor]
 public partial class RegionSwitchView : ElegantSeries.Flow.WPF.Views.BaseView<RegionSwitchDemoViewModel>
 {
     public RegionSwitchView()

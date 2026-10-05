@@ -3,7 +3,7 @@ using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
-[ViewFor(typeof(CancelDemoViewModel))]
+[ViewFor]
 public partial class CancelDemoView : ElegantSeries.Flow.WPF.Views.BaseView<CancelDemoViewModel>
 {
     public CancelDemoView() => InitializeComponent();

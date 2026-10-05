@@ -3,7 +3,7 @@ using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;
 
-[ViewFor(typeof(GuardedViewModel))]
+[ViewFor]
 public partial class GuardedView : ElegantSeries.Flow.Avalonia.Views.BaseView<GuardedViewModel>
 {
     public GuardedView() => InitializeComponent();

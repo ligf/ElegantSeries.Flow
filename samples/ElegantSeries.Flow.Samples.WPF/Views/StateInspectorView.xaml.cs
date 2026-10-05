@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
-[ViewFor(typeof(StateInspectorViewModel))]
+[ViewFor]
 public partial class StateInspectorView : ElegantSeries.Flow.WPF.Views.BaseView<StateInspectorViewModel>
 {
     public StateInspectorView()

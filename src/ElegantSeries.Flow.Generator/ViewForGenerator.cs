@@ -15,11 +15,13 @@ namespace ElegantSeries.Flow.Generator;
 /// </summary>
 /// <remarks>
 /// <para>
-/// For every class carrying <c>[ViewFor(typeof(TViewModel))]</c>, the generator
-/// emits the equivalent of an explicit <c>IViewLocator.Register*</c> call into a
-/// generated <c>RegisterAttributedViews</c> extension method. The runtime never
-/// scans the attribute; everything is plain generated C#, so the output is
-/// Native AOT and trimming safe.
+/// For every class carrying <c>[ViewFor]</c>, the generator emits the equivalent
+/// of an explicit <c>IViewLocator.Register*</c> call into a generated
+/// <c>RegisterAttributedViews</c> extension method. The ViewModel type is either
+/// given explicitly (<c>[ViewFor(typeof(TViewModel))]</c>) or inferred from the
+/// view's <c>BaseView&lt;TViewModel&gt;</c> base class. The runtime never scans
+/// the attribute; everything is plain generated C#, so the output is Native AOT
+/// and trimming safe.
 /// </para>
 /// <para>
 /// The platform is detected from the compilation: exactly one of the
@@ -61,13 +63,15 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
     private sealed class ViewMapping
     {
-        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime)
+        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel)
         {
             ViewName = viewName;
             ViewModelName = viewModelName;
             RegisterMethod = registerMethod;
             Location = location;
             InvalidLifetime = invalidLifetime;
+            CannotInferViewModel = cannotInferViewModel;
+            ConflictingBaseViewModel = conflictingBaseViewModel;
         }
 
         public string ViewName { get; }
@@ -81,6 +85,19 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         /// <see langword="null"/>.
         /// </summary>
         public string? InvalidLifetime { get; }
+
+        /// <summary>
+        /// True when <c>[ViewFor]</c> omits the ViewModel type and it cannot be
+        /// inferred from a <c>BaseView&lt;TViewModel&gt;</c> base class (FLOWGEN004).
+        /// </summary>
+        public bool CannotInferViewModel { get; }
+
+        /// <summary>
+        /// The <c>BaseView&lt;T&gt;</c> type argument when it conflicts with an
+        /// explicitly specified ViewModel type (FLOWGEN005); otherwise
+        /// <see langword="null"/>.
+        /// </summary>
+        public string? ConflictingBaseViewModel { get; }
     }
 
     private static ViewMapping? GetMapping(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
@@ -93,9 +110,37 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             return null;
         }
 
-        if (attribute.ConstructorArguments.Length == 0 ||
-            attribute.ConstructorArguments[0].Kind != TypedConstantKind.Type ||
-            attribute.ConstructorArguments[0].Value is not INamedTypeSymbol viewModelType)
+        var format = SymbolDisplayFormat.FullyQualifiedFormat;
+        var viewName = viewType.ToDisplayString(format);
+
+        // The ViewModel type is either explicit ([ViewFor(typeof(VM))]) or inferred
+        // from the view's BaseView<TViewModel> base class ([ViewFor]).
+        var baseViewModel = FindBaseViewModel(viewType);
+        string? viewModelName = null;
+        var cannotInfer = false;
+        string? conflictingBaseViewModel = null;
+
+        if (attribute.ConstructorArguments.Length == 0)
+        {
+            if (baseViewModel is not null)
+            {
+                viewModelName = baseViewModel.ToDisplayString(format);
+            }
+            else
+            {
+                cannotInfer = true;
+            }
+        }
+        else if (attribute.ConstructorArguments[0].Value is INamedTypeSymbol explicitViewModel)
+        {
+            viewModelName = explicitViewModel.ToDisplayString(format);
+            if (baseViewModel is not null &&
+                !SymbolEqualityComparer.Default.Equals(baseViewModel, explicitViewModel))
+            {
+                conflictingBaseViewModel = baseViewModel.ToDisplayString(format);
+            }
+        }
+        else
         {
             // Unresolvable ViewModel type argument; the compiler already reports it.
             return null;
@@ -124,13 +169,37 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                 break;
         }
 
-        var format = SymbolDisplayFormat.FullyQualifiedFormat;
         return new ViewMapping(
-            viewType.ToDisplayString(format),
-            viewModelType.ToDisplayString(format),
+            viewName,
+            viewModelName ?? string.Empty,
             registerMethod ?? string.Empty,
             location,
-            invalidLifetime);
+            invalidLifetime,
+            cannotInfer,
+            conflictingBaseViewModel);
+    }
+
+    /// <summary>
+    /// Walks the view's base-type chain for the framework's
+    /// <c>BaseView&lt;TViewModel&gt;</c> (WPF or Avalonia). Returns the concrete
+    /// <c>TViewModel</c> type argument, or <see langword="null"/> when the view
+    /// does not inherit it — or when the argument is an open type parameter,
+    /// which cannot be inferred from.
+    /// </summary>
+    private static INamedTypeSymbol? FindBaseViewModel(INamedTypeSymbol viewType)
+    {
+        for (var current = viewType.BaseType; current is not null; current = current.BaseType)
+        {
+            var original = current.OriginalDefinition;
+            if (original is { Name: "BaseView", Arity: 1 } &&
+                original.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) is
+                    "global::ElegantSeries.Flow.Avalonia.Views" or "global::ElegantSeries.Flow.WPF.Views")
+            {
+                return current.TypeArguments.FirstOrDefault() as INamedTypeSymbol;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -194,6 +263,30 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         }
 
         var locatorName = avaloniaLocator is not null ? AvaloniaLocatorMetadataName : WpfLocatorMetadataName;
+
+        // A [ViewFor] without a ViewModel type requires BaseView<TViewModel> to
+        // infer from; an explicit type conflicting with the base class is
+        // almost certainly a mistake. Both are compile-time errors.
+        foreach (var mapping in mappings)
+        {
+            if (mapping.CannotInferViewModel)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.CannotInferViewModel, mapping.Location, mapping.ViewName));
+                return;
+            }
+
+            if (mapping.ConflictingBaseViewModel is not null)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.ConflictingViewModel,
+                    mapping.Location,
+                    mapping.ViewName,
+                    mapping.ViewModelName,
+                    mapping.ConflictingBaseViewModel));
+                return;
+            }
+        }
 
         // An unrecognized Lifetime (only reachable via an explicit integral cast)
         // is a compile-time error; the runtime would otherwise misbehave silently.
@@ -288,6 +381,22 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             id: "FLOWGEN003",
             title: "Invalid ViewFor lifetime",
             messageFormat: "Unknown Lifetime '{0}' on [ViewFor]; expected Transient, Singleton, or ViewOnly",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor CannotInferViewModel = new DiagnosticDescriptor(
+            id: "FLOWGEN004",
+            title: "Cannot infer ViewModel type for [ViewFor]",
+            messageFormat: "[ViewFor] on view '{0}' does not specify a ViewModel type, and the view does not inherit BaseView<TViewModel>; the ViewModel type cannot be inferred",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor ConflictingViewModel = new DiagnosticDescriptor(
+            id: "FLOWGEN005",
+            title: "Conflicting ViewModel type for [ViewFor]",
+            messageFormat: "[ViewFor] on view '{0}' specifies ViewModel '{1}', but the view inherits BaseView<{2}>; the types must match",
             category: "ElegantSeries.Flow.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);

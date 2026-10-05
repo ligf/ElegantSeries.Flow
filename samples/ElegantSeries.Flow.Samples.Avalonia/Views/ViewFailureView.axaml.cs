@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;
 
-[ViewFor(typeof(ViewFailureViewModel))]
+[ViewFor]
 public partial class ViewFailureView : ElegantSeries.Flow.Avalonia.Views.BaseView<ViewFailureViewModel>
 {
     public ViewFailureView()

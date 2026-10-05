@@ -7,7 +7,7 @@ using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
-[ViewFor(typeof(ViewFailureViewModel))]
+[ViewFor]
 public partial class ViewFailureView : ElegantSeries.Flow.WPF.Views.BaseView<ViewFailureViewModel>
 {
     public ViewFailureView()

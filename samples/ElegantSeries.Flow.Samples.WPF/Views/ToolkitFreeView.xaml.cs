@@ -4,7 +4,7 @@ using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
-[ViewFor(typeof(ToolkitFreeDemoViewModel))]
+[ViewFor]
 public partial class ToolkitFreeView : ElegantSeries.Flow.WPF.Views.BaseView<ToolkitFreeDemoViewModel>
 {
     public ToolkitFreeView() => InitializeComponent();
