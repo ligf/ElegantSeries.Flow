@@ -3,7 +3,7 @@ using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;
 
-[ViewFor(typeof(ParamReceiverViewModel))]
+[ViewFor]
 public partial class ParamReceiverView : ElegantSeries.Flow.Avalonia.Views.BaseView<ParamReceiverViewModel>
 {
     public ParamReceiverView() => InitializeComponent();

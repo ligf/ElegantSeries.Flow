@@ -3,7 +3,7 @@ using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;
 
-[ViewFor(typeof(KeepAliveTempViewModel))]
+[ViewFor]
 public partial class KeepAliveTempView : ElegantSeries.Flow.Avalonia.Views.BaseView<KeepAliveTempViewModel>
 {
     public KeepAliveTempView() => InitializeComponent();

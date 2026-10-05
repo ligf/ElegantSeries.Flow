@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;
 
-[ViewFor(typeof(QuadrantsViewModel))]
+[ViewFor]
 public partial class QuadrantsView : ElegantSeries.Flow.Avalonia.Views.BaseView<QuadrantsViewModel>
 {
     private readonly NavigationHost[] _hosts;

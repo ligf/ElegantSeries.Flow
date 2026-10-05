@@ -15,6 +15,7 @@
         <Button Content="Cancellation" Command="{Binding GoCancelDemoCommand}" Margin="0,0,0,8" />
         <Button Content="Async Dispose" Command="{Binding GoAsyncDisposeDemoCommand}" Margin="0,0,0,8" />
         <Button Content="Custom Factory" Command="{Binding GoFactoryDemoCommand}" Margin="0,0,0,8" />
+        <Button Content="Manual Registration" Command="{Binding GoManualDemoCommand}" Margin="0,0,0,8" />
         <Button Content="View Failure" Command="{Binding GoViewFailureDemoCommand}" Margin="0,0,0,8" />
         <Button Content="Bound Region" Command="{Binding GoRegionSwitchDemoCommand}" Margin="0,0,0,8" />
         <Button Content="State Inspector" Command="{Binding GoStateInspectorCommand}" Margin="0,0,0,8" />

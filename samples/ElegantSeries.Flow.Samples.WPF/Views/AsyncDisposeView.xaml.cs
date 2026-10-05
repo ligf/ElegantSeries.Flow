@@ -3,7 +3,7 @@ using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
-[ViewFor(typeof(AsyncDisposeDemoViewModel))]
+[ViewFor]
 public partial class AsyncDisposeView : ElegantSeries.Flow.WPF.Views.BaseView<AsyncDisposeDemoViewModel>
 {
     public AsyncDisposeView() => InitializeComponent();

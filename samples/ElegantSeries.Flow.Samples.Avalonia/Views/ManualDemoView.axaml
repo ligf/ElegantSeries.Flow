@@ -1,0 +1,11 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.ManualDemoView"
+             x:DataType="vm:ManualDemoViewModel">
+    <StackPanel Margin="24">
+        <TextBlock Text="Manual Registration" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="This view carries no [ViewFor] attribute. It is registered the traditional way in App: views.Register&lt;ManualDemoView, ManualDemoViewModel&gt;(). Generated and manual registration coexist — pick one per ViewModel."
+                   Margin="0,0,0,12" TextWrapping="Wrap" Opacity="0.6" />
+    </StackPanel>
+</UserControl>

@@ -3,7 +3,7 @@ using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;
 
-[ViewFor(typeof(CacheDemoViewModel))]
+[ViewFor]
 public partial class CacheDemoView : ElegantSeries.Flow.Avalonia.Views.BaseView<CacheDemoViewModel>
 {
     public CacheDemoView() => InitializeComponent();

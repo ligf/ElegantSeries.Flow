@@ -50,6 +50,13 @@ public enum ViewModelLifetime
 /// declaration.
 /// </para>
 /// <para>
+/// The ViewModel type can be omitted when the View inherits
+/// <c>BaseView&lt;TViewModel&gt;</c>: the generator infers it from the base
+/// class. Pass it explicitly only for Views that do not inherit
+/// <c>BaseView&lt;TViewModel&gt;</c>. When both are present, they must agree —
+/// a mismatch is reported as a compile-time error.
+/// </para>
+/// <para>
 /// <b>Manual vs. generated registration:</b> both mechanisms are supported, but
 /// pick one per ViewModel. View registration is unique per ViewModel type — if
 /// a ViewModel is registered both manually and via a generated
@@ -58,16 +65,36 @@ public enum ViewModelLifetime
 /// <see cref="InvalidOperationException"/> at startup.
 /// </para>
 /// </remarks>
-/// <param name="viewModelType">The ViewModel type displayed by the decorated View.</param>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-public sealed class ViewForAttribute(
-    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type viewModelType) : Attribute
+public sealed class ViewForAttribute : Attribute
 {
     /// <summary>
-    /// Gets the ViewModel type displayed by the decorated View.
+    /// Initializes the attribute without an explicit ViewModel type. The source
+    /// generator infers the ViewModel from the View's
+    /// <c>BaseView&lt;TViewModel&gt;</c> base class.
+    /// </summary>
+    public ViewForAttribute()
+    {
+    }
+
+    /// <summary>
+    /// Initializes the attribute with an explicit ViewModel type. Use this for
+    /// Views that do not inherit <c>BaseView&lt;TViewModel&gt;</c>.
+    /// </summary>
+    /// <param name="viewModelType">The ViewModel type displayed by the decorated View.</param>
+    public ViewForAttribute(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type viewModelType)
+    {
+        ViewModelType = viewModelType ?? throw new ArgumentNullException(nameof(viewModelType));
+    }
+
+    /// <summary>
+    /// Gets the ViewModel type displayed by the decorated View, or
+    /// <see langword="null"/> when it is inferred from the View's
+    /// <c>BaseView&lt;TViewModel&gt;</c> base class.
     /// </summary>
     [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
-    public Type ViewModelType { get; } = viewModelType ?? throw new ArgumentNullException(nameof(viewModelType));
+    public Type? ViewModelType { get; }
 
     /// <summary>
     /// Gets or sets how the source generator registers the ViewModel in

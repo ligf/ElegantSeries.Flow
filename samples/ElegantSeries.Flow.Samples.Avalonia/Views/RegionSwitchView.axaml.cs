@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;
 
-[ViewFor(typeof(RegionSwitchDemoViewModel))]
+[ViewFor]
 public partial class RegionSwitchView : ElegantSeries.Flow.Avalonia.Views.BaseView<RegionSwitchDemoViewModel>
 {
     public RegionSwitchView()
