@@ -144,27 +144,24 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         // `Lifetime = ViewModelLifetime.Singleton` and integral casts like
         // `Lifetime = (ViewModelLifetime)1` to the member name, and yields the raw
         // value text for values with no matching member (e.g. `(ViewModelLifetime)99`).
-        // Assumption: ViewModelLifetime uses the default (int) underlying type, so the
-        // boxed TypedConstant value is an int. If the enum ever declares an explicit
-        // underlying type, extend the pattern below or invalid values will silently
-        // fall back to Transient and miss FLOWGEN003.
+        // The boxed values are compared with Equals: Roslyn boxes both sides with
+        // the enum's own underlying type, so this works for any underlying type.
         foreach (var namedArgument in attribute.NamedArguments)
         {
             if (namedArgument.Key == "Lifetime" &&
-                namedArgument.Value.Value is int intValue &&
+                namedArgument.Value.Value is { } rawValue &&
                 namedArgument.Value.Type is INamedTypeSymbol enumType)
             {
                 foreach (var member in enumType.GetMembers().OfType<IFieldSymbol>())
                 {
                     if (member.HasConstantValue &&
-                        member.ConstantValue is int memberValue &&
-                        memberValue == intValue)
+                        Equals(rawValue, member.ConstantValue))
                     {
                         return member.Name;
                     }
                 }
 
-                return intValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return rawValue.ToString();
             }
         }
 
