@@ -189,7 +189,13 @@ public sealed partial class NavigationService
                     {
                         // The cached entry was re-validated before acquiring the lock,
                         // so no race adoption is needed here.
-                        if (stack.Count > 0 && stack.Peek().ViewModel.GetType() == typeof(TViewModel))
+                        // An explicit navigation mode takes precedence over the same-type
+                        // no-op: Replace/ClearStack/KeepAlive express stack surgery or reuse
+                        // intent that must not be silently swallowed when the target type is
+                        // already the active page. The no-op/refresh shortcut below only
+                        // applies to the default New mode.
+                        if (mode == NavigationMode.New &&
+                            stack.Count > 0 && stack.Peek().ViewModel.GetType() == typeof(TViewModel))
                         {
                             // No-op: a page of the same type is already the active page.
                             // The freshly resolved instance is abandoned and its page scope
@@ -198,9 +204,15 @@ public sealed partial class NavigationService
                             ownedScope = null;
                             if (refreshIfActive)
                             {
-                                // Refresh: keep the active entry, its stack slot and its
-                                // page scope; only its activation callbacks run again.
-                                refreshEntry = stack.Peek();
+                                // Refresh: keep the active ViewModel, its stack slot, its
+                                // mode and its page scope; only the activation callbacks
+                                // run again. The entry is swapped so the new parameter is
+                                // persisted — a later GoBack re-activates with the refreshed
+                                // parameter, not the original one (mirrors pop-to-existing).
+                                var current = stack.Pop();
+                                refreshEntry = new NavigationEntry(
+                                    current.RegionName, current.ViewModel, parameter, current.Mode, current.Scope);
+                                stack.Push(refreshEntry);
                             }
 
                             success = true;

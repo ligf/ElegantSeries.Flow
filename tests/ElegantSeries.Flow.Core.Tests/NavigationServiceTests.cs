@@ -1518,6 +1518,83 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task NavigateToAsync_Refresh_PersistsNewParameterForGoBack()
+    {
+        await _navigationService.NavigateToAsync<RefreshableViewModel, string>("first");
+        var vm = (RefreshableViewModel)_navigationService.GetCurrentViewModel()!;
+
+        await _navigationService.NavigateToAsync<RefreshableViewModel, string>("second", refreshIfActive: true);
+        Assert.Equal("second", vm.LastParameter);
+
+        await _navigationService.NavigateToAsync<TestDetailViewModel, string>("detail");
+        Assert.True(_navigationService.CanGoBack());
+
+        await _navigationService.GoBackAsync();
+
+        Assert.Same(vm, _navigationService.GetCurrentViewModel());
+        // The refreshed parameter was persisted on the stack entry, so GoBack
+        // re-activates with "second", not the original "first".
+        Assert.Equal("second", vm.LastParameter);
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_Replace_ToActiveType_ReplacesEntry()
+    {
+        await _navigationService.NavigateToAsync<RefreshableViewModel, string>("first");
+        var first = (RefreshableViewModel)_navigationService.GetCurrentViewModel()!;
+
+        // Explicit Replace takes precedence over the same-type no-op.
+        var result = await _navigationService.NavigateToAsync<RefreshableViewModel, string>(
+            "second", mode: NavigationMode.Replace);
+
+        Assert.True(result);
+        var second = (RefreshableViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.NotSame(first, second);
+        Assert.Equal("second", second.LastParameter);
+        Assert.Equal(1, second.NavigatedToCount);
+        Assert.False(_navigationService.CanGoBack());
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_ClearStack_ToActiveType_ClearsStackAndPushesFresh()
+    {
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await _navigationService.NavigateToAsync<RefreshableViewModel, string>("first");
+        var first = (RefreshableViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.True(_navigationService.CanGoBack());
+
+        // Explicit ClearStack takes precedence over the same-type no-op.
+        var result = await _navigationService.NavigateToAsync<RefreshableViewModel, string>(
+            "second", mode: NavigationMode.ClearStack);
+
+        Assert.True(result);
+        var second = (RefreshableViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.NotSame(first, second);
+        Assert.Equal("second", second.LastParameter);
+        Assert.False(_navigationService.CanGoBack());
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_KeepAlive_ToActiveType_ReactivatesWithNewParameter()
+    {
+        await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "first", mode: NavigationMode.KeepAlive);
+        var vm = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.Equal("first", vm.LastParameter);
+
+        // Explicit KeepAlive takes precedence over the same-type no-op: the
+        // cached (active) instance is re-activated with the new parameter.
+        var result = await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "second", mode: NavigationMode.KeepAlive);
+
+        Assert.True(result);
+        Assert.Same(vm, _navigationService.GetCurrentViewModel());
+        Assert.Equal("second", vm.LastParameter);
+        Assert.False(vm.Disposed);
+        Assert.False(_navigationService.CanGoBack());
+    }
+
+    [Fact]
     public async Task INavigationGuardWithContext_ReceivesFullContext()
     {
         await _navigationService.NavigateToAsync<ContextGuardViewModel>();

@@ -130,12 +130,14 @@ active ViewModel to a View. The typical pattern is a `ContentControl`-style host
 `GetCurrentViewModel()` and refreshed on the `RegionNavigated` event. For AOT-safe
 ViewModel→View mapping, register views explicitly via `views.Register` /
 `views.RegisterTransient` / `views.RegisterSingleton` inside `services.AddFlowViews(...)`
-— no runtime reflection, no naming conventions. (The `[ViewFor]` attribute in
-`ElegantSeries.Flow.Core.Routing` goes on the View class and declares its ViewModel;
-it is a reserved compile-time contract for a future source generator that will emit
-the same registrations — it is not consumed at runtime today. Register a ViewModel
-either manually or via the attribute, not both: duplicates throw
-`InvalidOperationException` at startup.)
+— no runtime reflection, no naming conventions. Alternatively, put a `[ViewFor]`
+attribute (`ElegantSeries.Flow.Core.Routing`) on the View class declaring its ViewModel
+and let the ElegantSeries.Flow source generator emit the same registrations into a
+generated `RegisterAttributedViews()` extension (call it inside `AddFlowViews`); the
+attribute's `Lifetime` selects `Transient` (default), `Singleton`, or `ViewOnly`
+(mapping only — register the ViewModel in DI yourself). The runtime never scans the
+attribute. Register a ViewModel either manually or via the attribute, not both:
+duplicates throw `InvalidOperationException` at startup.)
 
 ## Packages
 
@@ -145,6 +147,7 @@ either manually or via the attribute, not both: duplicates throw
 | `ElegantSeries.Flow.Mvvm` | Optional CommunityToolkit.Mvvm integration: `BaseViewModel` (`ElegantSeries.Flow.Mvvm`) |
 | `ElegantSeries.Flow.WPF` | WPF host: `NavigationHost`, `BaseView<TViewModel>`, `ViewLocator` |
 | `ElegantSeries.Flow.Avalonia` | Avalonia host: `NavigationHost`, `BaseView<TViewModel>`, `ViewLocator` |
+| `ElegantSeries.Flow.Generator` | Roslyn source generator: emits `IViewLocator` registrations from `[ViewFor]` attributes (Analyzer-only, no runtime dependency) |
 
 ## UI integration
 
@@ -348,12 +351,12 @@ are serialized with an async lock; shared state is guarded by a dedicated lock.
 The library sets `IsAotCompatible=true` and annotates generic ViewModel parameters with
 `[DynamicallyAccessedMembers(PublicConstructors)]`. ViewModels are resolved through
 `IServiceProvider` — register them in DI and avoid `Activator.CreateInstance` at the
-app layer. The `[ViewFor]` attribute (on the View class, declaring its ViewModel) is a
-reserved compile-time contract for a future source generator; it is not consumed at
-runtime today. Note: the WPF sample app itself
+app layer. The `[ViewFor]` attribute (on the View class, declaring its ViewModel) is
+consumed by the ElegantSeries.Flow source generator, which emits the equivalent
+`IViewLocator` registrations at compile time; it is not scanned at runtime. Note: the WPF sample app itself
 cannot be NativeAOT-published (WPF as a framework does not support Native AOT); the
 Avalonia sample has `PublishAot=true` in its csproj as the proof of the
-framework's AOT story (a Native AOT publish smoke test in CI is planned).
+framework's AOT story (verified by the Native AOT publish smoke test in CI).
 
 ## API overview
 
