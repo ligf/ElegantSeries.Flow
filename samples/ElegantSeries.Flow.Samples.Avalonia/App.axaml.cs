@@ -46,6 +46,11 @@ public partial class App : Application
         {
             views.RegisterAttributedViews();
 
+            // Manual view registration: ManualDemoView carries no [ViewFor]
+            // attribute. This is the traditional alternative to generated
+            // registration — both mechanisms coexist; pick one per ViewModel.
+            views.Register<ManualDemoView, ManualDemoViewModel>();
+
             // Custom view factory: the factory overload does not touch DI, so
             // the ViewModel needs its own DI registration (see above). Use a
             // factory when the view needs constructor arguments or other
