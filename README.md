@@ -1,5 +1,7 @@
 # ElegantSeries.Flow
 
+English | [中文](README.zh-CN.md)
+
 [![NuGet](https://img.shields.io/nuget/v/ElegantSeries.Flow.svg)](https://www.nuget.org/packages/ElegantSeries.Flow)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 ![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4.svg)
