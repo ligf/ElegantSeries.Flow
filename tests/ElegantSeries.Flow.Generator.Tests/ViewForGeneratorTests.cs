@@ -141,6 +141,31 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void InvalidLifetimeCast_ReportsFlowGen003()
+    {
+        var sources = AttributeStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel { }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Core.Routing.ViewFor(
+                    typeof(TestApp.ViewModels.HomeViewModel),
+                    Lifetime = (ElegantSeries.Flow.Core.Routing.ViewModelLifetime)99)]
+                public class HomeView { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN003");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
     public void NoPlatformLocator_EmitsNothing()
     {
         var sources = AttributeStub + BasicViews;

@@ -106,6 +106,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         string? invalidLifetime = null;
         switch (lifetimeName)
         {
+            case null:
             case LifetimeTransient:
                 registerMethod = "RegisterTransient";
                 break;
@@ -116,8 +117,8 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                 registerMethod = "Register";
                 break;
             default:
-                // Not one of the known ViewModelLifetime members (only reachable
-                // via an explicit integral cast); reported as FLOWGEN003 below.
+                // A raw integral value with no matching ViewModelLifetime member
+                // (only reachable via an explicit cast); reported as FLOWGEN003 below.
                 registerMethod = null;
                 invalidLifetime = lifetimeName;
                 break;
@@ -132,29 +133,38 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             invalidLifetime);
     }
 
-    private static string GetLifetimeName(AttributeData attribute)
+    /// <summary>
+    /// Resolves the <c>Lifetime</c> named argument to a <c>ViewModelLifetime</c>
+    /// member name, or to the raw integral value text when it matches no member.
+    /// Returns <see langword="null"/> when the argument is not specified.
+    /// </summary>
+    private static string? GetLifetimeName(AttributeData attribute)
     {
-        var syntax = attribute.ApplicationSyntaxReference?.GetSyntax();
-        if (syntax is AttributeSyntax attributeSyntax &&
-            attributeSyntax.ArgumentList is AttributeArgumentListSyntax argumentList)
+        // Read the enum member semantically (not from syntax): this resolves both
+        // `Lifetime = ViewModelLifetime.Singleton` and integral casts like
+        // `Lifetime = (ViewModelLifetime)1` to the member name, and yields the raw
+        // value text for values with no matching member (e.g. `(ViewModelLifetime)99`).
+        foreach (var namedArgument in attribute.NamedArguments)
         {
-            foreach (var argument in argumentList.Arguments)
+            if (namedArgument.Key == "Lifetime" &&
+                namedArgument.Value.Value is int intValue &&
+                namedArgument.Value.Type is INamedTypeSymbol enumType)
             {
-                if (argument.NameEquals?.Name.Identifier.Text == "Lifetime" &&
-                    argument.Expression is MemberAccessExpressionSyntax memberAccess)
+                foreach (var member in enumType.GetMembers().OfType<IFieldSymbol>())
                 {
-                    var name = memberAccess.Name.Identifier.Text;
-                    if (name == LifetimeTransient || name == LifetimeSingleton || name == LifetimeViewOnly)
+                    if (member.HasConstantValue &&
+                        member.ConstantValue is int memberValue &&
+                        memberValue == intValue)
                     {
-                        return name;
+                        return member.Name;
                     }
-
-                    return name;
                 }
+
+                return intValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
         }
 
-        return LifetimeTransient;
+        return null;
     }
 
     private static void Generate(
