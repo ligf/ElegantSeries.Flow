@@ -144,6 +144,10 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         // `Lifetime = ViewModelLifetime.Singleton` and integral casts like
         // `Lifetime = (ViewModelLifetime)1` to the member name, and yields the raw
         // value text for values with no matching member (e.g. `(ViewModelLifetime)99`).
+        // Assumption: ViewModelLifetime uses the default (int) underlying type, so the
+        // boxed TypedConstant value is an int. If the enum ever declares an explicit
+        // underlying type, extend the pattern below or invalid values will silently
+        // fall back to Transient and miss FLOWGEN003.
         foreach (var namedArgument in attribute.NamedArguments)
         {
             if (namedArgument.Key == "Lifetime" &&

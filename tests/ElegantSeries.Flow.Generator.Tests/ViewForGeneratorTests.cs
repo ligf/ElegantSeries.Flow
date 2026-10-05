@@ -141,6 +141,38 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void ValidLifetimeCast_EmitsCorrectRegistration()
+    {
+        // Guards the fix for a second silent bug in the old syntax-based parsing:
+        // a *valid* integral cast such as (ViewModelLifetime)1 was downgraded to
+        // Transient because only MemberAccessExpressionSyntax was recognized.
+        var sources = AttributeStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class MenuViewModel { }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Core.Routing.ViewFor(
+                    typeof(TestApp.ViewModels.MenuViewModel),
+                    Lifetime = (ElegantSeries.Flow.Core.Routing.ViewModelLifetime)1)]
+                public class MenuView { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "views.RegisterSingleton<global::TestApp.Views.MenuView, global::TestApp.ViewModels.MenuViewModel>();",
+            generated.SourceText.ToString());
+    }
+
+    [Fact]
     public void InvalidLifetimeCast_ReportsFlowGen003()
     {
         var sources = AttributeStub + AvaloniaLocatorStub + """
