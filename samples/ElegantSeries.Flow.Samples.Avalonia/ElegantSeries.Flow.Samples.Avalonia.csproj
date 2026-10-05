@@ -14,7 +14,10 @@
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Mvvm\ElegantSeries.Flow.Mvvm.csproj" />
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Avalonia\ElegantSeries.Flow.Avalonia.csproj" />
     <ProjectReference Include="..\ElegantSeries.Flow.Samples.Shared\ElegantSeries.Flow.Samples.Shared.csproj" />
-    <!-- Roslyn source generator: emits IViewLocator registrations from [ViewFor] attributes. -->
+    <!-- [ViewFor] source generator: in-repo projects reference the generator directly.
+         (Analyzers attached via ProjectReference do not flow transitively; external
+         consumers instead get the generator from the ElegantSeries.Flow NuGet package,
+         where it ships embedded under analyzers/ and flows via package dependencies.) -->
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Generator\ElegantSeries.Flow.Generator.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />

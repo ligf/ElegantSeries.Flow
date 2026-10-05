@@ -9,20 +9,11 @@
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <Deterministic>true</Deterministic>
 
-    <!-- Roslyn source generator: consumed via OutputItemType="Analyzer",
-         never as a runtime dependency. -->
+    <!-- Roslyn source generator: embedded into the ElegantSeries.Flow package as a
+         build-time analyzer (see the ProjectReference in ElegantSeries.Flow.Core.csproj).
+         Never shipped as a standalone package, never a runtime dependency. -->
+    <IsPackable>false</IsPackable>
     <IncludeBuildOutput>false</IncludeBuildOutput>
-
-    <!-- NuGet package metadata (ships under analyzers/dotnet/cs) -->
-    <PackageId>ElegantSeries.Flow.Generator</PackageId>
-    <Version>0.1.1</Version>
-    <Authors>ligf</Authors>
-    <Description>Roslyn source generator for ElegantSeries.Flow: emits IViewLocator registrations from [ViewFor] attributes. AOT-safe; no runtime reflection.</Description>
-    <PackageTags>navigation;mvvm;sourcegenerator;roslyn;aot</PackageTags>
-    <PackageProjectUrl>https://github.com/ligf/ElegantSeries.Flow</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/ligf/ElegantSeries.Flow</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
   <ItemGroup>
