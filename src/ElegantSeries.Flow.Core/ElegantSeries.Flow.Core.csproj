@@ -54,10 +54,10 @@
   <ItemGroup>
     <!-- Pack the generator assembly under analyzers/: NuGet/MSBuild do not pack
          ProjectReference analyzers automatically, so list it explicitly
-         (CommunityToolkit.Mvvm pattern). roslyn4.0 folder: the generator uses
-         IIncrementalGenerator, which requires Roslyn 4.0+. -->
+         (CommunityToolkit.Mvvm pattern). roslyn5.0 folder: the generator is built
+         against Microsoft.CodeAnalysis 5.x (IIncrementalGenerator requires Roslyn 4.0+). -->
     <None Include="..\ElegantSeries.Flow.Generator\bin\$(Configuration)\netstandard2.0\ElegantSeries.Flow.Generator.dll"
-          PackagePath="analyzers\dotnet\roslyn4.0\cs" Pack="true" Visible="false" />
+          PackagePath="analyzers\dotnet\roslyn5.0\cs" Pack="true" Visible="false" />
   </ItemGroup>
 
 </Project>
