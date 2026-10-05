@@ -1,5 +1,6 @@
 using System.Windows;
 using ElegantSeries.Flow.Core.Extensions;
+using ElegantSeries.Flow.Generated;
 using ElegantSeries.Flow.WPF.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using ElegantSeries.Flow.Samples.Shared;
@@ -18,51 +19,28 @@ public partial class App : Application
         // Core navigation.
         services.AddSingletonFlowNavigation();
 
-        // The combined RegisterTransient/RegisterSingleton calls below cover
-        // the common cases (view mapping + DI registration in one). The
-        // separate style (services.AddTransient + views.Register) is kept for
-        // Home and Detail to demonstrate the decoupled alternative — use it
-        // when a ViewModel needs custom DI setup (factory, decorators, keyed
-        // services, ...).
+        // ViewModel DI registrations that stay manual:
+        // - Home/Detail carry [ViewFor(..., Lifetime = ViewOnly)]: the generator
+        //   emits only the view mapping, so their DI registration stays here to
+        //   demonstrate the decoupled style (custom DI setup: factory, decorators,
+        //   keyed services, ...).
+        // - FactoryDemoViewModel uses a custom view factory below (also manual DI).
+        // - UnregisteredDemoViewModel is DI-only by design: no view is registered,
+        //   so navigating to it exercises the host's view-creation-failure path.
         services.AddTransient<HomeViewModel>();
         services.AddTransient<DetailViewModel>();
-        services.AddTransient<AsyncDisposeDemoViewModel>();
         services.AddTransient<FactoryDemoViewModel>();
-        // DI only: deliberately no view registered — navigating to it
-        // exercises the host's view-creation-failure path.
         services.AddTransient<UnregisteredDemoViewModel>();
 
-        // AOT-safe view registration: no runtime reflection.
+        // AOT-safe view registration: the ElegantSeries.Flow source generator
+        // turns each view's [ViewFor] attribute into the equivalent
+        // IViewLocator.Register* call (no runtime reflection). Manual
+        // registration remains available for special cases — see the custom
+        // view factory below.
         services.AddFlowViews(views =>
         {
-            // Singleton ViewModel: coexists fine with transient pages — the
-            // page scope resolves the shared root instance and never disposes
-            // it.
-            views.RegisterSingleton<MenuView, MenuViewModel>();
-            views.Register<HomeView, HomeViewModel>();
-            views.Register<DetailView, DetailViewModel>();
-            views.RegisterTransient<CounterView, CounterViewModel>();
-            views.RegisterTransient<GuardedView, GuardedViewModel>();
-            views.RegisterTransient<AsyncDemoView, AsyncDemoViewModel>();
-            views.RegisterTransient<CacheDemoView, CacheDemoViewModel>();
-            views.RegisterTransient<CancelDemoView, CancelDemoViewModel>();
-            views.RegisterTransient<QuadrantsView, QuadrantsViewModel>();
-            views.RegisterTransient<StackDemoView, StackDemoViewModel>();
-            views.RegisterTransient<StackChildView, StackChildViewModel>();
-            views.RegisterTransient<KeepAliveDemoView, KeepAliveDemoViewModel>();
-            views.RegisterTransient<KeepAliveTempView, KeepAliveTempViewModel>();
-            views.RegisterTransient<ParamDemoView, ParamDemoViewModel>();
-            views.RegisterTransient<ParamReceiverView, ParamReceiverViewModel>();
-            views.RegisterTransient<ReplaceDemoView, ReplaceDemoViewModel>();
-            views.RegisterTransient<ReplaceTargetView, ReplaceTargetViewModel>();
-            views.RegisterTransient<ClearStackDemoView, ClearStackDemoViewModel>();
-            views.RegisterTransient<ClearStackChildView, ClearStackChildViewModel>();
-            views.RegisterTransient<RefreshDemoView, RefreshDemoViewModel>();
-            views.RegisterTransient<RegionSwitchView, RegionSwitchDemoViewModel>();
-            views.RegisterTransient<StateInspectorView, StateInspectorViewModel>();
-            views.RegisterTransient<EventsView, EventsDemoViewModel>();
-            views.RegisterTransient<ToolkitFreeView, ToolkitFreeDemoViewModel>();
-            views.RegisterTransient<AsyncDisposeView, AsyncDisposeDemoViewModel>();
+            views.RegisterAttributedViews();
+
             // Custom view factory: the factory overload does not touch DI, so
             // the ViewModel needs its own DI registration (see above). Use a
             // factory when the view needs constructor arguments or other
@@ -73,7 +51,6 @@ public partial class App : Application
                 view.ApplyFactoryBadge();
                 return view;
             });
-            views.RegisterTransient<ViewFailureView, ViewFailureViewModel>();
         });
 
         Services = services.BuildServiceProvider();

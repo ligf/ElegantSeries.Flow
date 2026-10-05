@@ -4,11 +4,13 @@
     <Project Path="src/ElegantSeries.Flow.Mvvm/ElegantSeries.Flow.Mvvm.csproj" />
     <Project Path="src/ElegantSeries.Flow.WPF/ElegantSeries.Flow.WPF.csproj" />
     <Project Path="src/ElegantSeries.Flow.Avalonia/ElegantSeries.Flow.Avalonia.csproj" />
+    <Project Path="src/ElegantSeries.Flow.Generator/ElegantSeries.Flow.Generator.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ElegantSeries.Flow.Core.Tests/ElegantSeries.Flow.Core.Tests.csproj" />
     <Project Path="tests/ElegantSeries.Flow.WPF.Tests/ElegantSeries.Flow.WPF.Tests.csproj" />
     <Project Path="tests/ElegantSeries.Flow.Avalonia.Tests/ElegantSeries.Flow.Avalonia.Tests.csproj" />
+    <Project Path="tests/ElegantSeries.Flow.Generator.Tests/ElegantSeries.Flow.Generator.Tests.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/ElegantSeries.Flow.Samples.WPF/ElegantSeries.Flow.Samples.WPF.csproj" />

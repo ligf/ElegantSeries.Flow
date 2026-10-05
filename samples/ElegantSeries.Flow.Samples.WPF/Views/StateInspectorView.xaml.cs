@@ -1,10 +1,12 @@
 using System.Windows;
+using ElegantSeries.Flow.Core.Routing;
 using ElegantSeries.Flow.Samples.Shared;
 using ElegantSeries.Flow.WPF.Locating;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
+[ViewFor(typeof(StateInspectorViewModel))]
 public partial class StateInspectorView : ElegantSeries.Flow.WPF.Views.BaseView<StateInspectorViewModel>
 {
     public StateInspectorView()

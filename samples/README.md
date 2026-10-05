@@ -20,13 +20,16 @@ second window; each sample's `App` wires it to its own platform `SecondWindow`
 Both samples demonstrate the library's full feature set:
 
 1. **DI setup** — `AddSingletonFlowNavigation()` (singleton); views + ViewModels
-   registered AOT-safely via `AddFlowViews(...)`: `RegisterTransient` /
-   `RegisterSingleton` combine view mapping with DI registration in one call
-   (the menu ViewModel is a singleton — it coexists fine with transient
-   pages: the page scope resolves the shared root instance and never
-   disposes it), while the separate `services.AddTransient` + `views.Register`
-   style is kept for Home/Detail to demonstrate the decoupled alternative
-   for custom DI setup (factory, decorators, keyed services, ...).
+   registered AOT-safely via `AddFlowViews(...)`. Most views carry a `[ViewFor]`
+   attribute and are registered by the ElegantSeries.Flow source generator
+   (`views.RegisterAttributedViews()` — see item 21); the separate
+   `services.AddTransient` + generated mapping style is kept for Home/Detail
+   (`Lifetime.ViewOnly`) to demonstrate the decoupled alternative for custom
+   DI setup (factory, decorators, keyed services, ...), and a custom
+   `views.Register<TViewModel>(factory)` covers views needing constructor
+   arguments. The menu ViewModel is a singleton
+   (`Lifetime.Singleton`) — it coexists fine with transient pages: the page
+   scope resolves the shared root instance and never disposes it.
 2. **Multi-region layout** — the main window hosts a `Sidebar` region (menu)
    and a `MainRegion` (full-page content); both share the singleton
    navigation service but keep separate stacks. Menu buttons switch the
@@ -116,8 +119,15 @@ Both samples demonstrate the library's full feature set:
     `NavigationViewModelBase` (core package): manual `SetProperty`
     notification, no CommunityToolkit.Mvvm; its buttons call public methods
     from code-behind.
-21. **`ViewFor` attribute** — `HomeView` carries `[ViewFor(typeof(HomeViewModel))]`
-    as the compile-time view→ViewModel declaration for the future source
-    generator. The runtime still uses the manual `views.Register` call (it never
-    scans the attribute); when the generator ships, the manual call goes away —
-    never both.
+21. **`ViewFor` attribute + source generator** — every view carries
+    `[ViewFor(typeof(XxxViewModel))]`; the ElegantSeries.Flow source generator
+    (`ElegantSeries.Flow.Generator`, referenced as an Analyzer) turns them into
+    `IViewLocator.Register*` calls inside the generated
+    `RegisterAttributedViews()` extension (called from `AddFlowViews`). The
+    attribute's `Lifetime` selects the registration: `Transient` (default) →
+    `RegisterTransient`, `Singleton` → `RegisterSingleton`, `ViewOnly` →
+    mapping-only `Register` (used by Home/Detail, whose DI stays manual).
+    The runtime never scans the attribute — everything is generated C#, hence
+    AOT-safe. Manual `IViewLocator` registration remains for special cases
+    (custom factories); never register the same ViewModel both ways —
+    duplicates throw at startup.

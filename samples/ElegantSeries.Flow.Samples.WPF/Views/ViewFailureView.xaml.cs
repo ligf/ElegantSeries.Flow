@@ -2,10 +2,12 @@ using System.Windows;
 using ElegantSeries.Flow.Core.Navigation;
 using ElegantSeries.Flow.WPF.Locating;
 using Microsoft.Extensions.DependencyInjection;
+using ElegantSeries.Flow.Core.Routing;
 using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
+[ViewFor(typeof(ViewFailureViewModel))]
 public partial class ViewFailureView : ElegantSeries.Flow.WPF.Views.BaseView<ViewFailureViewModel>
 {
     public ViewFailureView()

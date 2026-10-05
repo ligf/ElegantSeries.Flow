@@ -19,20 +19,22 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// <item><term>Singleton</term><description>Shared from the root container; a page scope never disposes it.</description></item>
 /// </list>
 /// <para>
-/// A ViewModel <i>instance</i> never appears twice on one region's stack:
-/// navigating to a type whose instance is already the active page is a no-op
-/// returning <see langword="true"/> (or a <i>refresh</i> when <c>refreshIfActive</c>
-/// is set — the active instance's activation callbacks run again with the new
-/// parameter, without creating a new page scope); navigating to a type whose
-/// instance lives deeper on the region's stack <i>pops back to it</i> — the pages
-/// above leave the stack and the existing instance is re-activated with the new
-/// parameter. Deduplication is by <i>instance reference</i>, not by type:
-/// navigating to a type while a <i>different</i> instance of that type is active
-/// still pushes a new page. This is how <c>Singleton</c> ViewModels and cached
-/// <c>KeepAlive</c> pages behave (mainstream behavior, cf. Prism's
-/// <c>IsNavigationTarget</c>): navigate away and the instance survives; navigate
-/// to its type and it is reused instead of duplicated. The shared page scope is
-/// disposed only after its last stack/cache reference disappears.
+/// A ViewModel <i>instance</i> never appears twice on one region's stack.
+/// Navigating to the default <see cref="NavigationMode.New"/> mode while a page
+/// of the same <i>type</i> is already the active page is a no-op returning
+/// <see langword="true"/> (or a <i>refresh</i> when <c>refreshIfActive</c> is set —
+/// the active instance's activation callbacks run again with the new parameter,
+/// which is also persisted on the stack entry, without creating a new page
+/// scope). An explicit <see cref="NavigationMode"/> (<c>Replace</c>,
+/// <c>ClearStack</c>, <c>KeepAlive</c>) takes precedence over this shortcut and
+/// is always honored. Navigating to a type whose <i>instance</i> lives deeper
+/// on the region's stack <i>pops back to it</i> — the pages above leave the
+/// stack and the existing instance is re-activated with the new parameter.
+/// This is how <c>Singleton</c> ViewModels and cached <c>KeepAlive</c> pages
+/// behave (mainstream behavior, cf. Prism's <c>IsNavigationTarget</c>):
+/// navigate away and the instance survives; navigate to its type and it is
+/// reused instead of duplicated. The shared page scope is disposed only after
+/// its last stack/cache reference disappears.
 /// </para>
 /// <para>
 /// Navigating to an instance that lives on a <i>different</i> region's stack throws
