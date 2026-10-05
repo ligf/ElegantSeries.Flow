@@ -1,0 +1,16 @@
+<flow:BaseView x:Class="ElegantSeries.Flow.Samples.WPF.Views.ManualTransientDemoView"
+             x:TypeArguments="vm:ManualTransientDemoViewModel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:ManualTransientDemoViewModel, IsDesignTimeCreatable=False}">
+    <StackPanel Margin="24">
+        <TextBlock Text="Manual Registration (Transient)" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="This view carries no [ViewFor] attribute. It is registered manually in App: views.RegisterTransient&lt;ManualTransientDemoView, ManualTransientDemoViewModel&gt;(), which registers the view mapping plus a transient ViewModel in DI."
+                   Margin="0,0,0,12" TextWrapping="Wrap" Opacity="0.6" />
+    </StackPanel>
+</flow:BaseView>

@@ -1,0 +1,11 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:ElegantSeries.Flow.Samples.Shared;assembly=ElegantSeries.Flow.Samples.Shared"
+             x:Class="ElegantSeries.Flow.Samples.Avalonia.Views.ManualSingletonDemoView"
+             x:DataType="vm:ManualSingletonDemoViewModel">
+    <StackPanel Margin="24">
+        <TextBlock Text="Manual Registration (Singleton)" FontSize="28" Margin="0,0,0,8" />
+        <TextBlock Text="This view carries no [ViewFor] attribute. It is registered manually in App: views.RegisterSingleton&lt;ManualSingletonDemoView, ManualSingletonDemoViewModel&gt;(), which registers the view mapping plus a singleton ViewModel in DI."
+                   Margin="0,0,0,12" TextWrapping="Wrap" Opacity="0.6" />
+    </StackPanel>
+</UserControl>

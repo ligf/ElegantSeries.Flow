@@ -283,6 +283,26 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void NullViewModelType_ReportsFlowGen006()
+    {
+        var sources = AttributeStub + AvaloniaLocatorStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Core.Routing.ViewFor(null)]
+                public class HomeView
+                {
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN006");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
     public void MissingBaseView_ReportsFlowGen004()
     {
         var sources = AttributeStub + AvaloniaLocatorStub + """

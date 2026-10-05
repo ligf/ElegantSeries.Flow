@@ -56,6 +56,14 @@ public sealed partial class MenuViewModel : BaseViewModel
         => NavigateToAsync<ManualDemoViewModel>(RegionNames.MainRegion);
 
     [RelayCommand]
+    private Task GoManualTransientDemoAsync()
+        => NavigateToAsync<ManualTransientDemoViewModel>(RegionNames.MainRegion);
+
+    [RelayCommand]
+    private Task GoManualSingletonDemoAsync()
+        => NavigateToAsync<ManualSingletonDemoViewModel>(RegionNames.MainRegion);
+
+    [RelayCommand]
     private Task GoViewFailureDemoAsync()
         => NavigateToAsync<ViewFailureViewModel>(RegionNames.MainRegion);
 

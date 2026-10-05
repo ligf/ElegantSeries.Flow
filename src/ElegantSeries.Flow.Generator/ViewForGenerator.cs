@@ -37,8 +37,17 @@ namespace ElegantSeries.Flow.Generator;
 public sealed class ViewForGenerator : IIncrementalGenerator
 {
     private const string ViewForAttributeMetadataName = "ElegantSeries.Flow.Core.Routing.ViewForAttribute";
-    private const string AvaloniaLocatorMetadataName = "ElegantSeries.Flow.Avalonia.Locating.IViewLocator";
-    private const string WpfLocatorMetadataName = "ElegantSeries.Flow.WPF.Locating.IViewLocator";
+
+    // Platform namespace roots. The locator and BaseView<TViewModel> namespaces
+    // are derived from these, so supporting a new platform only touches this table.
+    private const string AvaloniaNamespaceRoot = "ElegantSeries.Flow.Avalonia";
+    private const string WpfNamespaceRoot = "ElegantSeries.Flow.WPF";
+
+    private const string AvaloniaLocatorMetadataName = AvaloniaNamespaceRoot + ".Locating.IViewLocator";
+    private const string WpfLocatorMetadataName = WpfNamespaceRoot + ".Locating.IViewLocator";
+
+    private const string AvaloniaViewsNamespace = "global::" + AvaloniaNamespaceRoot + ".Views";
+    private const string WpfViewsNamespace = "global::" + WpfNamespaceRoot + ".Views";
 
     private const string LifetimeTransient = "Transient";
     private const string LifetimeSingleton = "Singleton";
@@ -63,7 +72,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
     private sealed class ViewMapping
     {
-        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel)
+        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType)
         {
             ViewName = viewName;
             ViewModelName = viewModelName;
@@ -72,6 +81,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             InvalidLifetime = invalidLifetime;
             CannotInferViewModel = cannotInferViewModel;
             ConflictingBaseViewModel = conflictingBaseViewModel;
+            UnresolvableViewModelType = unresolvableViewModelType;
         }
 
         public string ViewName { get; }
@@ -98,6 +108,13 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         /// <see langword="null"/>.
         /// </summary>
         public string? ConflictingBaseViewModel { get; }
+
+        /// <summary>
+        /// True when <c>[ViewFor]</c> specifies a ViewModel type argument that
+        /// could not be resolved to a type, and the compiler did not already
+        /// report it (FLOWGEN006).
+        /// </summary>
+        public bool UnresolvableViewModelType { get; }
     }
 
     private static ViewMapping? GetMapping(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
@@ -119,6 +136,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         string? viewModelName = null;
         var cannotInfer = false;
         string? conflictingBaseViewModel = null;
+        var unresolvableViewModelType = false;
 
         if (attribute.ConstructorArguments.Length == 0)
         {
@@ -139,6 +157,13 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             {
                 conflictingBaseViewModel = baseViewModel.ToDisplayString(format);
             }
+        }
+        else if (attribute.ConstructorArguments[0].Kind != TypedConstantKind.Error)
+        {
+            // The type argument could not be resolved (e.g. an explicit null),
+            // and the compiler did not already report it: surface FLOWGEN006
+            // instead of silently skipping the view.
+            unresolvableViewModelType = true;
         }
         else
         {
@@ -176,7 +201,8 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             location,
             invalidLifetime,
             cannotInfer,
-            conflictingBaseViewModel);
+            conflictingBaseViewModel,
+            unresolvableViewModelType);
     }
 
     /// <summary>
@@ -193,7 +219,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             var original = current.OriginalDefinition;
             if (original is { Name: "BaseView", Arity: 1 } &&
                 original.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) is
-                    "global::ElegantSeries.Flow.Avalonia.Views" or "global::ElegantSeries.Flow.WPF.Views")
+                    AvaloniaViewsNamespace or WpfViewsNamespace)
             {
                 return current.TypeArguments.FirstOrDefault() as INamedTypeSymbol;
             }
@@ -264,9 +290,10 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
         var locatorName = avaloniaLocator is not null ? AvaloniaLocatorMetadataName : WpfLocatorMetadataName;
 
-        // A [ViewFor] without a ViewModel type requires BaseView<TViewModel> to
-        // infer from; an explicit type conflicting with the base class is
-        // almost certainly a mistake. Both are compile-time errors.
+        // Per-mapping errors are compile-time failures: unresolved view models
+        // (FLOWGEN004/006), conflicting explicit/inferred types (FLOWGEN005),
+        // and unrecognized lifetimes (FLOWGEN003) would otherwise misbehave
+        // silently at runtime.
         foreach (var mapping in mappings)
         {
             if (mapping.CannotInferViewModel)
@@ -286,12 +313,14 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                     mapping.ConflictingBaseViewModel));
                 return;
             }
-        }
 
-        // An unrecognized Lifetime (only reachable via an explicit integral cast)
-        // is a compile-time error; the runtime would otherwise misbehave silently.
-        foreach (var mapping in mappings)
-        {
+            if (mapping.UnresolvableViewModelType)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.UnresolvableViewModelType, mapping.Location, mapping.ViewName));
+                return;
+            }
+
             if (mapping.InvalidLifetime is not null)
             {
                 spc.ReportDiagnostic(Diagnostic.Create(
@@ -397,6 +426,14 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             id: "FLOWGEN005",
             title: "Conflicting ViewModel type for [ViewFor]",
             messageFormat: "[ViewFor] on view '{0}' specifies ViewModel '{1}', but the view inherits BaseView<{2}>; the types must match",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor UnresolvableViewModelType = new DiagnosticDescriptor(
+            id: "FLOWGEN006",
+            title: "Unresolvable ViewModel type for [ViewFor]",
+            messageFormat: "[ViewFor] on view '{0}' specifies a ViewModel type that could not be resolved",
             category: "ElegantSeries.Flow.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);

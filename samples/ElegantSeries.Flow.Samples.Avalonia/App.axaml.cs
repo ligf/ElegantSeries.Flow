@@ -36,6 +36,9 @@ public partial class App : Application
         services.AddTransient<DetailViewModel>();
         services.AddTransient<FactoryDemoViewModel>();
         services.AddTransient<UnregisteredDemoViewModel>();
+        // ManualDemoViewModel: its view uses views.Register<TView, TViewModel>()
+        // (mapping only), so its DI registration stays manual here.
+        services.AddTransient<ManualDemoViewModel>();
 
         // AOT-safe view registration: the ElegantSeries.Flow source generator
         // turns each view's [ViewFor] attribute into the equivalent
@@ -49,7 +52,14 @@ public partial class App : Application
             // Manual view registration: ManualDemoView carries no [ViewFor]
             // attribute. This is the traditional alternative to generated
             // registration — both mechanisms coexist; pick one per ViewModel.
+            // Register<TView, TViewModel> registers only the view mapping; the
+            // ViewModel's DI registration stays manual (see above).
             views.Register<ManualDemoView, ManualDemoViewModel>();
+
+            // RegisterTransient/RegisterSingleton register the view mapping plus
+            // the ViewModel in DI with the corresponding lifetime.
+            views.RegisterTransient<ManualTransientDemoView, ManualTransientDemoViewModel>();
+            views.RegisterSingleton<ManualSingletonDemoView, ManualSingletonDemoViewModel>();
 
             // Custom view factory: the factory overload does not touch DI, so
             // the ViewModel needs its own DI registration (see above). Use a
