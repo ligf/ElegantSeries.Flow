@@ -1,8 +1,10 @@
 using System.Windows;
+using ElegantSeries.Flow.Core.Routing;
 using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
+[ViewFor(typeof(ToolkitFreeDemoViewModel))]
 public partial class ToolkitFreeView : ElegantSeries.Flow.WPF.Views.BaseView<ToolkitFreeDemoViewModel>
 {
     public ToolkitFreeView() => InitializeComponent();

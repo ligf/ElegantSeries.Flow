@@ -1,10 +1,12 @@
 using ElegantSeries.Flow.Avalonia.Locating;
 using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Core.Routing;
 using ElegantSeries.Flow.Samples.Shared;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;
 
+[ViewFor(typeof(ViewFailureViewModel))]
 public partial class ViewFailureView : ElegantSeries.Flow.Avalonia.Views.BaseView<ViewFailureViewModel>
 {
     public ViewFailureView()

@@ -14,6 +14,10 @@
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Mvvm\ElegantSeries.Flow.Mvvm.csproj" />
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Avalonia\ElegantSeries.Flow.Avalonia.csproj" />
     <ProjectReference Include="..\ElegantSeries.Flow.Samples.Shared\ElegantSeries.Flow.Samples.Shared.csproj" />
+    <!-- Roslyn source generator: emits IViewLocator registrations from [ViewFor] attributes. -->
+    <ProjectReference Include="..\..\src\ElegantSeries.Flow.Generator\ElegantSeries.Flow.Generator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

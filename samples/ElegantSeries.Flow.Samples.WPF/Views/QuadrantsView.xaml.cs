@@ -3,10 +3,12 @@ using ElegantSeries.Flow.Core.Navigation;
 using ElegantSeries.Flow.WPF.Hosting;
 using ElegantSeries.Flow.WPF.Locating;
 using Microsoft.Extensions.DependencyInjection;
+using ElegantSeries.Flow.Core.Routing;
 using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
+[ViewFor(typeof(QuadrantsViewModel))]
 public partial class QuadrantsView : ElegantSeries.Flow.WPF.Views.BaseView<QuadrantsViewModel>
 {
     private readonly NavigationHost[] _hosts;

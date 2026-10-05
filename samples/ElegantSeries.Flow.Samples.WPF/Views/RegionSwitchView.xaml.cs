@@ -1,4 +1,5 @@
 using System.Windows;
+using ElegantSeries.Flow.Core.Routing;
 using ElegantSeries.Flow.Samples.Shared;
 using ElegantSeries.Flow.WPF.Hosting;
 using ElegantSeries.Flow.WPF.Locating;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;
 
+[ViewFor(typeof(RegionSwitchDemoViewModel))]
 public partial class RegionSwitchView : ElegantSeries.Flow.WPF.Views.BaseView<RegionSwitchDemoViewModel>
 {
     public RegionSwitchView()

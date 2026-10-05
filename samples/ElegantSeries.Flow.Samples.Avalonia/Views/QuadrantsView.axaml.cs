@@ -1,11 +1,13 @@
 using ElegantSeries.Flow.Avalonia.Hosting;
 using ElegantSeries.Flow.Avalonia.Locating;
 using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Core.Routing;
 using ElegantSeries.Flow.Samples.Shared;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;
 
+[ViewFor(typeof(QuadrantsViewModel))]
 public partial class QuadrantsView : ElegantSeries.Flow.Avalonia.Views.BaseView<QuadrantsViewModel>
 {
     private readonly NavigationHost[] _hosts;
