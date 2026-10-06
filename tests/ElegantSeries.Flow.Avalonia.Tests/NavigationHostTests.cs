@@ -9,13 +9,21 @@ namespace ElegantSeries.Flow.Avalonia.Tests;
 
 public sealed class NavigationHostTests
 {
+    private sealed class TestNavigationHost : NavigationHost
+    {
+        public TestNavigationHost(IDispatcher dispatcher)
+            : base(dispatcher)
+        {
+        }
+    }
+
     private static NavigationHost CreateHost(
         FakeDispatcher dispatcher,
         FakeNavigationService service,
         IViewLocator locator,
         string regionName = "MainRegion")
     {
-        return new NavigationHost(dispatcher)
+        return new TestNavigationHost(dispatcher)
         {
             RegionName = regionName,
             NavigationService = service,
@@ -33,7 +41,7 @@ public sealed class NavigationHostTests
     [Fact]
     public void RegionName_DefaultsToMainRegion()
     {
-        using var host = new NavigationHost(new FakeDispatcher());
+        using var host = new TestNavigationHost(new FakeDispatcher());
 
         Assert.Equal("MainRegion", host.RegionName);
     }

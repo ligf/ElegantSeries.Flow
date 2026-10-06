@@ -64,7 +64,7 @@ stacks*:
 Both methods use `TryAdd`, so calling both registers only the first one — a
 single container holds exactly one `INavigationService` registration. The
 ViewModels' lifetimes are independent of this choice (see
-[Page-level service scopes](#page-level-service-scopes-v20)).
+[Page-level service scopes](#page-level-service-scopes)).
 
 **Mixed setup** — one global stack plus isolated windows: register the singleton
 for the shared stack, and construct per-window services manually from each
@@ -282,14 +282,17 @@ scope is created — the active instance's activation callbacks simply run again
 new parameter, and `RegionNavigated` is raised. The current page's from-guard is still
 consulted and may veto the refresh.
 
-### Page-level service scopes (v2.0)
+### Page-level service scopes
 
 Every page gets its own `IServiceScope`. The ViewModel is resolved from that scope, and
 leaving the page disposes the scope — the DI container then releases the ViewModel and
 its whole Transient/Scoped dependency graph. The navigation service never disposes
 ViewModels directly.
 
-| Registration | Navigation behavior | When the page is left |
+How the ViewModel's own DI lifetime — your `services.AddXxx<MyViewModel>()` call,
+not the navigation service registration — interacts with the page scope:
+
+| ViewModel lifetime | Navigation behavior | When the page is left |
 |---|---|---|
 | `Transient` | A new instance per page scope | The scope disposes the ViewModel and its dependency graph |
 | `Scoped` | One instance per page scope | The scope disposes it |

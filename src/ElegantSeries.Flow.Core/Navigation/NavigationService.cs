@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ElegantSeries.Flow.Core.Navigation;
 
 /// <summary>
-/// Default <see cref="INavigationService"/> implementation (v2.0: page-level lifetime scopes).
+/// Default <see cref="INavigationService"/> implementation (page-level lifetime scopes).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -12,7 +12,7 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// ViewModel lifecycle (activation callbacks and disposal).
 /// </para>
 /// <para>
-/// <b>Lifetime model (v2.0).</b> Every navigation creates one <see cref="IServiceScope"/>
+/// <b>Lifetime model.</b> Every navigation creates one <see cref="IServiceScope"/>
 /// (a "page scope") and resolves the ViewModel from it. When the page leaves the navigation
 /// service's ownership, the service disposes the page scope and the DI container releases
 /// the ViewModel <i>and its whole dependency graph</i>. Registration lifetimes behave as follows:

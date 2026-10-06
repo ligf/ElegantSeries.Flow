@@ -99,11 +99,11 @@ public class NavigationHost : ContentControl, IDisposable
 
     /// <summary>
     /// Initializes a new instance of the <see cref="NavigationHost"/> class with an
-    /// explicit dispatcher.
+    /// explicit dispatcher. For subclasses (e.g. tests).
     /// </summary>
     /// <param name="dispatcher">The dispatcher used to marshal UI work.</param>
     /// <exception cref="ArgumentNullException"><paramref name="dispatcher"/> is <see langword="null"/>.</exception>
-    public NavigationHost(IDispatcher dispatcher)
+    protected NavigationHost(IDispatcher dispatcher)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
 

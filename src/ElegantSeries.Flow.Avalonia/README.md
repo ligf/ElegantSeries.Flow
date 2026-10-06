@@ -69,7 +69,7 @@ public partial class HomeView : BaseView<HomeViewModel>
 ```
 
 Keep the constructor parameterless (AXAML requirement); all dependencies go
-through the ViewModel, which is created by DI inside a per-page scope (core v2.0).
+through the ViewModel, which is created by DI inside a per-page scope.
 
 ### 4. Navigate (from any ViewModel)
 

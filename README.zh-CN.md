@@ -60,7 +60,7 @@ services.AddScopedFlowNavigation();      // 作用域——每个窗口独立导
 
 两个方法都用 `TryAdd`，所以同时调用也只会注册第一个——一个容器里恰好只有
 一个 `INavigationService`。ViewModel 的生命周期与此选择无关（见
-[页面级服务作用域](#页面级服务作用域-v20)）。
+[页面级服务作用域](#页面级服务作用域)）。
 
 **混合配置**——一个全局栈加独立窗口：为共享栈注册单例，每个窗口手动从自己的
 作用域构造服务（不注册进 DI）。作用域的存活期必须覆盖窗口——窗口关闭时再释放，
@@ -271,13 +271,16 @@ UI 层应在 `RegionNavigated` 里换 view；`OnNavigatedTo` 执行时 view 还�
 活动实例的激活回调，并触发 `RegionNavigated`。当前页面的 from-guard 照常
 执行，仍可否决刷新。
 
-### 页面级服务作用域 (v2.0)
+### 页面级服务作用域
 
 每个页面拥有独立的 `IServiceScope`。ViewModel 从这个作用域解析，页面离开
 时作用域被释放——DI 容器随即释放 ViewModel 及其整个 Transient/Scoped 依赖图。
 导航服务从不直接释放 ViewModel。
 
-| 注册方式 | 导航行为 | 页面离开时 |
+ViewModel 自身的 DI 生命周期——即你的 `services.AddXxx<MyViewModel>()` 调用，
+不是导航服务的注册方式——与页面作用域的交互：
+
+| ViewModel 生命周期 | 导航行为 | 页面离开时 |
 |---|---|---|
 | `Transient` | 每个页面作用域一个新实例 | 作用域释放 ViewModel 及其依赖图 |
 | `Scoped` | 每个页面作用域一个实例 | 作用域释放它 |

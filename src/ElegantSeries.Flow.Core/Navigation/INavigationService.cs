@@ -8,12 +8,12 @@ namespace ElegantSeries.Flow.Core.Navigation;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Lifetime model (v2.0):</b> every page gets its own <c>IServiceScope</c>. The ViewModel
+/// <b>Lifetime model:</b> every page gets its own <c>IServiceScope</c>. The ViewModel
 /// is resolved from that scope, and leaving the page disposes the scope — releasing the
 /// ViewModel and its whole Transient/Scoped dependency graph via the DI container.
 /// </para>
 /// <list type="table">
-/// <listheader><term>Registration</term><description>Page lifetime</description></listheader>
+/// <listheader><term>ViewModel lifetime</term><description>Page lifetime</description></listheader>
 /// <item><term>Transient</term><description>A new instance per page; disposed with the page scope.</description></item>
 /// <item><term>Scoped</term><description>One instance per page; disposed with the page scope.</description></item>
 /// <item><term>Singleton</term><description>Shared from the root container; a page scope never disposes it.</description></item>
