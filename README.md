@@ -175,8 +175,15 @@ services.AddFlowViews(locator =>
     // locator.Register<HomeView, HomeViewModel>();
 });
 
-// 2. Attach the host (typically in the window's code-behind)
-navigationHost.Attach(navigationService);
+// 2. Provide the host with its dependencies — via XAML binding (MVVM):
+//    <flow:NavigationHost RegionName="MainRegion"
+//                          NavigationService="{Binding NavigationService}"
+//                          ViewLocator="{Binding ViewLocator}" />
+//    or in code-behind:
+//    navigationHost.NavigationService = navigationService;
+//    navigationHost.ViewLocator = viewLocator;
+//    The host shows the region's current page immediately; navigation order
+//    does not matter.
 ```
 
 ```xml

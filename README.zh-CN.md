@@ -167,8 +167,14 @@ services.AddFlowViews(locator =>
     // locator.Register<HomeView, HomeViewModel>();
 });
 
-// 2. 挂载 host（通常在窗口的 code-behind）
-navigationHost.Attach(navigationService);
+// 2. 给 host 提供依赖——用 XAML 绑定（MVVM）：
+//    <flow:NavigationHost RegionName="MainRegion"
+//                          NavigationService="{Binding NavigationService}"
+//                          ViewLocator="{Binding ViewLocator}" />
+//    或在 code-behind 里：
+//    navigationHost.NavigationService = navigationService;
+//    navigationHost.ViewLocator = viewLocator;
+//    Host 会立即显示该 region 的当前页面，初始化顺序无所谓。
 ```
 
 ```xml

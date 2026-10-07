@@ -224,6 +224,7 @@ public class NavigationServiceTests
         services.AddTransient<ThrowingDependencyViewModel>();
         services.AddSingleton<SingletonViewModel>();
         services.AddTransient<RefreshableViewModel>();
+        services.AddTransient<ConstructionCountingViewModel>();
         services.AddTransient<BothAwareViewModel>();
         services.AddTransient<AsyncThrowingViewModel>();
         services.AddTransient<TypedAsyncViewModel>();
@@ -1133,7 +1134,7 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task NavigateToAsync_WhenTargetIsAlreadyActive_ShouldBeNoOp_AndReleaseAbandonedScope()
+    public async Task NavigateToAsync_WhenTargetIsAlreadyActive_ShouldBeNoOp_WithoutResolvingDuplicate()
     {
         var services = new ServiceCollection();
         services.AddSingletonFlowNavigation();
@@ -1149,12 +1150,13 @@ public class NavigationServiceTests
 
         Assert.Same(first, second);
         Assert.False(navigationService.CanGoBack());
-        // One scope for the page, one abandoned scope for the no-op duplicate.
-        Assert.Equal(2, tracking.CreatedScopes);
-        Assert.Equal(1, tracking.DisposedScopes);
+        // One scope for the page; the no-op creates no scope at all (no duplicate
+        // ViewModel is resolved and discarded).
+        Assert.Equal(1, tracking.CreatedScopes);
+        Assert.Equal(0, tracking.DisposedScopes);
 
         await navigationService.DisposeAsync();
-        Assert.Equal(2, tracking.DisposedScopes);
+        Assert.Equal(1, tracking.DisposedScopes);
     }
 
     [Fact]
@@ -1538,6 +1540,44 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task NavigateToAsync_Refresh_DoesNotResolveTemporaryViewModel()
+    {
+        ConstructionCountingViewModel.ConstructionCount = 0;
+
+        await _navigationService.NavigateToAsync<ConstructionCountingViewModel>();
+        Assert.Equal(1, ConstructionCountingViewModel.ConstructionCount);
+        var vm = (ConstructionCountingViewModel)_navigationService.GetCurrentViewModel()!;
+
+        // Refresh must reuse the active instance without creating (and discarding)
+        // a temporary ViewModel: no extra construction, no extra disposal.
+        var result = await _navigationService.NavigateToAsync<ConstructionCountingViewModel>(
+            refreshIfActive: true);
+
+        Assert.True(result);
+        Assert.Equal(1, ConstructionCountingViewModel.ConstructionCount);
+        Assert.Same(vm, _navigationService.GetCurrentViewModel());
+        Assert.Equal(2, vm.NavigatedToCount);
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_SameTypeNoOp_DoesNotResolveTemporaryViewModel()
+    {
+        ConstructionCountingViewModel.ConstructionCount = 0;
+
+        await _navigationService.NavigateToAsync<ConstructionCountingViewModel>();
+        Assert.Equal(1, ConstructionCountingViewModel.ConstructionCount);
+        var vm = (ConstructionCountingViewModel)_navigationService.GetCurrentViewModel()!;
+
+        // Silent no-op: same instance, no callbacks, and no temporary resolution.
+        var result = await _navigationService.NavigateToAsync<ConstructionCountingViewModel>();
+
+        Assert.True(result);
+        Assert.Equal(1, ConstructionCountingViewModel.ConstructionCount);
+        Assert.Same(vm, _navigationService.GetCurrentViewModel());
+        Assert.Equal(1, vm.NavigatedToCount);
+    }
+
+    [Fact]
     public async Task NavigateToAsync_Replace_ToActiveType_ReplacesEntry()
     {
         await _navigationService.NavigateToAsync<RefreshableViewModel, string>("first");
@@ -1720,6 +1760,22 @@ public class NavigationServiceTests
             NavigatedToCount++;
             LastParameter = parameter;
         }
+
+        public void OnNavigatedFrom() { }
+    }
+
+    private sealed class ConstructionCountingViewModel : NavigationViewModelBase, INavigationAware
+    {
+        public static int ConstructionCount;
+
+        public ConstructionCountingViewModel()
+        {
+            Interlocked.Increment(ref ConstructionCount);
+        }
+
+        public int NavigatedToCount { get; private set; }
+
+        public void OnNavigatedTo(object? parameter) => NavigatedToCount++;
 
         public void OnNavigatedFrom() { }
     }
