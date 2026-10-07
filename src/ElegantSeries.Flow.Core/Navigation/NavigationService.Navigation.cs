@@ -51,6 +51,70 @@ public sealed partial class NavigationService
 
         cancellationToken.ThrowIfCancellationRequested();
 
+        // Fast path: a New-mode navigation to the already-active type needs no new
+        // page scope. Resolving a throwaway ViewModel just to discard it wastes
+        // construction and disposal (and can cause real side effects when the
+        // constructor subscribes events or starts work), so the same-type check
+        // runs here — under _navigationLock, before any scope is created.
+        // The guard above already ran on this exact instance (ReferenceEquals),
+        // so a refresh keeps its "guard may veto" semantics.
+        if (mode == NavigationMode.New && !_disposed)
+        {
+            var fastWork = new TransitionWork();
+            INavigationViewModel? fastVm = null;
+            bool fastRefresh = false;
+
+            await _navigationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                using (_stateLock.EnterScope())
+                {
+                    if (_regionStacks.TryGetValue(regionName, out var fastStack) &&
+                        fastStack.Count > 0)
+                    {
+                        var peeked = fastStack.Peek();
+                        if (ReferenceEquals(peeked.ViewModel, currentVmForGuard) &&
+                            peeked.ViewModel.GetType() == typeof(TViewModel))
+                        {
+                            fastVm = peeked.ViewModel;
+                            fastRefresh = refreshIfActive;
+                            if (fastRefresh)
+                            {
+                                // Refresh: keep the active ViewModel, its stack slot,
+                                // its mode and its page scope; swap the entry so the
+                                // new parameter is persisted.
+                                var popped = fastStack.Pop();
+                                var refreshed = new NavigationEntry(
+                                    popped.RegionName, popped.ViewModel, parameter, popped.Mode, popped.Scope);
+                                fastStack.Push(refreshed);
+                            }
+                        }
+                    }
+                }
+
+                // Queue lifecycle work while holding _navigationLock but not _stateLock,
+                // mirroring the main path below.
+                if (fastVm is not null && fastRefresh)
+                {
+                    // The ViewModel is already attached from its original activation.
+                    QueueActivate(fastVm, parameter, fastWork);
+                    var capturedVm = fastVm;
+                    fastWork.Events.Add(() => RegionNavigated?.Invoke(regionName, capturedVm));
+                }
+            }
+            finally
+            {
+                _navigationLock.Release();
+            }
+
+            if (fastVm is not null)
+            {
+                await RunTransitionAsync(fastWork).ConfigureAwait(false);
+                return true;
+            }
+            // Not a same-type hit: fall through to the resolve loop below.
+        }
+
         // Resolve the target page outside _navigationLock: reuse the KeepAlive entry
         // or create a fresh page scope and resolve the ViewModel from it.
         // A concurrent ClearCache can remove or replace the cached entry between the
