@@ -9,7 +9,6 @@
 
     <!-- NuGet package metadata -->
     <PackageId>ElegantSeries.Flow.Mvvm</PackageId>
-    <Version>0.1.1</Version>
     <Authors>ligf</Authors>
     <Description>Optional CommunityToolkit.Mvvm integration for ElegantSeries.Flow: a toolkit-based ViewModel base class on top of the toolkit-independent navigation core.</Description>
     <PackageTags>navigation;mvvm;viewmodel;aot;trimming;communitytoolkit</PackageTags>
