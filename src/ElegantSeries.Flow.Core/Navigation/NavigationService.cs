@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 
+using static ElegantSeries.Flow.Core.Navigation.NavigationDefaults;
+
 namespace ElegantSeries.Flow.Core.Navigation;
 
 /// <summary>
@@ -99,7 +101,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
     /// <inheritdoc />
     public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
-        string regionName = "MainRegion",
+        string regionName = DefaultRegionName,
         NavigationMode mode = NavigationMode.New,
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
@@ -109,7 +111,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
     /// <inheritdoc />
     public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
         TParam parameter,
-        string regionName = "MainRegion",
+        string regionName = DefaultRegionName,
         NavigationMode mode = NavigationMode.New,
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
@@ -117,7 +119,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         => NavigateInternalAsync<TViewModel>(regionName, parameter, mode, refreshIfActive, cancellationToken);
 
     /// <inheritdoc />
-    public async Task<bool> GoBackAsync(string regionName = "MainRegion", CancellationToken cancellationToken = default)
+    public async Task<bool> GoBackAsync(string regionName = DefaultRegionName, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
         ThrowIfDisposed();
@@ -215,7 +217,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
     // ───────────────────────── Queries (sync) ─────────────────────────
 
     /// <inheritdoc />
-    public bool CanGoBack(string regionName = "MainRegion")
+    public bool CanGoBack(string regionName = DefaultRegionName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
         using (_stateLock.EnterScope())
@@ -225,7 +227,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
     }
 
     /// <inheritdoc />
-    public INavigationViewModel? GetCurrentViewModel(string regionName = "MainRegion")
+    public INavigationViewModel? GetCurrentViewModel(string regionName = DefaultRegionName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
         using (_stateLock.EnterScope())
@@ -237,14 +239,14 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
     }
 
     /// <inheritdoc />
-    public bool IsActive<TViewModel>(string regionName = "MainRegion") where TViewModel : INavigationViewModel
+    public bool IsActive<TViewModel>(string regionName = DefaultRegionName) where TViewModel : INavigationViewModel
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
         return GetCurrentViewModel(regionName) is TViewModel;
     }
 
     /// <inheritdoc />
-    public NavigationMode? GetCurrentMode(string regionName = "MainRegion")
+    public NavigationMode? GetCurrentMode(string regionName = DefaultRegionName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
         using (_stateLock.EnterScope())

@@ -5,6 +5,8 @@ using ElegantSeries.Flow.Core.Navigation;
 using ElegantSeries.Flow.Avalonia.Locating;
 using ElegantSeries.Flow.Avalonia.Threading;
 
+using static ElegantSeries.Flow.Core.Navigation.NavigationDefaults;
+
 namespace ElegantSeries.Flow.Avalonia.Hosting;
 
 /// <summary>
@@ -58,7 +60,7 @@ public class NavigationHost : ContentControl, IDisposable
     /// Defines the <see cref="RegionName"/> property.
     /// </summary>
     public static readonly StyledProperty<string> RegionNameProperty =
-        AvaloniaProperty.Register<NavigationHost, string>(nameof(RegionName), defaultValue: "MainRegion");
+        AvaloniaProperty.Register<NavigationHost, string>(nameof(RegionName), defaultValue: DefaultRegionName);
 
     /// <summary>
     /// Defines the <see cref="NavigationService"/> property.
@@ -82,7 +84,7 @@ public class NavigationHost : ContentControl, IDisposable
     // navigation service swallows subscriber exceptions, so the host would silently
     // stop updating). OnPropertyChanged runs on the UI thread; volatile keeps the
     // write visible to event threads.
-    private volatile string _regionName = "MainRegion";
+    private volatile string _regionName = DefaultRegionName;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="NavigationHost"/> class using the
@@ -209,7 +211,7 @@ public class NavigationHost : ContentControl, IDisposable
             // Runs on the UI thread (SetValue verifies access); mirrors the value
             // into _regionName so background event threads never touch the
             // property system, then re-displays the new region's content.
-            _regionName = change.GetNewValue<string>() ?? "MainRegion";
+            _regionName = change.GetNewValue<string>() ?? DefaultRegionName;
             _controller.Refresh();
         }
 

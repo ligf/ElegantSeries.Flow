@@ -5,6 +5,8 @@ using ElegantSeries.Flow.Core.Navigation;
 using ElegantSeries.Flow.WPF.Locating;
 using ElegantSeries.Flow.WPF.Threading;
 
+using static ElegantSeries.Flow.Core.Navigation.NavigationDefaults;
+
 namespace ElegantSeries.Flow.WPF.Hosting;
 
 /// <summary>
@@ -52,7 +54,7 @@ public class NavigationHost : ContentControl, IDisposable
             nameof(RegionName),
             typeof(string),
             typeof(NavigationHost),
-            new PropertyMetadata("MainRegion", OnRegionNameChanged));
+            new PropertyMetadata(DefaultRegionName, OnRegionNameChanged));
 
     /// <summary>
     /// Identifies the <see cref="NavigationService"/> dependency property.
@@ -81,7 +83,7 @@ public class NavigationHost : ContentControl, IDisposable
     // events on a thread-pool thread, and DependencyObject.GetValue must only be
     // called on the UI thread. The callback below runs on the UI thread; volatile
     // keeps the write visible to event threads.
-    private volatile string _regionName = "MainRegion";
+    private volatile string _regionName = DefaultRegionName;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="NavigationHost"/> class
@@ -123,7 +125,7 @@ public class NavigationHost : ContentControl, IDisposable
     /// </summary>
     public string RegionName
     {
-        get => (string?)GetValue(RegionNameProperty) ?? "MainRegion";
+        get => (string?)GetValue(RegionNameProperty) ?? DefaultRegionName;
         set => SetValue(RegionNameProperty, value ?? throw new ArgumentNullException(nameof(value)));
     }
 
@@ -213,7 +215,7 @@ public class NavigationHost : ContentControl, IDisposable
     {
         // Runs on the UI thread (dependency properties have thread affinity).
         var host = (NavigationHost)d;
-        host._regionName = (string?)e.NewValue ?? "MainRegion";
+        host._regionName = (string?)e.NewValue ?? DefaultRegionName;
         host._controller.Refresh();
     }
 
