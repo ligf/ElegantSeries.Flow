@@ -3,6 +3,8 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using ElegantSeries.Flow.Core.Navigation;
 
+using static ElegantSeries.Flow.Core.Navigation.NavigationDefaults;
+
 namespace ElegantSeries.Flow.Core.ViewModels;
 
 /// <summary>
@@ -101,7 +103,7 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     /// <see langword="false"/> if it was cancelled or the ViewModel is not active.
     /// </returns>
     protected Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
-        string regionName = "MainRegion",
+        string regionName = DefaultRegionName,
         NavigationMode mode = NavigationMode.New,
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
@@ -128,7 +130,7 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     /// </returns>
     protected Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
         TParam parameter,
-        string regionName = "MainRegion",
+        string regionName = DefaultRegionName,
         NavigationMode mode = NavigationMode.New,
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
@@ -145,6 +147,6 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     /// <see langword="true"/> if back navigation succeeded;
     /// <see langword="false"/> if the stack is empty, the guard cancelled, or the ViewModel is not active.
     /// </returns>
-    protected Task<bool> GoBackAsync(string regionName = "MainRegion", CancellationToken cancellationToken = default)
+    protected Task<bool> GoBackAsync(string regionName = DefaultRegionName, CancellationToken cancellationToken = default)
         => Navigation?.GoBackAsync(regionName, cancellationToken) ?? Task.FromResult(false);
 }

@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using static ElegantSeries.Flow.Core.Navigation.NavigationDefaults;
 
 namespace ElegantSeries.Flow.Core.Navigation;
 
@@ -124,28 +125,28 @@ public interface INavigationService
     /// </summary>
     /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
     /// <returns><see langword="true"/> if the region stack contains more than one page.</returns>
-    bool CanGoBack(string regionName = "MainRegion");
+    bool CanGoBack(string regionName = DefaultRegionName);
 
     /// <summary>
     /// Gets the currently active ViewModel in the specified region.
     /// </summary>
     /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
     /// <returns>The active ViewModel, or <see langword="null"/> if the region is empty.</returns>
-    INavigationViewModel? GetCurrentViewModel(string regionName = "MainRegion");
+    INavigationViewModel? GetCurrentViewModel(string regionName = DefaultRegionName);
 
     /// <summary>
     /// Checks whether the active ViewModel in the specified region is of the given type.
     /// </summary>
     /// <typeparam name="TViewModel">The ViewModel type to check.</typeparam>
     /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
-    bool IsActive<TViewModel>(string regionName = "MainRegion") where TViewModel : INavigationViewModel;
+    bool IsActive<TViewModel>(string regionName = DefaultRegionName) where TViewModel : INavigationViewModel;
 
     /// <summary>
     /// Gets the <see cref="NavigationMode"/> of the current page in the specified region.
     /// </summary>
     /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
     /// <returns>The navigation mode, or <see langword="null"/> if the region is empty.</returns>
-    NavigationMode? GetCurrentMode(string regionName = "MainRegion");
+    NavigationMode? GetCurrentMode(string regionName = DefaultRegionName);
 
     // ─────────────────── Navigation Methods (Async) ───────────────────
 
@@ -178,7 +179,7 @@ public interface INavigationService
     /// stack is updated.
     /// </exception>
     Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
-        string regionName = "MainRegion",
+        string regionName = DefaultRegionName,
         NavigationMode mode = NavigationMode.New,
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
@@ -216,7 +217,7 @@ public interface INavigationService
     /// </exception>
     Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
         TParam parameter,
-        string regionName = "MainRegion",
+        string regionName = DefaultRegionName,
         NavigationMode mode = NavigationMode.New,
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
@@ -239,7 +240,7 @@ public interface INavigationService
     /// Thrown when <paramref name="cancellationToken"/> is cancelled before the region
     /// stack is updated.
     /// </exception>
-    Task<bool> GoBackAsync(string regionName = "MainRegion", CancellationToken cancellationToken = default);
+    Task<bool> GoBackAsync(string regionName = DefaultRegionName, CancellationToken cancellationToken = default);
 
     // ──────────────── Cache Management (Sync then Async) ────────────────
 
