@@ -9,7 +9,6 @@
 
     <!-- NuGet package metadata (aligned with ElegantSeries.Flow.Core) -->
     <PackageId>ElegantSeries.Flow.Avalonia</PackageId>
-    <Version>0.1.1</Version>
     <Authors>ligf</Authors>
     <Description>Avalonia UI adapter for ElegantSeries.Flow: a zero-reflection view locator, a typed BaseView, and a region NavigationHost that binds to INavigationService.</Description>
     <PackageTags>navigation;mvvm;avalonia;viewmodel;aot;trimming</PackageTags>

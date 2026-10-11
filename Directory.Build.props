@@ -1,0 +1,10 @@
+<Project>
+  <!--
+    MinVer: versions are derived from git tags (bare SemVer, e.g. "1.0.0", "1.0.0-rc.1").
+    Tag the commit you want to release; MinVer applies the version to assemblies and packages.
+    See https://github.com/adamralph/minver
+  -->
+  <ItemGroup>
+    <PackageReference Include="MinVer" Version="8.0.0" PrivateAssets="All" />
+  </ItemGroup>
+</Project>
