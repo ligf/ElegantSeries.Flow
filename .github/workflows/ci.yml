@@ -55,3 +55,7 @@ jobs:
   
       - name: Publish Avalonia sample (Native AOT)
         run: dotnet publish samples/ElegantSeries.Flow.Samples.Avalonia -c Release -r ${{ matrix.rid }} --self-contained
+      
+      - name: Run AOT smoke test
+        run: ./samples/ElegantSeries.Flow.Samples.Avalonia/bin/Release/net10.0/${{ matrix.rid }}/publish/ElegantSeries.Flow.Samples.Avalonia${{ matrix.rid == 'win-x64' && '.exe' || '' }} --smoke-test
+        
