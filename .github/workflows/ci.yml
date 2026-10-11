@@ -20,6 +20,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-dotnet@v6
         with:
@@ -34,7 +36,8 @@ jobs:
 
       - name: Test (Windows)
         if: runner.os == 'Windows'
-        run: dotnet test ElegantSeries.Flow.slnx -c Release --no-build        
+        run: dotnet test ElegantSeries.Flow.slnx -c Release --no-build
+
   aot-publish:
     name: AOT publish smoke test (${{ matrix.rid }})
     runs-on: ${{ matrix.os }}
@@ -48,14 +51,15 @@ jobs:
             rid: win-x64
     steps:
       - uses: actions/checkout@v7
-  
+        with:
+          fetch-depth: 0
+
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
-  
+
       - name: Publish Avalonia sample (Native AOT)
         run: dotnet publish samples/ElegantSeries.Flow.Samples.Avalonia -c Release -r ${{ matrix.rid }} --self-contained
-      
+
       - name: Run AOT smoke test
         run: ./samples/ElegantSeries.Flow.Samples.Avalonia/bin/Release/net10.0/${{ matrix.rid }}/publish/ElegantSeries.Flow.Samples.Avalonia${{ matrix.rid == 'win-x64' && '.exe' || '' }} --smoke-test
-        
