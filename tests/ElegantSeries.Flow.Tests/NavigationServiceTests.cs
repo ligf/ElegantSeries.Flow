@@ -804,6 +804,13 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void AddFlow_ShouldThrowOnUndefinedLifetime()
+    {
+        var services = new ServiceCollection();
+        Assert.Throws<ArgumentOutOfRangeException>(() => services.AddFlow((ServiceLifetime)999));
+    }
+
+    [Fact]
     public async Task Validation_AllMethods_ShouldThrowOnInvalidRegionName()
     {
         await Assert.ThrowsAsync<ArgumentException>(() => _navigationService.NavigateToAsync<TestHomeViewModel>(string.Empty));
