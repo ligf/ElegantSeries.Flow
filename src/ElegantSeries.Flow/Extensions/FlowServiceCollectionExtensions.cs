@@ -10,11 +10,24 @@ namespace ElegantSeries.Flow.Extensions;
 public static class FlowServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers <see cref="INavigationService"/> as a singleton.
-    /// Suitable for single-window applications or global navigation.
+    /// Registers <see cref="INavigationService"/> with the specified lifetime.
     /// </summary>
     /// <param name="services">The service collection.</param>
+    /// <param name="lifetime">
+    /// <see cref="ServiceLifetime.Singleton"/> (default): suitable for single-window
+    /// applications or global navigation — one shared navigation stack.
+    /// <see cref="ServiceLifetime.Scoped"/>: suitable for multi-window applications —
+    /// each window scope gets its own <see cref="NavigationService"/> with isolated
+    /// region stacks.
+    /// </param>
     /// <returns>The service collection for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="lifetime"/> is <see cref="ServiceLifetime.Transient"/> or not a
+    /// defined value. The navigation service is stateful (it owns the region stacks),
+    /// so transient lifetime would hand each consumer an isolated, empty stack and
+    /// silently break navigation.
+    /// </exception>
     /// <remarks>
     /// <para><b>Registration conventions</b> (the page-level scope model disposes whatever
     /// the page scope created, so register with intent):</para>
@@ -37,29 +50,12 @@ public static class FlowServiceCollectionExtensions
     /// when popped — it won't be: navigating to its type while its instance lives deeper
     /// on the region's stack pops back to the shared instance instead of pushing a duplicate.
     /// </para>
-    /// </remarks>
-    public static IServiceCollection AddSingletonFlowNavigation(this IServiceCollection services)
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        services.TryAddSingleton<INavigationService, NavigationService>();
-        return services;
-    }
-
-    /// <summary>
-    /// Registers <see cref="INavigationService"/> as a scoped service.
-    /// Suitable for multi-window applications where each window has its own scope
-    /// with an isolated navigation stack.
-    /// </summary>
-    /// <param name="services">The service collection.</param>
-    /// <returns>The service collection for chaining.</returns>
-    /// <remarks>
     /// <para>
-    /// Each window scope gets its own <see cref="NavigationService"/> with isolated
-    /// region stacks. Page scopes nest inside the window scope:
+    /// With <see cref="ServiceLifetime.Scoped"/>, page scopes nest inside the window scope:
     /// </para>
     /// <code>
     /// root container
-    ///  └─ window scope (AddScopedFlowNavigation → INavigationService per window)
+    ///  └─ window scope (AddFlow(ServiceLifetime.Scoped) → INavigationService per window)
     ///       ├─ page scope (page 1: ViewModel + its Transient/Scoped graph)
     ///       └─ page scope (page 2: ViewModel + its Transient/Scoped graph)
     /// </code>
@@ -69,12 +65,28 @@ public static class FlowServiceCollectionExtensions
     /// hand it to another window's navigation service — a page scope belongs to exactly
     /// one navigation service.
     /// </para>
-    /// <para>See <see cref="AddSingletonFlowNavigation"/> for the registration conventions.</para>
     /// </remarks>
-    public static IServiceCollection AddScopedFlowNavigation(this IServiceCollection services)
+    public static IServiceCollection AddFlow(
+        this IServiceCollection services,
+        ServiceLifetime lifetime = ServiceLifetime.Singleton)
     {
         ArgumentNullException.ThrowIfNull(services);
-        services.TryAddScoped<INavigationService, NavigationService>();
+
+        switch (lifetime)
+        {
+            case ServiceLifetime.Singleton:
+                services.TryAddSingleton<INavigationService, NavigationService>();
+                break;
+            case ServiceLifetime.Scoped:
+                services.TryAddScoped<INavigationService, NavigationService>();
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(
+                    nameof(lifetime),
+                    lifetime,
+                    "INavigationService must be Singleton or Scoped. Transient would give each consumer an isolated, empty navigation stack.");
+        }
+
         return services;
     }
 }

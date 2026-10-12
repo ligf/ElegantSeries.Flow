@@ -61,7 +61,7 @@ internal static class SmokeTest
     private static ServiceProvider BuildServiceProvider()
     {
         var services = new ServiceCollection();
-        services.AddSingletonFlowNavigation();
+        services.AddFlow();
         services.AddTransient<SmokeHomeViewModel>();
         services.AddTransient<SmokeDetailViewModel>();
         return services.BuildServiceProvider();

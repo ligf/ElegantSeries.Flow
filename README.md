@@ -45,9 +45,9 @@ Requires **.NET 10** or later.
 ```csharp
 using ElegantSeries.Flow.Extensions;
 
-services.AddSingletonFlowNavigation();   // singleton — single-window apps
+services.AddFlow();   // singleton — single-window apps
 // or
-services.AddScopedFlowNavigation();      // scoped — each window gets its own navigation stack
+services.AddFlow(ServiceLifetime.Scoped);      // scoped — each window gets its own navigation stack
 ```
 
 **Singleton or scoped?** A *region* is a named navigation slot — typically one
@@ -55,16 +55,19 @@ services.AddScopedFlowNavigation();      // scoped — each window gets its own 
 stack (see [Regions](#regions)). This choice only decides the *scope of those
 stacks*:
 
-- `AddSingletonFlowNavigation()` registers one app-wide `INavigationService`. Every window
+- `AddFlow()` registers one app-wide `INavigationService`. Every window
   shares the same region stacks: two windows each hosting a `"MainRegion"` would
   interfere with each other.
-- `AddScopedFlowNavigation()` gives each DI scope (typically one per window) its
+- `AddFlow(ServiceLifetime.Scoped)` gives each DI scope (typically one per window) its
   own `INavigationService` with fully isolated region stacks.
 
-Both methods use `TryAdd`, so calling both registers only the first one — a
-single container holds exactly one `INavigationService` registration. The
+`AddFlow` uses `TryAdd` internally, so calling it twice registers only the first
+one — a single container holds exactly one `INavigationService` registration. The
 ViewModels' lifetimes are independent of this choice (see
-[Page-level service scopes](#page-level-service-scopes)).
+[Page-level service scopes](#page-level-service-scopes)). Passing
+`ServiceLifetime.Transient` throws `ArgumentOutOfRangeException`: the navigation
+service is stateful, and a transient registration would hand each consumer an
+isolated, empty stack.
 
 **Mixed setup** — one global stack plus isolated windows: register the singleton
 for the shared stack, and construct per-window services manually from each
@@ -72,7 +75,7 @@ window's scope (they are not registered in DI). The scope must live as long as
 the window — dispose it when the window closes, not earlier:
 
 ```csharp
-services.AddSingletonFlowNavigation(); // global stack
+services.AddFlow(); // global stack
 
 // Per-window isolated stack:
 var windowScope = rootProvider.CreateScope(); // dispose when the window closes
@@ -381,7 +384,7 @@ framework's AOT story (verified by the Native AOT publish smoke test in CI).
 | `ClearCache(region?)` / `ClearCacheAsync(region?)` | Clear one region's KeepAlive cache |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | Clear all KeepAlive caches |
 | `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` | Events |
-| `AddSingletonFlowNavigation()` / `AddScopedFlowNavigation()` | DI registration |
+| `AddFlow()` / `AddFlow(ServiceLifetime.Scoped)` | DI registration |
 
 ## Contributing
 
