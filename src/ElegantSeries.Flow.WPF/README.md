@@ -4,7 +4,7 @@ WPF UI integration for the [ElegantSeries.Flow](https://github.com/ligf/ElegantS
 MVVM navigation library: an AOT-friendly view locator, a typed `BaseView` base
 class, and a region-aware `NavigationHost` control.
 
-Requires **ElegantSeries.Flow (core) >= 0.1.0**.
+Requires **ElegantSeries.Flow (core) >= 1.0.0**.
 
 ## Setup
 
@@ -128,7 +128,7 @@ their exceptions, so a misbehaving host can never corrupt navigation state.
 | Package | Targets | Depends on |
 |---|---|---|
 | `ElegantSeries.Flow` | `net10.0` | — |
-| `ElegantSeries.Flow.WPF` | `net10.0-windows` | `ElegantSeries.Flow` >= 0.1.0 |
+| `ElegantSeries.Flow.WPF` | `net10.0-windows` | `ElegantSeries.Flow` >= 1.0.0 |
 
 ## License
 
