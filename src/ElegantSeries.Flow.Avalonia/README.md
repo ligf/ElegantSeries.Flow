@@ -14,7 +14,7 @@ It contains no navigation logic itself — it binds the platform-agnostic
 | `IDispatcher` / `AvaloniaDispatcher` | UI-thread marshalling abstraction (testable) |
 | `FlowViewServiceExtensions` | `services.AddFlowViews(...)` DI registration |
 
-Requires `ElegantSeries.Flow` **>= 0.1.1** (this package is version 0.1.1).
+Requires `ElegantSeries.Flow` **>= 1.0.0**.
 
 ## Usage
 
@@ -105,13 +105,15 @@ by the (typically singleton) service.
 
 The package is `IsAotCompatible=true`. View resolution uses only generic type
 parameters and a dictionary keyed by `viewModel.GetType()` — no
-`Activator.CreateInstance`, no runtime reflection, no source generators.
+`Activator.CreateInstance`, no runtime reflection. (The optional `[ViewFor]`
+source generator emits the same registrations at build time; the runtime never
+requires it.)
 
 ## Version correspondence
 
 | This package | Requires |
 |---|---|
-| 0.1.1 | ElegantSeries.Flow >= 0.1.1, Avalonia 12.x |
+| 1.0.0 | ElegantSeries.Flow >= 1.0.0, Avalonia 12.x |
 
 ## License
 
