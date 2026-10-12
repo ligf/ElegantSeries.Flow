@@ -1,4 +1,4 @@
-namespace ElegantSeries.Flow.Core.Navigation;
+namespace ElegantSeries.Flow.Navigation;
 
 /// <summary>
 /// Specifies how a page is navigated to within a region.

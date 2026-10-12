@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace ElegantSeries.Flow.Core.Routing;
+namespace ElegantSeries.Flow.Routing;
 
 /// <summary>
 /// Specifies how the ElegantSeries.Flow source generator registers the ViewModel

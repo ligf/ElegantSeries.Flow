@@ -1,10 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
-using ElegantSeries.Flow.Core.Extensions;
-using ElegantSeries.Flow.Core.Navigation;
-using ElegantSeries.Flow.Core.Routing;
-using ElegantSeries.Flow.Core.ViewModels;
+using ElegantSeries.Flow.Extensions;
+using ElegantSeries.Flow.Navigation;
+using ElegantSeries.Flow.Routing;
+using ElegantSeries.Flow.ViewModels;
 
-namespace ElegantSeries.Flow.Core.Tests;
+namespace ElegantSeries.Flow.Tests;
 
 public class TestHomeViewModel : NavigationViewModelBase
 {

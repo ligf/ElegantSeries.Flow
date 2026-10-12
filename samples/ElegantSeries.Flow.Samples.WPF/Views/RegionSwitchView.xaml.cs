@@ -1,5 +1,5 @@
 using System.Windows;
-using ElegantSeries.Flow.Core.Routing;
+using ElegantSeries.Flow.Routing;
 using ElegantSeries.Flow.Samples.Shared;
 using ElegantSeries.Flow.WPF.Hosting;
 using ElegantSeries.Flow.WPF.Locating;

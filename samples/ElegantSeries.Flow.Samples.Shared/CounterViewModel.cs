@@ -5,7 +5,7 @@ using ElegantSeries.Flow.Mvvm;
 namespace ElegantSeries.Flow.Samples.Shared;
 
 /// <summary>
-/// Demonstrates <see cref="ElegantSeries.Flow.Core.Navigation.NavigationMode.KeepAlive"/>:
+/// Demonstrates <see cref="ElegantSeries.Flow.Navigation.NavigationMode.KeepAlive"/>:
 /// navigate away and back — the count is preserved because the page (ViewModel +
 /// its scope) is cached instead of disposed.
 /// </summary>

@@ -1,4 +1,4 @@
-namespace ElegantSeries.Flow.Core.Navigation;
+namespace ElegantSeries.Flow.Navigation;
 
 /// <summary>
 /// Contract for a ViewModel that the navigation service can manage.

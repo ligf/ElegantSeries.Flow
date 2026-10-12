@@ -43,7 +43,7 @@ public static class FlowViewServiceExtensions
     /// benefit, configuration errors fail fast at startup.
     /// </para>
     /// <para>
-    /// The navigation service itself (<c>ElegantSeries.Flow.Core</c>) is registered
+    /// The navigation service itself (<c>ElegantSeries.Flow</c>) is registered
     /// separately; this method only covers the Avalonia view layer.
     /// </para>
     /// </remarks>

@@ -1,8 +1,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 using System.Diagnostics.CodeAnalysis;
 
-using static ElegantSeries.Flow.Core.Navigation.NavigationDefaults;
+using static ElegantSeries.Flow.Navigation.NavigationDefaults;
 
 namespace ElegantSeries.Flow.Mvvm;
 
@@ -14,7 +14,7 @@ namespace ElegantSeries.Flow.Mvvm;
 /// <para>
 /// This base class builds on CommunityToolkit.Mvvm (<see cref="ObservableObject"/>) for
 /// <c>[ObservableProperty]</c> source generation. For a toolkit-free alternative, derive
-/// from <see cref="Core.ViewModels.NavigationViewModelBase"/> (in the
+/// from <see cref="ElegantSeries.Flow.ViewModels.NavigationViewModelBase"/> (in the
 /// <c>ElegantSeries.Flow</c> core package) instead.
 /// </para>
 /// <para>

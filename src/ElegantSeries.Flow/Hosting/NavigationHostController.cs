@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
-using ElegantSeries.Flow.Core.Navigation;
-using ElegantSeries.Flow.Core.Threading;
+using ElegantSeries.Flow.Navigation;
+using ElegantSeries.Flow.Threading;
 
-namespace ElegantSeries.Flow.Core.Hosting;
+namespace ElegantSeries.Flow.Hosting;
 
 /// <summary>
 /// UI-framework-agnostic navigation-host logic used by the platform

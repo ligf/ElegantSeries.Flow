@@ -1,4 +1,4 @@
-namespace ElegantSeries.Flow.Core.Threading;
+namespace ElegantSeries.Flow.Threading;
 
 /// <summary>
 /// Minimal UI-thread marshaling abstraction. Keeps navigation-host logic

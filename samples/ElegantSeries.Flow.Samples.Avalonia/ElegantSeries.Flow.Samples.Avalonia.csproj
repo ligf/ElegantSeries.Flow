@@ -11,7 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\ElegantSeries.Flow.Core\ElegantSeries.Flow.Core.csproj" />
+    <ProjectReference Include="..\..\src\ElegantSeries.Flow\ElegantSeries.Flow.csproj" />
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Mvvm\ElegantSeries.Flow.Mvvm.csproj" />
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Avalonia\ElegantSeries.Flow.Avalonia.csproj" />
     <ProjectReference Include="..\ElegantSeries.Flow.Samples.Shared\ElegantSeries.Flow.Samples.Shared.csproj" />

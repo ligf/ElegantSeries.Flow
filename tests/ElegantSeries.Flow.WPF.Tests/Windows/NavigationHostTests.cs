@@ -1,6 +1,6 @@
 using System.Windows;
-using ElegantSeries.Flow.Core.Navigation;
-using ElegantSeries.Flow.Core.ViewModels;
+using ElegantSeries.Flow.Navigation;
+using ElegantSeries.Flow.ViewModels;
 using ElegantSeries.Flow.WPF.Hosting;
 using ElegantSeries.Flow.WPF.Locating;
 using ElegantSeries.Flow.WPF.Threading;
@@ -21,7 +21,7 @@ public sealed class NavigationHostTests
 
     private sealed class TestHost : NavigationHost
     {
-        public TestHost(Core.Threading.IDispatcher dispatcher)
+        public TestHost(ElegantSeries.Flow.Threading.IDispatcher dispatcher)
             : base(dispatcher)
         {
         }

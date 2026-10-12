@@ -1,8 +1,8 @@
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace ElegantSeries.Flow.Core.Extensions;
+namespace ElegantSeries.Flow.Extensions;
 
 /// <summary>
 /// Extension methods for registering ElegantSeries.Flow navigation services.

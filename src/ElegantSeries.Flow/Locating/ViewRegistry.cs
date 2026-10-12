@@ -1,6 +1,6 @@
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 
-namespace ElegantSeries.Flow.Core.Locating;
+namespace ElegantSeries.Flow.Locating;
 
 /// <summary>
 /// Thread-safe ViewModel-type to view-factory registry.

@@ -11,7 +11,7 @@ namespace ElegantSeries.Flow.Generator;
 /// <summary>
 /// Generates <c>IViewLocator</c> view registrations from
 /// <c>[ViewFor]</c> attributes
-/// (<c>ElegantSeries.Flow.Core.Routing.ViewForAttribute</c>).
+/// (<c>ElegantSeries.Flow.Routing.ViewForAttribute</c>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -36,7 +36,7 @@ namespace ElegantSeries.Flow.Generator;
 [Generator]
 public sealed class ViewForGenerator : IIncrementalGenerator
 {
-    private const string ViewForAttributeMetadataName = "ElegantSeries.Flow.Core.Routing.ViewForAttribute";
+    private const string ViewForAttributeMetadataName = "ElegantSeries.Flow.Routing.ViewForAttribute";
 
     // Platform namespace roots. The locator and BaseView<TViewModel> namespaces
     // are derived from these, so supporting a new platform only touches this table.

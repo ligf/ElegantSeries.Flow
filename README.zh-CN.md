@@ -42,7 +42,7 @@ dotnet add package ElegantSeries.Flow
 ### 1. 注册服务
 
 ```csharp
-using ElegantSeries.Flow.Core.Extensions;
+using ElegantSeries.Flow.Extensions;
 
 services.AddSingletonFlowNavigation();   // 单例——单窗口应用
 // 或
@@ -78,7 +78,7 @@ var windowNavigation = new NavigationService(windowScope.ServiceProvider);
 
 ```csharp
 using ElegantSeries.Flow.Mvvm;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 
 public partial class HomeViewModel : BaseViewModel, INavigationAware
 {
@@ -126,7 +126,7 @@ ElegantSeries.Flow 与 UI 无关：它管理 ViewModel，平台层负责把活�
 ViewModel→View 映射方式：在 `services.AddFlowViews(...)` 里用 `views.Register` /
 `views.RegisterTransient` / `views.RegisterSingleton` 显式注册——无运行时反射，
 无命名约定。也可以在 View 类上放 `[ViewFor]` attribute
-（`ElegantSeries.Flow.Core.Routing`）声明它的 ViewModel，让 ElegantSeries.Flow
+（`ElegantSeries.Flow.Routing`）声明它的 ViewModel，让 ElegantSeries.Flow
 source generator 在编译期生成等价的注册代码，生成一个 `RegisterAttributedViews()`
 扩展方法（在 `AddFlowViews` 里调用）；attribute 的 `Lifetime` 可选 `Transient`
 （默认）、`Singleton` 或 `ViewOnly`（只生成映射，ViewModel 的 DI 注册自己管）。

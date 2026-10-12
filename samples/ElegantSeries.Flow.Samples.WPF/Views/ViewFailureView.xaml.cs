@@ -1,8 +1,8 @@
 using System.Windows;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.WPF.Locating;
 using Microsoft.Extensions.DependencyInjection;
-using ElegantSeries.Flow.Core.Routing;
+using ElegantSeries.Flow.Routing;
 using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF.Views;

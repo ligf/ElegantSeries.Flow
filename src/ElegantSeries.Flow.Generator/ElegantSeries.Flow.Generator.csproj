@@ -10,7 +10,7 @@
     <Deterministic>true</Deterministic>
 
     <!-- Roslyn source generator: embedded into the ElegantSeries.Flow package as a
-         build-time analyzer (see the ProjectReference in ElegantSeries.Flow.Core.csproj).
+         build-time analyzer (see the ProjectReference in ElegantSeries.Flow.csproj).
          Never shipped as a standalone package, never a runtime dependency. -->
     <IsPackable>false</IsPackable>
     <IncludeBuildOutput>false</IncludeBuildOutput>

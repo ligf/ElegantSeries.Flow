@@ -1,5 +1,5 @@
 using Avalonia.Controls;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 
 namespace ElegantSeries.Flow.Avalonia.Views;
 
