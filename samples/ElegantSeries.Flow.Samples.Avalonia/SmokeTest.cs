@@ -1,6 +1,6 @@
-using ElegantSeries.Flow.Core.Extensions;
-using ElegantSeries.Flow.Core.Navigation;
-using ElegantSeries.Flow.Core.ViewModels;
+using ElegantSeries.Flow.Extensions;
+using ElegantSeries.Flow.Navigation;
+using ElegantSeries.Flow.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Samples.Avalonia;

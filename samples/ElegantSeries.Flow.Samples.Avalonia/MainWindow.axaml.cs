@@ -1,7 +1,7 @@
 using Avalonia.Controls;
 using ElegantSeries.Flow.Avalonia.Hosting;
 using ElegantSeries.Flow.Avalonia.Locating;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 using Microsoft.Extensions.DependencyInjection;
 using ElegantSeries.Flow.Samples.Shared;
 

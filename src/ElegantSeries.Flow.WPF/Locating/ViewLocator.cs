@@ -1,6 +1,6 @@
 using System.Windows;
-using ElegantSeries.Flow.Core.Locating;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Locating;
+using ElegantSeries.Flow.Navigation;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 

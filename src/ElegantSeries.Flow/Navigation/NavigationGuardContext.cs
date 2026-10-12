@@ -1,4 +1,4 @@
-namespace ElegantSeries.Flow.Core.Navigation;
+namespace ElegantSeries.Flow.Navigation;
 
 /// <summary>
 /// Describes a pending navigation for <see cref="INavigationGuardWithContext"/> guards:

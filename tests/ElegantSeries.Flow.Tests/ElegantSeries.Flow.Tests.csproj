@@ -25,7 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\ElegantSeries.Flow.Core\ElegantSeries.Flow.Core.csproj" />
+    <ProjectReference Include="..\..\src\ElegantSeries.Flow\ElegantSeries.Flow.csproj" />
   </ItemGroup>
 
 </Project>

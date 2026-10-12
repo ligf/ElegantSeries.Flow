@@ -1,4 +1,4 @@
-namespace ElegantSeries.Flow.Core.Navigation;
+namespace ElegantSeries.Flow.Navigation;
 
 /// <summary>
 /// Implement this interface on a ViewModel to intercept navigation away from the current page.

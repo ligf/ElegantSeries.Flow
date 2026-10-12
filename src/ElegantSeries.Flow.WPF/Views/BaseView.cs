@@ -1,6 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 
 namespace ElegantSeries.Flow.WPF.Views;
 

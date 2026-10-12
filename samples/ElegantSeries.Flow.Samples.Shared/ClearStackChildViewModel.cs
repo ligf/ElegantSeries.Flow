@@ -1,5 +1,5 @@
 using CommunityToolkit.Mvvm.Input;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.Mvvm;
 
 namespace ElegantSeries.Flow.Samples.Shared;

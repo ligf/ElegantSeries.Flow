@@ -1,6 +1,6 @@
-using ElegantSeries.Flow.Core.Navigation;
-using ElegantSeries.Flow.Core.ViewModels;
-using ElegantSeries.Flow.Core.Hosting;
+using ElegantSeries.Flow.Navigation;
+using ElegantSeries.Flow.ViewModels;
+using ElegantSeries.Flow.Hosting;
 
 namespace ElegantSeries.Flow.WPF.Tests.Logic;
 

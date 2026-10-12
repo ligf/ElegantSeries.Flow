@@ -1,5 +1,5 @@
 using System.Windows;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.WPF.Hosting;
 using ElegantSeries.Flow.WPF.Locating;
 using Microsoft.Extensions.DependencyInjection;

@@ -1,6 +1,6 @@
 using System.Runtime.ExceptionServices;
-using ElegantSeries.Flow.Core.Navigation;
-using ElegantSeries.Flow.Core.ViewModels;
+using ElegantSeries.Flow.Navigation;
+using ElegantSeries.Flow.ViewModels;
 using ElegantSeries.Flow.Avalonia.Hosting;
 using ElegantSeries.Flow.Avalonia.Locating;
 using ElegantSeries.Flow.Avalonia.Threading;

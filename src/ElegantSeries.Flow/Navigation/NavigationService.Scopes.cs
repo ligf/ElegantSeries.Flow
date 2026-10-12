@@ -1,7 +1,7 @@
 using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace ElegantSeries.Flow.Core.Navigation;
+namespace ElegantSeries.Flow.Navigation;
 
 /// <summary>
 /// <see cref="NavigationService"/> — page-scope and KeepAlive-cache disposal.

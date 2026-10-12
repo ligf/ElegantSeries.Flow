@@ -31,7 +31,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ElegantSeries.Flow.Core\ElegantSeries.Flow.Core.csproj" />
+    <ProjectReference Include="..\ElegantSeries.Flow\ElegantSeries.Flow.csproj" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.401" PrivateAssets="All" />
   </ItemGroup>

@@ -1,5 +1,5 @@
-using ElegantSeries.Flow.Core.Navigation;
-using ElegantSeries.Flow.Core.Locating;
+using ElegantSeries.Flow.Navigation;
+using ElegantSeries.Flow.Locating;
 using Avalonia.Controls;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,7 +11,7 @@ namespace ElegantSeries.Flow.Avalonia.Locating;
 /// </summary>
 /// <remarks>
 /// A thin adapter over <c>ViewRegistry&lt;Control&gt;</c> (in
-/// <c>ElegantSeries.Flow.Core</c>); all registration and lookup logic lives
+/// <c>ElegantSeries.Flow</c>); all registration and lookup logic lives
 /// there so it stays unit-testable without an Avalonia runtime.
 /// Zero reflection: registration stores a compiled delegate per ViewModel type
 /// and lookup uses <see cref="object.GetType"/> only. Safe for Native AOT and

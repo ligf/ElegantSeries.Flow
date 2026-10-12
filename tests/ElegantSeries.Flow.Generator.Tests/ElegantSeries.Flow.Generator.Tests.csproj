@@ -8,7 +8,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <OutputType>Exe</OutputType>
     <!-- xUnit1051 suppressed: generator tests are synchronous and fast;
-         consistent with ElegantSeries.Flow.Core.Tests. -->
+         consistent with ElegantSeries.Flow.Tests. -->
     <NoWarn>$(NoWarn);xUnit1051</NoWarn>
   </PropertyGroup>
 

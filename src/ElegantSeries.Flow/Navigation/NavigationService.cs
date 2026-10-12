@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 
-using static ElegantSeries.Flow.Core.Navigation.NavigationDefaults;
+using static ElegantSeries.Flow.Navigation.NavigationDefaults;
 
-namespace ElegantSeries.Flow.Core.Navigation;
+namespace ElegantSeries.Flow.Navigation;
 
 /// <summary>
 /// Default <see cref="INavigationService"/> implementation (page-level lifetime scopes).

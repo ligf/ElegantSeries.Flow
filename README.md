@@ -43,7 +43,7 @@ Requires **.NET 10** or later.
 ### 1. Register the service
 
 ```csharp
-using ElegantSeries.Flow.Core.Extensions;
+using ElegantSeries.Flow.Extensions;
 
 services.AddSingletonFlowNavigation();   // singleton — single-window apps
 // or
@@ -83,7 +83,7 @@ var windowNavigation = new NavigationService(windowScope.ServiceProvider);
 
 ```csharp
 using ElegantSeries.Flow.Mvvm;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 
 public partial class HomeViewModel : BaseViewModel, INavigationAware
 {
@@ -133,7 +133,7 @@ active ViewModel to a View. The typical pattern is a `ContentControl`-style host
 ViewModel→View mapping, register views explicitly via `views.Register` /
 `views.RegisterTransient` / `views.RegisterSingleton` inside `services.AddFlowViews(...)`
 — no runtime reflection, no naming conventions. Alternatively, put a `[ViewFor]`
-attribute (`ElegantSeries.Flow.Core.Routing`) on the View class declaring its ViewModel
+attribute (`ElegantSeries.Flow.Routing`) on the View class declaring its ViewModel
 and let the ElegantSeries.Flow source generator emit the same registrations into a
 generated `RegisterAttributedViews()` extension (call it inside `AddFlowViews`); the
 attribute's `Lifetime` selects `Transient` (default), `Singleton`, or `ViewOnly`

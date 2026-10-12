@@ -1,11 +1,11 @@
 using System.Windows;
 using System.Windows.Controls;
-using ElegantSeries.Flow.Core.Hosting;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Hosting;
+using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.WPF.Locating;
 using ElegantSeries.Flow.WPF.Threading;
 
-using static ElegantSeries.Flow.Core.Navigation.NavigationDefaults;
+using static ElegantSeries.Flow.Navigation.NavigationDefaults;
 
 namespace ElegantSeries.Flow.WPF.Hosting;
 
@@ -100,7 +100,7 @@ public class NavigationHost : ContentControl, IDisposable
     /// </summary>
     /// <param name="dispatcher">The dispatcher used to marshal UI updates.</param>
     /// <exception cref="ArgumentNullException"><paramref name="dispatcher"/> is <see langword="null"/>.</exception>
-    protected NavigationHost(Core.Threading.IDispatcher dispatcher)
+    protected NavigationHost(ElegantSeries.Flow.Threading.IDispatcher dispatcher)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
 

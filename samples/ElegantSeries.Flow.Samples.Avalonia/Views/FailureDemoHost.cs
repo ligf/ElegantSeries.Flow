@@ -1,4 +1,4 @@
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.Avalonia.Views;

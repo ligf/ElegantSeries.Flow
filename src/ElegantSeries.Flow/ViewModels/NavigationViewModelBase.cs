@@ -1,11 +1,11 @@
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Navigation;
 
-using static ElegantSeries.Flow.Core.Navigation.NavigationDefaults;
+using static ElegantSeries.Flow.Navigation.NavigationDefaults;
 
-namespace ElegantSeries.Flow.Core.ViewModels;
+namespace ElegantSeries.Flow.ViewModels;
 
 /// <summary>
 /// Thin ViewModel base class with no MVVM toolkit dependency.

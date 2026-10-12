@@ -1,11 +1,11 @@
 using Avalonia;
 using Avalonia.Controls;
-using ElegantSeries.Flow.Core.Hosting;
-using ElegantSeries.Flow.Core.Navigation;
+using ElegantSeries.Flow.Hosting;
+using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.Avalonia.Locating;
 using ElegantSeries.Flow.Avalonia.Threading;
 
-using static ElegantSeries.Flow.Core.Navigation.NavigationDefaults;
+using static ElegantSeries.Flow.Navigation.NavigationDefaults;
 
 namespace ElegantSeries.Flow.Avalonia.Hosting;
 
@@ -22,7 +22,7 @@ namespace ElegantSeries.Flow.Avalonia.Hosting;
 /// <para>
 /// Region filtering, UI-thread marshaling, view caching, and failure handling are
 /// implemented by the shared <c>NavigationHostController&lt;Control&gt;</c> in
-/// <c>ElegantSeries.Flow.Core</c> (the same logic the WPF host uses); this class
+/// <c>ElegantSeries.Flow</c> (the same logic the WPF host uses); this class
 /// only adapts it to Avalonia's property system and visual-tree lifetime.
 /// </para>
 /// <para>

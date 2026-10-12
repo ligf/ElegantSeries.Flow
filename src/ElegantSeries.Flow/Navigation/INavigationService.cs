@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-using static ElegantSeries.Flow.Core.Navigation.NavigationDefaults;
+using static ElegantSeries.Flow.Navigation.NavigationDefaults;
 
-namespace ElegantSeries.Flow.Core.Navigation;
+namespace ElegantSeries.Flow.Navigation;
 
 /// <summary>
 /// Platform-agnostic navigation service that manages region-based navigation stacks,

@@ -8,7 +8,6 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!-- NuGet package metadata -->
-    <PackageId>ElegantSeries.Flow</PackageId>
     <Authors>ligf</Authors>
     <Description>A lightweight, AOT-friendly MVVM navigation library for .NET: region-based navigation stacks, KeepAlive ViewModel caching, typed navigation parameters, navigation guards, and lifecycle callbacks.</Description>
     <PackageTags>navigation;mvvm;viewmodel;aot;trimming</PackageTags>

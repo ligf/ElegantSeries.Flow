@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\ElegantSeries.Flow.Core\ElegantSeries.Flow.Core.csproj" />
+    <ProjectReference Include="..\..\src\ElegantSeries.Flow\ElegantSeries.Flow.csproj" />
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Mvvm\ElegantSeries.Flow.Mvvm.csproj" />
   </ItemGroup>
 

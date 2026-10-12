@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Avalonia.Controls;
-using ElegantSeries.Flow.Core.Navigation;
-using ElegantSeries.Flow.Core.ViewModels;
+using ElegantSeries.Flow.Navigation;
+using ElegantSeries.Flow.ViewModels;
 using ElegantSeries.Flow.Avalonia.Threading;
 using ElegantSeries.Flow.Avalonia.Views;
 

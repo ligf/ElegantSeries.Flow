@@ -1,4 +1,4 @@
-namespace ElegantSeries.Flow.Core.Navigation;
+namespace ElegantSeries.Flow.Navigation;
 
 /// <summary>
 /// Default values for the navigation API.

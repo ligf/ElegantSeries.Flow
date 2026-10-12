@@ -1,5 +1,5 @@
 using ElegantSeries.Flow.Avalonia.Locating;
-using ElegantSeries.Flow.Core.Routing;
+using ElegantSeries.Flow.Routing;
 using ElegantSeries.Flow.Samples.Shared;
 using Microsoft.Extensions.DependencyInjection;
 

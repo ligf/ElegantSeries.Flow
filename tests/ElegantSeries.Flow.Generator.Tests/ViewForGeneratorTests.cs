@@ -12,7 +12,7 @@ namespace ElegantSeries.Flow.Generator.Tests;
 public class ViewForGeneratorTests
 {
     private const string AttributeStub = """
-        namespace ElegantSeries.Flow.Core.Routing
+        namespace ElegantSeries.Flow.Routing
         {
             [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
             public sealed class ViewForAttribute : System.Attribute
@@ -70,17 +70,17 @@ public class ViewForGeneratorTests
 
         namespace TestApp.Views
         {
-            [ElegantSeries.Flow.Core.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+            [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
             public class HomeView { }
 
-            [ElegantSeries.Flow.Core.Routing.ViewFor(
+            [ElegantSeries.Flow.Routing.ViewFor(
                 typeof(TestApp.ViewModels.MenuViewModel),
-                Lifetime = ElegantSeries.Flow.Core.Routing.ViewModelLifetime.Singleton)]
+                Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.Singleton)]
             public class MenuView { }
 
-            [ElegantSeries.Flow.Core.Routing.ViewFor(
+            [ElegantSeries.Flow.Routing.ViewFor(
                 typeof(TestApp.ViewModels.DetailViewModel),
-                Lifetime = ElegantSeries.Flow.Core.Routing.ViewModelLifetime.ViewOnly)]
+                Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.ViewOnly)]
             public class DetailView { }
         }
         """;
@@ -125,10 +125,10 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Core.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
                 public class HomeView { }
 
-                [ElegantSeries.Flow.Core.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
                 public class OtherHomeView { }
             }
             """;
@@ -165,9 +165,9 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Core.Routing.ViewFor(
+                [ElegantSeries.Flow.Routing.ViewFor(
                     typeof(TestApp.ViewModels.MenuViewModel),
-                    Lifetime = (ElegantSeries.Flow.Core.Routing.ViewModelLifetime)1)]
+                    Lifetime = (ElegantSeries.Flow.Routing.ViewModelLifetime)1)]
                 public class MenuView { }
             }
             """;
@@ -194,9 +194,9 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Core.Routing.ViewFor(
+                [ElegantSeries.Flow.Routing.ViewFor(
                     typeof(TestApp.ViewModels.HomeViewModel),
-                    Lifetime = (ElegantSeries.Flow.Core.Routing.ViewModelLifetime)99)]
+                    Lifetime = (ElegantSeries.Flow.Routing.ViewModelLifetime)99)]
                 public class HomeView { }
             }
             """;
@@ -230,7 +230,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Core.Routing.ViewFor]
+                [ElegantSeries.Flow.Routing.ViewFor]
                 public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel>
                 {
                 }
@@ -264,7 +264,7 @@ public class ViewForGeneratorTests
                 {
                 }
 
-                [ElegantSeries.Flow.Core.Routing.ViewFor]
+                [ElegantSeries.Flow.Routing.ViewFor]
                 public class HomeView : MiddleView
                 {
                 }
@@ -288,7 +288,7 @@ public class ViewForGeneratorTests
         var sources = AttributeStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Core.Routing.ViewFor(null)]
+                [ElegantSeries.Flow.Routing.ViewFor(null)]
                 public class HomeView
                 {
                 }
@@ -308,7 +308,7 @@ public class ViewForGeneratorTests
         var sources = AttributeStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Core.Routing.ViewFor]
+                [ElegantSeries.Flow.Routing.ViewFor]
                 public class HomeView
                 {
                 }
@@ -334,7 +334,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Core.Routing.ViewFor(typeof(TestApp.ViewModels.OtherViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.OtherViewModel))]
                 public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel>
                 {
                 }
@@ -359,7 +359,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Core.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
                 public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel>
                 {
                 }
