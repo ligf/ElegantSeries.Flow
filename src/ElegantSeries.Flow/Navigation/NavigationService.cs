@@ -199,7 +199,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
             QueueDeactivation(current, destroy: current.Mode != NavigationMode.KeepAlive, notifyLifecycle: true, work);
 
             AttachNavigation(previous.ViewModel);
-            QueueActivate(previous.ViewModel, previous.Parameter, work);
+            QueueActivate(previous, previous.Parameter, work);
             QueueRegionNavigatedEvent(regionName, previous.ViewModel, work);
 
             success = true;

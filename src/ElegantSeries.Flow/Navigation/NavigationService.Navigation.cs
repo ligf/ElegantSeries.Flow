@@ -88,6 +88,7 @@ public sealed partial class NavigationService
         {
             var fastWork = new TransitionWork();
             INavigationViewModel? fastVm = null;
+            NavigationEntry? fastEntry = null;
             bool fastRefresh = false;
 
             await _navigationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -113,6 +114,7 @@ public sealed partial class NavigationService
                                 var refreshed = new NavigationEntry(
                                     popped.RegionName, popped.ViewModel, parameter, popped.Mode, popped.Scope);
                                 fastStack.Push(refreshed);
+                                fastEntry = refreshed;
                             }
                         }
                     }
@@ -120,12 +122,11 @@ public sealed partial class NavigationService
 
                 // Queue lifecycle work while holding _navigationLock but not _stateLock,
                 // mirroring the main path below.
-                if (fastVm is not null && fastRefresh)
+                if (fastEntry is not null && fastRefresh)
                 {
                     // The ViewModel is already attached from its original activation.
-                    QueueActivate(fastVm, parameter, fastWork);
-                    var capturedVm = fastVm;
-                    QueueRegionNavigatedEvent(regionName, capturedVm, fastWork);
+                    QueueActivate(fastEntry, parameter, fastWork);
+                    QueueRegionNavigatedEvent(regionName, fastEntry.ViewModel, fastWork);
                 }
             }
             finally
@@ -459,7 +460,7 @@ public sealed partial class NavigationService
                 if (success && pushedEntry is not null)
                 {
                     AttachNavigation(pushedEntry.ViewModel);
-                    QueueActivate(pushedEntry.ViewModel, parameter, work);
+                    QueueActivate(pushedEntry, parameter, work);
                     var capturedVm = pushedEntry.ViewModel;
                     QueueRegionNavigatedEvent(regionName, capturedVm, work);
                 }
@@ -468,7 +469,7 @@ public sealed partial class NavigationService
                     // Refresh: the entry keeps its stack slot and page scope; only the
                     // activation callbacks run again, with the new parameter.
                     // (The ViewModel is already attached from its original activation.)
-                    QueueActivate(refreshEntry.ViewModel, parameter, work);
+                    QueueActivate(refreshEntry, parameter, work);
                     var capturedVm = refreshEntry.ViewModel;
                     QueueRegionNavigatedEvent(regionName, capturedVm, work);
                 }
@@ -477,7 +478,7 @@ public sealed partial class NavigationService
                     // Pop-to-existing: the instance was detached when it was covered;
                     // re-attach it as the active page.
                     AttachNavigation(reactivatedEntry.ViewModel);
-                    QueueActivate(reactivatedEntry.ViewModel, parameter, work);
+                    QueueActivate(reactivatedEntry, parameter, work);
                     var capturedVm = reactivatedEntry.ViewModel;
                     QueueRegionNavigatedEvent(regionName, capturedVm, work);
                 }

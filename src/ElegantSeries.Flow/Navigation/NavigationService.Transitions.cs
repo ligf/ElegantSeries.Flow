@@ -9,6 +9,13 @@ namespace ElegantSeries.Flow.Navigation;
 public sealed partial class NavigationService
 {
     /// <summary>
+    /// How long disposal gating waits for an entry's in-flight async lifecycle to
+    /// complete before releasing its page scope anyway. Guards against a ViewModel
+    /// that ignores its cancellation token blocking navigation forever.
+    /// </summary>
+    private static readonly TimeSpan DisposalGateTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Raises <see cref="RegionNavigated"/> subscriber-by-subscriber, so one throwing
     /// subscriber cannot prevent the others from receiving the event.
     /// </summary>
@@ -169,15 +176,38 @@ public sealed partial class NavigationService
     private void QueueDeactivation(NavigationEntry entry, bool destroy, bool notifyLifecycle, TransitionWork work)
     {
         DetachNavigation(entry.ViewModel);
+
+        // The entry is leaving the active position: signal its async lifecycle to stop.
+        // Idempotent — a covered entry cancelled here stays cancelled if later disposed.
+        try { entry.LifecycleCts.Cancel(); }
+        catch (ObjectDisposedException) { }
+
         var plan = BuildDeactivatePlan(entry, destroy);
 
         if (notifyLifecycle)
         {
             // A ViewModel implementing INavigationAwareAsync gets the async callbacks
-            // instead of the synchronous ones.
+            // instead of the synchronous ones. The token is already cancelled (above);
+            // a well-behaved ViewModel returns promptly.
             if (entry.ViewModel is INavigationAwareAsync asyncAware)
             {
-                work.NavigatedFromAsyncActions.Add(() => asyncAware.OnNavigatedFromAsync(CancellationToken.None));
+                var token = entry.LifecycleCts.Token;
+                work.NavigatedFromAsyncActions.Add(async () =>
+                {
+                    var gateTask = EnterInFlightLifecycle(entry);
+                    try
+                    {
+                        await asyncAware.OnNavigatedFromAsync(token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        // Expected: the token is already cancelled (the page is leaving).
+                    }
+                    finally
+                    {
+                        ExitInFlightLifecycle(entry, gateTask);
+                    }
+                });
             }
             else if (entry.ViewModel is INavigationAware aware)
             {
@@ -190,10 +220,36 @@ public sealed partial class NavigationService
 
         work.DisposeActions.Add(async () =>
         {
+            // Disposal gating: do not release the page scope while the entry's async
+            // lifecycle is still running — it may still touch the scope's services.
+            // Wait with a timeout so a ViewModel that ignores cancellation cannot
+            // block navigation forever; on timeout the scope is released anyway and
+            // the hang is reported via SubscriberError.
+            var gateTask = entry.InFlightLifecycleGate?.Task;
+            if (gateTask is not null && !gateTask.IsCompleted)
+            {
+                var completed = await Task.WhenAny(gateTask, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
+                if (!ReferenceEquals(completed, gateTask))
+                {
+                    try
+                    {
+                        SubscriberError?.Invoke(new TimeoutException(
+                            $"Disposal gate timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
+                            $"'{entry.ViewModel.GetType().FullName}' async lifecycle to complete. " +
+                            "The page scope is being released anyway; the ViewModel ignored its cancellation token."));
+                    }
+                    catch { }
+                }
+            }
+
             await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false);
 
             using (_stateLock.EnterScope())
                 _pendingScopeDisposals.Remove(entry.Scope);
+
+            // The lifecycle CTS is no longer needed once the entry is gone.
+            try { entry.LifecycleCts.Dispose(); }
+            catch { }
 
             // Ownership released: notify even if the scope disposal threw (the error
             // was collected above and will be rethrown by RunTransitionAsync).
@@ -206,15 +262,60 @@ public sealed partial class NavigationService
     }
 
     /// <summary>
-    /// Queues the activation work (OnNavigatedTo callback) for one ViewModel.
-    /// A ViewModel implementing <see cref="INavigationAwareAsync"/> gets the async
-    /// callback instead of the synchronous one.
+    /// Marks the start of an async lifecycle callback for the entry. Returns the gate
+    /// task that completes when all in-flight callbacks for the entry finish.
     /// </summary>
-    private static void QueueActivate(INavigationViewModel viewModel, object? parameter, TransitionWork work)
+    private static Task EnterInFlightLifecycle(NavigationEntry entry)
     {
+        entry.InFlightLifecycleCount++;
+        if (entry.InFlightLifecycleCount == 1)
+        {
+            entry.InFlightLifecycleGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+        return entry.InFlightLifecycleGate!.Task;
+    }
+
+    /// <summary>
+    /// Marks the end of an async lifecycle callback for the entry.
+    /// </summary>
+    private static void ExitInFlightLifecycle(NavigationEntry entry, Task gateTask)
+    {
+        entry.InFlightLifecycleCount--;
+        if (entry.InFlightLifecycleCount == 0 && ReferenceEquals(entry.InFlightLifecycleGate?.Task, gateTask))
+        {
+            entry.InFlightLifecycleGate.TrySetResult();
+            entry.InFlightLifecycleGate = null;
+        }
+    }
+
+    /// <summary>
+    /// Queues the activation work (OnNavigatedTo callback) for one entry.
+    /// A ViewModel implementing <see cref="INavigationAwareAsync"/> gets the async
+    /// callback instead of the synchronous one. The async callback receives the
+    /// entry's lifecycle token and is tracked as in-flight for disposal gating.
+    /// </summary>
+    private void QueueActivate(NavigationEntry entry, object? parameter, TransitionWork work)
+    {
+        var viewModel = entry.ViewModel;
         if (viewModel is INavigationAwareAsync asyncAware)
         {
-            work.NavigatedToAsyncActions.Add(() => asyncAware.OnNavigatedToAsync(parameter, CancellationToken.None));
+            work.NavigatedToAsyncActions.Add(async () =>
+            {
+                var gateTask = EnterInFlightLifecycle(entry);
+                try
+                {
+                    await asyncAware.OnNavigatedToAsync(parameter, entry.LifecycleCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (entry.LifecycleCts.Token.IsCancellationRequested)
+                {
+                    // Expected: the page left the active position while its init was
+                    // still running. Not an error — the navigation itself succeeded.
+                }
+                finally
+                {
+                    ExitInFlightLifecycle(entry, gateTask);
+                }
+            });
         }
         else if (viewModel is INavigationAware aware)
         {
@@ -304,5 +405,41 @@ public sealed partial class NavigationService
     private readonly record struct DeactivatePlan(bool ShouldDispose, string[] RegionsToNotify);
 
     /// <summary>One page on a region's navigation stack. The scope owns the ViewModel's lifetime.</summary>
-    private sealed record NavigationEntry(string RegionName, INavigationViewModel ViewModel, object? Parameter, NavigationMode Mode, IServiceScope Scope);
+    private sealed class NavigationEntry
+    {
+        public NavigationEntry(string regionName, INavigationViewModel viewModel, object? parameter, NavigationMode mode, IServiceScope scope)
+        {
+            RegionName = regionName;
+            ViewModel = viewModel;
+            Parameter = parameter;
+            Mode = mode;
+            Scope = scope;
+        }
+
+        public string RegionName { get; }
+        public INavigationViewModel ViewModel { get; }
+        public object? Parameter { get; set; }
+        public NavigationMode Mode { get; }
+        public IServiceScope Scope { get; }
+
+        /// <summary>
+        /// Cancelled when the entry leaves the active position (covered, popped,
+        /// replaced, or cleared). Async lifecycle callbacks receive this token and
+        /// should stop using the page's dependencies when it fires.
+        /// </summary>
+        public CancellationTokenSource LifecycleCts { get; } = new();
+
+        /// <summary>
+        /// Number of async lifecycle callbacks currently running for this entry.
+        /// Used by disposal gating to avoid releasing the page scope while its
+        /// async lifecycle still runs.
+        /// </summary>
+        public int InFlightLifecycleCount { get; set; }
+
+        /// <summary>
+        /// Completes when <see cref="InFlightLifecycleCount"/> drops to zero.
+        /// Null when no async lifecycle is in flight.
+        /// </summary>
+        public TaskCompletionSource? InFlightLifecycleGate { get; set; }
+    }
 }
