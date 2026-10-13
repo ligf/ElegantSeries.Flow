@@ -1830,6 +1830,66 @@ public class NavigationServiceTests
         }
     }
 
+    private sealed class SlowInitViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public TaskCompletionSource<bool> InitStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<bool> InitCanComplete { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public CancellationToken ReceivedToken { get; private set; }
+        public bool TokenWasCancelled { get; private set; }
+        /// <summary>Simulates slow cleanup after observing cancellation.</summary>
+        public bool SimulateSlowCleanup { get; set; }
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            ReceivedToken = cancellationToken;
+            InitStarted.TrySetResult(true);
+            try
+            {
+                await InitCanComplete.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                TokenWasCancelled = true;
+                if (SimulateSlowCleanup)
+                {
+                    // Non-cancellable cleanup: disposal gating must wait for this.
+                    await Task.Delay(1000).ConfigureAwait(false);
+                }
+                throw;
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class ReentrantAsyncViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            await Task.Yield();
+            if (Navigation is not null)
+            {
+                await Navigation.NavigateToAsync<TestHomeViewModel>().ConfigureAwait(false);
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class HangingViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public TaskCompletionSource<bool> InitStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            InitStarted.TrySetResult(true);
+            // Ignores cancellation entirely: hangs forever.
+            await Task.Delay(Timeout.InfiniteTimeSpan).ConfigureAwait(false);
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
     private sealed class AsyncThrowingViewModel : NavigationViewModelBase, INavigationAwareAsync
     {
         public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
@@ -2201,6 +2261,133 @@ public class NavigationServiceTests
         Assert.True(await nav.GoBackAsync());
         Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
         Assert.False(nav.CanGoBack());
+    }
+
+    [Fact]
+    public async Task SlowInit_CancelledOnNavigateAway()
+    {
+        // B's OnNavigatedToAsync is still running when we navigate away: its token
+        // must be cancelled so it stops touching the page's dependencies.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SlowInitViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var navTask = nav.NavigateToAsync<SlowInitViewModel>();
+        var slowVm = (SlowInitViewModel)nav.GetCurrentViewModel()!;
+        await slowVm.InitStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Navigate away while init is still in flight.
+        var awayTask = nav.NavigateToAsync<TestHomeViewModel>();
+        await awayTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Let the cancelled init observe the token.
+        slowVm.InitCanComplete.TrySetResult(true);
+        await navTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(slowVm.TokenWasCancelled);
+        Assert.True(slowVm.ReceivedToken.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task Replace_WaitsForInFlightLifecycleBeforeDisposing()
+    {
+        // Replace B with C while B's OnNavigatedToAsync is in flight: the scope must
+        // not be released until B's callback completes (disposal gating).
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SlowInitViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var navTask = nav.NavigateToAsync<SlowInitViewModel>();
+        var slowVm = (SlowInitViewModel)nav.GetCurrentViewModel()!;
+        slowVm.SimulateSlowCleanup = true;
+        await slowVm.InitStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var replaceTask = nav.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.Replace);
+        // Give the replace a moment to reach the disposal gate (it should block
+        // while B's slow cleanup runs).
+        await Task.Delay(300);
+        Assert.False(replaceTask.IsCompleted); // gated: waiting for B's cleanup
+
+        await replaceTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await navTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
+        Assert.True(slowVm.TokenWasCancelled);
+    }
+
+    [Fact]
+    public async Task HangingLifecycle_DisposalTimesOutAndNavigationCompletes()
+    {
+        // A ViewModel that ignores its cancellation token must not block navigation
+        // forever: after the disposal gate timeout, the scope is released anyway.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<HangingViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var errors = new List<Exception>();
+        nav.SubscriberError += ex => errors.Add(ex);
+
+        _ = nav.NavigateToAsync<HangingViewModel>();
+        var hangingVm = (HangingViewModel)nav.GetCurrentViewModel()!;
+        await hangingVm.InitStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Replace: disposal gate waits 5s for the hanging init, then times out.
+        var replaceTask = nav.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.Replace);
+        await replaceTask.WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
+        var timeoutError = Assert.Single(errors, e => e is TimeoutException);
+        Assert.Contains("Disposal gate timed out", timeoutError.Message);
+    }
+
+    [Fact]
+    public async Task CoveredPage_CancelledOnCover()
+    {
+        // A covered by B: A's init token must be cancelled when B covers it.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SlowInitViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var navTask = nav.NavigateToAsync<SlowInitViewModel>();
+        var slowVm = (SlowInitViewModel)nav.GetCurrentViewModel()!;
+        await slowVm.InitStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await nav.NavigateToAsync<TestHomeViewModel>().WaitAsync(TimeSpan.FromSeconds(5));
+
+        slowVm.InitCanComplete.TrySetResult(true);
+        await navTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(slowVm.TokenWasCancelled);
+    }
+
+    [Fact]
+    public async Task ReentrantAsyncNavigation_NoDeadlock()
+    {
+        // Async OnNavigatedTo that re-enters navigation must not deadlock with the
+        // disposal gating (no lock is held across the lifecycle).
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ReentrantAsyncViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var result = await nav.NavigateToAsync<ReentrantAsyncViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(result);
+        Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
     }
 
     [Fact]

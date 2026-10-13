@@ -19,11 +19,13 @@ namespace ElegantSeries.Flow.Navigation;
 /// in an <see cref="AggregateException"/>).
 /// </para>
 /// <para>
-/// The <see cref="CancellationToken"/> passed to these callbacks is always
-/// <see cref="CancellationToken.None"/>: once the region stack has been updated the
-/// transition runs to completion and is no longer cancellable. To cancel a navigation,
-/// use the token on <see cref="INavigationService.NavigateToAsync{TViewModel}"/> /
-/// <see cref="INavigationService.GoBackAsync"/> or a navigation guard.
+/// The <see cref="CancellationToken"/> passed to these callbacks is cancelled when the
+/// page leaves the active position (covered by another page, popped, replaced, or
+/// cleared) — even if the callback is still running. ViewModels must honor the token:
+/// stop touching the page's dependencies once it fires. The navigation service waits
+/// for an in-flight async callback to complete (up to 5 seconds) before releasing the
+/// page scope; a callback that ignores cancellation cannot block navigation forever,
+/// but the scope <i>will</i> be released while it is still running.
 /// </para>
 /// </remarks>
 public interface INavigationAwareAsync
@@ -35,7 +37,8 @@ public interface INavigationAwareAsync
     /// The navigation parameter passed by the caller, or <see langword="null"/> if none was provided.
     /// </param>
     /// <param name="cancellationToken">
-    /// Always <see cref="CancellationToken.None"/>; reserved for future use.
+    /// Cancelled when the page leaves the active position. Honor it: stop using the
+    /// page's dependencies once it fires.
     /// </param>
     Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default);
 
@@ -43,7 +46,8 @@ public interface INavigationAwareAsync
     /// Called when the ViewModel is being navigated away from.
     /// </summary>
     /// <param name="cancellationToken">
-    /// Always <see cref="CancellationToken.None"/>; reserved for future use.
+    /// Already cancelled (the page is leaving). A well-behaved implementation returns
+    /// promptly.
     /// </param>
     Task OnNavigatedFromAsync(CancellationToken cancellationToken = default);
 }
@@ -60,7 +64,8 @@ public interface INavigationAwareAsync<in TParam> : INavigationAwareAsync
     /// </summary>
     /// <param name="parameter">The strongly-typed navigation parameter.</param>
     /// <param name="cancellationToken">
-    /// Always <see cref="CancellationToken.None"/>; reserved for future use.
+    /// Cancelled when the page leaves the active position. Honor it: stop using the
+    /// page's dependencies once it fires.
     /// </param>
     Task OnNavigatedToAsync(TParam parameter, CancellationToken cancellationToken = default);
 
