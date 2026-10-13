@@ -309,7 +309,13 @@ public sealed partial class NavigationService
                         }
                         else
                         {
-                            var existingEntry = FindEntryOnStackLocked(stack, targetVm);
+                            // Explicit stack-surgery modes take precedence over instance reuse:
+                            // ClearStack/Replace express the caller's intent to restructure the
+                            // stack, which must not be bypassed just because the resolved
+                            // instance (e.g. a Singleton) already lives on it.
+                            var existingEntry = (mode == NavigationMode.ClearStack || mode == NavigationMode.Replace)
+                                ? null
+                                : FindEntryOnStackLocked(stack, targetVm);
                             if (existingEntry is not null)
                             {
                                 // Pop back to the existing instance (mainstream behavior):
@@ -340,7 +346,7 @@ public sealed partial class NavigationService
 
                                 success = true;
                             }
-                            else if (IsOnAnyStackLocked(targetVm))
+                            else if (IsOnOtherRegionStackLocked(regionName, targetVm))
                             {
                                 // The instance lives on a *different* region's stack: a
                                 // ViewModel has a single Navigation reference and cannot
@@ -410,6 +416,15 @@ public sealed partial class NavigationService
                                 {
                                     if (mode == NavigationMode.Replace)
                                     {
+                                        // Remove any deeper duplicate of the target instance first
+                                        // (e.g. a Singleton already on this stack): it was inactive,
+                                        // so no lifecycle notification, just disposal bookkeeping.
+                                        var duplicate = FindEntryOnStackLocked(stack, targetVm);
+                                        if (duplicate is not null && !ReferenceEquals(stack.Peek(), duplicate))
+                                        {
+                                            RemoveEntryLocked(stack, duplicate, deactivations);
+                                        }
+
                                         var old = stack.Pop();
                                         deactivations.Add((old, old.Mode != NavigationMode.KeepAlive, true));
                                     }
@@ -514,7 +529,7 @@ public sealed partial class NavigationService
         {
             if (ReferenceEquals(GetCurrentViewModel(regionName), viewModel))
             {
-                RegionNavigated?.Invoke(regionName, viewModel);
+                RaiseRegionNavigated(regionName, viewModel);
             }
         });
     }
@@ -541,6 +556,36 @@ public sealed partial class NavigationService
     }
 
     /// <summary>
+    /// Removes the given entry from the stack (which is not directly removable from
+    /// <see cref="Stack{T}"/>). The entry was inactive, so it is queued for disposal
+    /// without a lifecycle notification. The caller must hold <see cref="_stateLock"/>.
+    /// </summary>
+    private void RemoveEntryLocked(
+        Stack<NavigationEntry> stack,
+        NavigationEntry entry,
+        List<(NavigationEntry Entry, bool Destroy, bool NotifyLifecycle)> deactivations)
+    {
+        var temp = new Stack<NavigationEntry>();
+        while (stack.Count > 0)
+        {
+            var popped = stack.Pop();
+            if (!ReferenceEquals(popped, entry))
+            {
+                temp.Push(popped);
+            }
+            else
+            {
+                deactivations.Add((popped, popped.Mode != NavigationMode.KeepAlive, false));
+            }
+        }
+
+        while (temp.Count > 0)
+        {
+            stack.Push(temp.Pop());
+        }
+    }
+
+    /// <summary>
     /// Determines whether the given ViewModel instance is present on any region's
     /// navigation stack. The caller must hold <see cref="_stateLock"/>.
     /// </summary>
@@ -549,6 +594,32 @@ public sealed partial class NavigationService
         foreach (var stack in _regionStacks.Values)
         {
             foreach (var entry in stack)
+            {
+                if (ReferenceEquals(entry.ViewModel, viewModel))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Determines whether the given ViewModel instance is present on another region's
+    /// navigation stack (excluding the specified region). The caller must hold
+    /// <see cref="_stateLock"/>.
+    /// </summary>
+    private bool IsOnOtherRegionStackLocked(string regionName, INavigationViewModel viewModel)
+    {
+        foreach (var kvp in _regionStacks)
+        {
+            if (string.Equals(kvp.Key, regionName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            foreach (var entry in kvp.Value)
             {
                 if (ReferenceEquals(entry.ViewModel, viewModel))
                 {

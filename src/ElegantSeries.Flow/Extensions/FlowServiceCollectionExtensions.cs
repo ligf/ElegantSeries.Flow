@@ -71,19 +71,15 @@ public static class FlowServiceCollectionExtensions
     /// on the region's stack pops back to the shared instance instead of pushing a duplicate.
     /// </para>
     /// <para>
-    /// With <see cref="ServiceLifetime.Scoped"/>, page scopes nest inside the window scope:
+    /// With <see cref="ServiceLifetime.Scoped"/>, the navigation service itself is scoped
+    /// to the window scope (one stack per window), but page scopes are <i>not</i> nested
+    /// inside it — see the Scoped contract in <paramref name="lifetime"/> above.
     /// </para>
-    /// <code>
-    /// root container
-    ///  └─ window scope (AddElegantSeriesFlow(ServiceLifetime.Scoped) → INavigationService per window)
-    ///       ├─ page scope (page 1: ViewModel + its Transient/Scoped graph)
-    ///       └─ page scope (page 2: ViewModel + its Transient/Scoped graph)
-    /// </code>
     /// <para>
-    /// Disposing the window scope disposes its navigation service and, through it, every
-    /// page scope below. Never resolve a page ViewModel from the window scope directly and
-    /// hand it to another window's navigation service — a page scope belongs to exactly
-    /// one navigation service.
+    /// Disposing the window scope disposes its navigation service. Page scopes are
+    /// disposed by the navigation service when their pages leave. Never resolve a page
+    /// ViewModel from the window scope directly and hand it to another window's
+    /// navigation service — a page scope belongs to exactly one navigation service.
     /// </para>
     /// </remarks>
     public static IServiceCollection AddElegantSeriesFlow(

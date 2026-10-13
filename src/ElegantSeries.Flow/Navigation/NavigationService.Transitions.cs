@@ -9,6 +9,82 @@ namespace ElegantSeries.Flow.Navigation;
 public sealed partial class NavigationService
 {
     /// <summary>
+    /// Raises <see cref="RegionNavigated"/> subscriber-by-subscriber, so one throwing
+    /// subscriber cannot prevent the others from receiving the event.
+    /// </summary>
+    private void RaiseRegionNavigated(string regionName, INavigationViewModel viewModel)
+    {
+        var handlers = RegionNavigated;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (var handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<string, INavigationViewModel>)handler)(regionName, viewModel);
+            }
+            catch (Exception ex)
+            {
+                try { SubscriberError?.Invoke(ex); }
+                catch { }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Raises <see cref="ViewModelReleased"/> subscriber-by-subscriber.
+    /// </summary>
+    private void RaiseViewModelReleased(string regionName, INavigationViewModel viewModel)
+    {
+        var handlers = ViewModelReleased;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (var handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<string, INavigationViewModel>)handler)(regionName, viewModel);
+            }
+            catch (Exception ex)
+            {
+                try { SubscriberError?.Invoke(ex); }
+                catch { }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Raises <see cref="RegionCacheCleared"/> subscriber-by-subscriber.
+    /// </summary>
+    private void RaiseRegionCacheCleared(string regionName)
+    {
+        var handlers = RegionCacheCleared;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (var handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<string>)handler)(regionName);
+            }
+            catch (Exception ex)
+            {
+                try { SubscriberError?.Invoke(ex); }
+                catch { }
+            }
+        }
+    }
+
+    /// <summary>
     /// Invokes queued event handlers. Subscriber exceptions are swallowed so a faulty
     /// subscriber can never corrupt navigation state; they are reported via
     /// <paramref name="onError"/> for diagnostics.
@@ -124,7 +200,7 @@ public sealed partial class NavigationService
             foreach (var region in plan.RegionsToNotify)
             {
                 var capturedRegion = region;
-                work.Events.Add(() => ViewModelReleased?.Invoke(capturedRegion, entry.ViewModel));
+                work.Events.Add(() => RaiseViewModelReleased(capturedRegion, entry.ViewModel));
             }
         });
     }

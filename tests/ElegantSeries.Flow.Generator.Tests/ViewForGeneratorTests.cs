@@ -304,6 +304,33 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void OpenGenericView_ReportsFlowGen008()
+    {
+        var sources = AttributeStub + AvaloniaLocatorStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                public class GenericView<T>
+                {
+                }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel
+                {
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN008");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
     public void NullViewModelType_ReportsFlowGen006()
     {
         var sources = AttributeStub + AvaloniaLocatorStub + """

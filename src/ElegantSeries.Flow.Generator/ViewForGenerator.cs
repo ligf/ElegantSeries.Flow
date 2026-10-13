@@ -72,7 +72,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
     private sealed class ViewMapping
     {
-        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType)
+        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType, bool isOpenGenericView)
         {
             ViewName = viewName;
             ViewModelName = viewModelName;
@@ -82,6 +82,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             CannotInferViewModel = cannotInferViewModel;
             ConflictingBaseViewModel = conflictingBaseViewModel;
             UnresolvableViewModelType = unresolvableViewModelType;
+            IsOpenGenericView = isOpenGenericView;
         }
 
         public string ViewName { get; }
@@ -115,6 +116,12 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         /// report it (FLOWGEN006).
         /// </summary>
         public bool UnresolvableViewModelType { get; }
+
+        /// <summary>
+        /// True when the view is an open generic type (e.g. <c>GenericView&lt;T&gt;</c>),
+        /// which cannot be registered (FLOWGEN008).
+        /// </summary>
+        public bool IsOpenGenericView { get; }
     }
 
     private static ViewMapping? GetMapping(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
@@ -194,6 +201,10 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                 break;
         }
 
+        // Open generic views (e.g. GenericView<T>) cannot be registered: the generated
+        // code would reference an undefined type parameter.
+        bool isOpenGenericView = viewType.IsGenericType && viewType.TypeParameters.Length > 0;
+
         return new ViewMapping(
             viewName,
             viewModelName ?? string.Empty,
@@ -202,7 +213,8 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             invalidLifetime,
             cannotInfer,
             conflictingBaseViewModel,
-            unresolvableViewModelType);
+            unresolvableViewModelType,
+            isOpenGenericView);
     }
 
     /// <summary>
@@ -329,6 +341,13 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                     DiagnosticDescriptors.InvalidLifetime, mapping.Location, mapping.InvalidLifetime));
                 hasMappingErrors = true;
             }
+
+            if (mapping.IsOpenGenericView)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.OpenGenericView, mapping.Location, mapping.ViewName));
+                hasMappingErrors = true;
+            }
         }
 
         // Duplicate ViewModel mappings would throw at runtime; fail at compile time instead.
@@ -441,6 +460,14 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             id: "FLOWGEN006",
             title: "Unresolvable ViewModel type for [ViewFor]",
             messageFormat: "[ViewFor] on view '{0}' specifies a ViewModel type that could not be resolved",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor OpenGenericView = new DiagnosticDescriptor(
+            id: "FLOWGEN008",
+            title: "Open generic view for [ViewFor]",
+            messageFormat: "[ViewFor] on view '{0}' is an open generic type; only closed (constructed) view types can be registered",
             category: "ElegantSeries.Flow.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);

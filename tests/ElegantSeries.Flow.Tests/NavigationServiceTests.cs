@@ -2147,5 +2147,83 @@ public class NavigationServiceTests
         Assert.IsType<InvalidOperationException>(error);
     }
 
+    [Fact]
+    public async Task ClearStack_ToSingletonAlreadyOnStack_ShouldActuallyClear()
+    {
+        // Home -> Settings(singleton) -> Detail, then ClearStack to Settings.
+        // The resolved Settings instance is the same object already on the stack;
+        // ClearStack must still empty the stack instead of popping back to it.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddSingleton<SingletonViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        await nav.NavigateToAsync<SingletonViewModel>();
+        var settings = nav.GetCurrentViewModel();
+        await nav.NavigateToAsync<TestDetailViewModel>();
+        Assert.True(nav.CanGoBack());
+
+        var result = await nav.NavigateToAsync<SingletonViewModel>(mode: NavigationMode.ClearStack);
+
+        Assert.True(result);
+        Assert.Same(settings, nav.GetCurrentViewModel());
+        Assert.False(nav.CanGoBack()); // stack holds only Settings
+    }
+
+    [Fact]
+    public async Task Replace_ToSingletonAlreadyOnStack_ShouldNotDuplicate()
+    {
+        // Home -> Settings(singleton) -> Detail, then Replace top with Settings.
+        // The deeper Settings entry must be removed so the singleton appears once.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddSingleton<SingletonViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        await nav.NavigateToAsync<SingletonViewModel>();
+        var settings = nav.GetCurrentViewModel();
+        await nav.NavigateToAsync<TestDetailViewModel>();
+
+        var result = await nav.NavigateToAsync<SingletonViewModel>(mode: NavigationMode.Replace);
+
+        Assert.True(result);
+        Assert.Same(settings, nav.GetCurrentViewModel());
+        // Home -> Settings: back once to Home, then nothing.
+        Assert.True(nav.CanGoBack());
+        Assert.True(await nav.GoBackAsync());
+        Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
+        Assert.False(nav.CanGoBack());
+    }
+
+    [Fact]
+    public async Task RegionNavigated_ThrowingFirstSubscriber_ShouldNotBlockOthers()
+    {
+        // Multicast delegate semantics: one throwing subscriber must not prevent
+        // later subscribers (e.g. the Host) from receiving the event.
+        var errors = new List<Exception>();
+        _navigationService.SubscriberError += ex => errors.Add(ex);
+        _navigationService.RegionNavigated += (_, _) => throw new InvalidOperationException("first boom");
+
+        string? secondRegion = null;
+        INavigationViewModel? secondVm = null;
+        _navigationService.RegionNavigated += (r, vm) => { secondRegion = r; secondVm = vm; };
+
+        var result = await _navigationService.NavigateToAsync<TestHomeViewModel>();
+
+        Assert.True(result);
+        Assert.Equal("MainRegion", secondRegion);
+        Assert.IsType<TestHomeViewModel>(secondVm);
+        var error = Assert.Single(errors);
+        Assert.IsType<InvalidOperationException>(error);
+    }
+
     #endregion
 }
