@@ -118,6 +118,15 @@ public interface INavigationService
     /// <remarks>Parameter: region name.</remarks>
     event Action<string>? RegionCacheCleared;
 
+    /// <summary>
+    /// Raised when a navigation event subscriber (<see cref="RegionNavigated"/>,
+    /// <see cref="ViewModelReleased"/>, <see cref="RegionCacheCleared"/>) throws.
+    /// The exception is swallowed to protect navigation state; subscribe to this
+    /// event for diagnostics.
+    /// </summary>
+    /// <remarks>Parameter: the subscriber exception.</remarks>
+    event Action<Exception>? SubscriberError;
+
     // ──────────────────────── Query Methods (Sync) ────────────────────────
 
     /// <summary>

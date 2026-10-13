@@ -19,6 +19,26 @@ public static class FlowServiceCollectionExtensions
     /// <see cref="ServiceLifetime.Scoped"/>: suitable for multi-window applications —
     /// each window scope gets its own <see cref="NavigationService"/> with isolated
     /// region stacks.
+    /// <para>
+    /// <b>Scoped contract (important):</b> Scoped mode isolates the <i>navigation stacks</i>
+    /// per window scope, but page scopes are <i>not</i> nested inside the window scope —
+    /// Microsoft.Extensions.DependencyInjection creates them as siblings under the root
+    /// container (there is no public API to create a child scope from an existing scope).
+    /// Consequences:
+    /// <list type="bullet">
+    /// <item>
+    /// <description>Window-level <c>Scoped</c> services are <i>not</i> shared with pages.
+    /// Use <c>Singleton</c> for state that pages must share with the window.</description>
+    /// </item>
+    /// <item>
+    /// <description>Page ViewModels must <i>not</i> constructor-inject
+    /// <see cref="INavigationService"/>: the injected instance would be a different scoped
+    /// instance, not the one managing the page. Use the <c>Navigation</c> property
+    /// (via <c>NavigationViewModelBase</c> or <see cref="INavigationViewModel"/>) instead —
+    /// it is attached to the managing service on activation.</description>
+    /// </item>
+    /// </list>
+    /// </para>
     /// </param>
     /// <returns>The service collection for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>

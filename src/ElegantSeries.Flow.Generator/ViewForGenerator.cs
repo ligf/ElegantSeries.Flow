@@ -293,14 +293,16 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         // Per-mapping errors are compile-time failures: unresolved view models
         // (FLOWGEN004/006), conflicting explicit/inferred types (FLOWGEN005),
         // and unrecognized lifetimes (FLOWGEN003) would otherwise misbehave
-        // silently at runtime.
+        // silently at runtime. All diagnostics are collected and reported together
+        // so the user sees every problem in one compilation, not one at a time.
+        bool hasMappingErrors = false;
         foreach (var mapping in mappings)
         {
             if (mapping.CannotInferViewModel)
             {
                 spc.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticDescriptors.CannotInferViewModel, mapping.Location, mapping.ViewName));
-                return;
+                hasMappingErrors = true;
             }
 
             if (mapping.ConflictingBaseViewModel is not null)
@@ -311,21 +313,21 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                     mapping.ViewName,
                     mapping.ViewModelName,
                     mapping.ConflictingBaseViewModel));
-                return;
+                hasMappingErrors = true;
             }
 
             if (mapping.UnresolvableViewModelType)
             {
                 spc.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticDescriptors.UnresolvableViewModelType, mapping.Location, mapping.ViewName));
-                return;
+                hasMappingErrors = true;
             }
 
             if (mapping.InvalidLifetime is not null)
             {
                 spc.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticDescriptors.InvalidLifetime, mapping.Location, mapping.InvalidLifetime));
-                return;
+                hasMappingErrors = true;
             }
         }
 
@@ -337,8 +339,13 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             {
                 spc.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticDescriptors.DuplicateViewModel, mapping.Location, mapping.ViewModelName));
-                return;
+                hasMappingErrors = true;
             }
+        }
+
+        if (hasMappingErrors)
+        {
+            return;
         }
 
         var ordered = mappings

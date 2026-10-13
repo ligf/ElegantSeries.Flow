@@ -138,6 +138,18 @@ public class GuardedViewModel : NavigationViewModelBase, INavigationGuard
     }
 }
 
+/// <summary>
+/// Counts lifecycle callbacks to verify each fires exactly once.
+/// </summary>
+public class CountingAwareViewModel : NavigationViewModelBase, INavigationAware
+{
+    public int NavigatedToCount { get; private set; }
+    public int NavigatedFromCount { get; private set; }
+
+    public void OnNavigatedTo(object? parameter) => NavigatedToCount++;
+    public void OnNavigatedFrom() => NavigatedFromCount++;
+}
+
 public class KeepAliveViewModel : NavigationViewModelBase, IDisposable
 {
     public bool Disposed { get; private set; }
@@ -210,6 +222,7 @@ public class NavigationServiceTests
         services.AddTransient<CallerViewModel>();
         services.AddTransient<GuardedViewModel>();
         services.AddTransient<ThrowingNavigatedFromViewModel>();
+        services.AddTransient<CountingAwareViewModel>();
         services.AddTransient<ThrowingNavigatedToViewModel>();
         services.AddTransient<ReentrantNavigatedToViewModel>();
         services.AddTransient<StateMismatchGuardViewModel>();
@@ -2026,6 +2039,112 @@ public class NavigationServiceTests
 
         public object? GetService(Type serviceType) =>
             serviceType == typeof(IServiceScopeFactory) ? _scopeFactory : _inner.GetService(serviceType);
+    }
+
+    #endregion
+
+    #region Review Regression Tests (P1/P2 fixes)
+
+    [Fact]
+    public async Task ClearStack_ShouldNotRepeatNavigatedFrom()
+    {
+        // A -> B -> C, then ClearStack to D.
+        // A already received OnNavigatedFrom when B covered it; ClearStack must not
+        // notify it again. Only C (the active page) gets OnNavigatedFrom here.
+        // Note: A and C share the type but are different instances (B is a different
+        // type in between, so no same-type no-op applies).
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<CountingAwareViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<CountingAwareViewModel>(); // A (instance 1)
+        var a = (CountingAwareViewModel)nav.GetCurrentViewModel()!;
+        await nav.NavigateToAsync<TestHomeViewModel>(); // B covers A
+        await nav.NavigateToAsync<CountingAwareViewModel>(); // C (instance 2) covers B
+        var c = (CountingAwareViewModel)nav.GetCurrentViewModel()!;
+        Assert.NotSame(a, c);
+
+        Assert.Equal(1, a.NavigatedFromCount); // covered by B
+        Assert.Equal(0, c.NavigatedFromCount); // active
+
+        await nav.NavigateToAsync<TestDetailViewModel>(mode: NavigationMode.ClearStack);
+
+        Assert.Equal(1, a.NavigatedFromCount); // must NOT be notified again
+        Assert.Equal(1, c.NavigatedFromCount); // active page: exactly once
+    }
+
+    [Fact]
+    public async Task PopToExisting_ShouldNotRepeatNavigatedFrom()
+    {
+        // A(KeepAlive) -> B -> back to A via KeepAlive (pop-to-existing).
+        // B was active when popped, so it gets OnNavigatedFrom once.
+        // A was already inactive (covered by B); popping B must not notify A again.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<CountingAwareViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<CountingAwareViewModel>(mode: NavigationMode.KeepAlive); // A
+        var a = (CountingAwareViewModel)nav.GetCurrentViewModel()!;
+        await nav.NavigateToAsync<TestHomeViewModel>(); // B covers A
+        Assert.Equal(1, a.NavigatedFromCount);
+
+        await nav.NavigateToAsync<CountingAwareViewModel>(mode: NavigationMode.KeepAlive); // pop back to A
+        Assert.Same(a, nav.GetCurrentViewModel());
+        Assert.Equal(1, a.NavigatedFromCount); // must NOT be notified again
+        Assert.Equal(2, a.NavigatedToCount);   // reactivated
+    }
+
+    [Fact]
+    public async Task ReentrantNavigation_ShouldSuppressStaleRegionNavigatedEvent()
+    {
+        // ReentrantNavigatedToViewModel navigates to TestHomeViewModel inside OnNavigatedTo.
+        // The outer transition's RegionNavigated(Reentrant) event must be suppressed;
+        // only RegionNavigated(Home) should fire, and the final page must be Home.
+        var events = new List<string>();
+        _navigationService.RegionNavigated += (_, vm) => events.Add(vm.GetType().Name);
+
+        await _navigationService.NavigateToAsync<ReentrantNavigatedToViewModel>();
+
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.DoesNotContain(nameof(ReentrantNavigatedToViewModel), events);
+        Assert.Equal(new[] { nameof(TestHomeViewModel) }, events);
+    }
+
+    [Fact]
+    public async Task SameTypeNoOp_ShouldNotBeVetoedByGuard()
+    {
+        // Navigating to the already-active type (New mode, no refresh) is a no-op
+        // and must not be vetoed by the leave guard.
+        await _navigationService.NavigateToAsync<GuardedViewModel>();
+        var guarded = (GuardedViewModel)_navigationService.GetCurrentViewModel()!;
+        guarded.AllowNavigation = false;
+
+        var result = await _navigationService.NavigateToAsync<GuardedViewModel>();
+
+        Assert.True(result);
+        Assert.Same(guarded, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task SubscriberError_ShouldBeReportedWithoutBreakingNavigation()
+    {
+        var errors = new List<Exception>();
+        _navigationService.SubscriberError += ex => errors.Add(ex);
+        _navigationService.RegionNavigated += (_, _) => throw new InvalidOperationException("boom");
+
+        var result = await _navigationService.NavigateToAsync<TestHomeViewModel>();
+
+        Assert.True(result);
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+        var error = Assert.Single(errors);
+        Assert.IsType<InvalidOperationException>(error);
     }
 
     #endregion

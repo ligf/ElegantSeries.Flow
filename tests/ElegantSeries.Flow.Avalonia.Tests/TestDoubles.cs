@@ -88,6 +88,10 @@ internal sealed class FakeNavigationService : INavigationService
     public event Action<string, INavigationViewModel>? RegionNavigated;
     public event Action<string, INavigationViewModel>? ViewModelReleased;
     public event Action<string>? RegionCacheCleared;
+    public event Action<Exception>? SubscriberError;
+
+    public void RaiseSubscriberError(Exception ex)
+        => SubscriberError?.Invoke(ex);
 
     public void RaiseRegionNavigated(string regionName, INavigationViewModel viewModel)
         => RegionNavigated?.Invoke(regionName, viewModel);

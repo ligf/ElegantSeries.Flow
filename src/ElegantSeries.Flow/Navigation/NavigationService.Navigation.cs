@@ -40,6 +40,32 @@ public sealed partial class NavigationService
             }
         }
 
+        // Early no-op: a New-mode navigation to the already-active type with no refresh
+        // changes nothing, so the leave guard must not veto it. Verified under the
+        // navigation lock to guard against a concurrent navigation changing the stack.
+        if (mode == NavigationMode.New && !refreshIfActive &&
+            currentVmForGuard?.GetType() == typeof(TViewModel))
+        {
+            await _navigationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                using (_stateLock.EnterScope())
+                {
+                    if (_regionStacks.TryGetValue(regionName, out var checkStack) &&
+                        checkStack.Count > 0 &&
+                        ReferenceEquals(checkStack.Peek().ViewModel, currentVmForGuard))
+                    {
+                        return true;
+                    }
+                }
+            }
+            finally
+            {
+                _navigationLock.Release();
+            }
+            // The active page changed concurrently: fall through to the normal path.
+        }
+
         if (currentVmForGuard is not null)
         {
             var guardContext = new NavigationGuardContext(regionName, typeof(TViewModel), mode, parameter, isBack: false);
@@ -99,7 +125,7 @@ public sealed partial class NavigationService
                     // The ViewModel is already attached from its original activation.
                     QueueActivate(fastVm, parameter, fastWork);
                     var capturedVm = fastVm;
-                    fastWork.Events.Add(() => RegionNavigated?.Invoke(regionName, capturedVm));
+                    QueueRegionNavigatedEvent(regionName, capturedVm, fastWork);
                 }
             }
             finally
@@ -211,7 +237,7 @@ public sealed partial class NavigationService
         bool canceled = false;
         IServiceScope? scopeToRelease = null;
         Exception? duplicateException = null;
-        List<(NavigationEntry Entry, bool Destroy)> deactivations = [];
+        List<(NavigationEntry Entry, bool Destroy, bool NotifyLifecycle)> deactivations = [];
         NavigationEntry? pushedEntry = null;
         NavigationEntry? refreshEntry = null;
         NavigationEntry? reactivatedEntry = null;
@@ -294,10 +320,14 @@ public sealed partial class NavigationService
                                 scopeToRelease = ownedScope;
                                 ownedScope = null;
 
+                                bool firstPopped = true;
                                 while (stack.Count > 0 && !ReferenceEquals(stack.Peek(), existingEntry))
                                 {
                                     var old = stack.Pop();
-                                    deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                    // Only the first popped entry was active; the ones below
+                                    // already received OnNavigatedFrom when they were covered.
+                                    deactivations.Add((old, old.Mode != NavigationMode.KeepAlive, firstPopped));
+                                    firstPopped = false;
                                 }
 
                                 // Swap the entry so the re-activation carries the new
@@ -366,10 +396,14 @@ public sealed partial class NavigationService
 
                                 if (mode == NavigationMode.ClearStack)
                                 {
+                                    bool firstPopped = true;
                                     while (stack.Count > 0)
                                     {
                                         var old = stack.Pop();
-                                        deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                        // Only the first popped entry was active; the ones below
+                                        // already received OnNavigatedFrom when they were covered.
+                                        deactivations.Add((old, old.Mode != NavigationMode.KeepAlive, firstPopped));
+                                        firstPopped = false;
                                     }
                                 }
                                 else if (stack.Count > 0)
@@ -377,11 +411,11 @@ public sealed partial class NavigationService
                                     if (mode == NavigationMode.Replace)
                                     {
                                         var old = stack.Pop();
-                                        deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                        deactivations.Add((old, old.Mode != NavigationMode.KeepAlive, true));
                                     }
                                     else
                                     {
-                                        deactivations.Add((stack.Peek(), false));
+                                        deactivations.Add((stack.Peek(), false, true));
                                     }
                                 }
 
@@ -402,9 +436,9 @@ public sealed partial class NavigationService
             // preserving lifecycle/event ordering across navigations.
             if (!canceled)
             {
-                foreach (var (entry, destroy) in deactivations)
+                foreach (var (entry, destroy, notifyLifecycle) in deactivations)
                 {
-                    QueueDeactivation(entry, destroy, work);
+                    QueueDeactivation(entry, destroy, notifyLifecycle, work);
                 }
 
                 if (success && pushedEntry is not null)
@@ -412,7 +446,7 @@ public sealed partial class NavigationService
                     AttachNavigation(pushedEntry.ViewModel);
                     QueueActivate(pushedEntry.ViewModel, parameter, work);
                     var capturedVm = pushedEntry.ViewModel;
-                    work.Events.Add(() => RegionNavigated?.Invoke(regionName, capturedVm));
+                    QueueRegionNavigatedEvent(regionName, capturedVm, work);
                 }
                 else if (refreshEntry is not null)
                 {
@@ -421,7 +455,7 @@ public sealed partial class NavigationService
                     // (The ViewModel is already attached from its original activation.)
                     QueueActivate(refreshEntry.ViewModel, parameter, work);
                     var capturedVm = refreshEntry.ViewModel;
-                    work.Events.Add(() => RegionNavigated?.Invoke(regionName, capturedVm));
+                    QueueRegionNavigatedEvent(regionName, capturedVm, work);
                 }
                 else if (reactivatedEntry is not null)
                 {
@@ -430,7 +464,7 @@ public sealed partial class NavigationService
                     AttachNavigation(reactivatedEntry.ViewModel);
                     QueueActivate(reactivatedEntry.ViewModel, parameter, work);
                     var capturedVm = reactivatedEntry.ViewModel;
-                    work.Events.Add(() => RegionNavigated?.Invoke(regionName, capturedVm));
+                    QueueRegionNavigatedEvent(regionName, capturedVm, work);
                 }
             }
         }
@@ -466,6 +500,23 @@ public sealed partial class NavigationService
         await RunTransitionAsync(work).ConfigureAwait(false);
 
         return true;
+    }
+
+    /// <summary>
+    /// Queues a <see cref="RegionNavigated"/> event that is suppressed if the ViewModel
+    /// is no longer the region's current page when the event runs. This handles reentrant
+    /// navigation: an outer transition's event must not overwrite a newer inner transition's
+    /// state.
+    /// </summary>
+    private void QueueRegionNavigatedEvent(string regionName, INavigationViewModel viewModel, TransitionWork work)
+    {
+        work.Events.Add(() =>
+        {
+            if (ReferenceEquals(GetCurrentViewModel(regionName), viewModel))
+            {
+                RegionNavigated?.Invoke(regionName, viewModel);
+            }
+        });
     }
 
     /// <summary>
