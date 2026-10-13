@@ -190,7 +190,37 @@ internal sealed class NavigationHostController<TView> where TView : class
         }
         else
         {
-            _dispatcher.Post(() => ApplyNavigation(viewModel));
+            // Re-check at execution time: the ViewModel may have become stale while
+            // queued. Also captures the service/region to detect detachment or rename.
+            var capturedService = service;
+            var capturedRegion = regionName;
+            var capturedViewModel = viewModel;
+            _dispatcher.Post(() =>
+            {
+                INavigationService? currentService;
+                lock (_eventLock)
+                {
+                    currentService = _navigationService;
+                }
+
+                if (!ReferenceEquals(currentService, capturedService))
+                {
+                    return;
+                }
+
+                if (!string.Equals(capturedRegion, _regionNameProvider(), StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                var currentVm = capturedService?.GetCurrentViewModel(capturedRegion);
+                if (currentVm is not null && !ReferenceEquals(currentVm, capturedViewModel))
+                {
+                    return;
+                }
+
+                ApplyNavigation(capturedViewModel);
+            });
         }
     }
 

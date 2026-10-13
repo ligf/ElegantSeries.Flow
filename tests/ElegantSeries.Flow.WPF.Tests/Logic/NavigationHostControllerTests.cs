@@ -1,6 +1,7 @@
 using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.ViewModels;
 using ElegantSeries.Flow.Hosting;
+using ElegantSeries.Flow.WPF.Tests;
 
 namespace ElegantSeries.Flow.WPF.Tests.Logic;
 
@@ -337,5 +338,36 @@ public sealed class NavigationHostControllerTests
         harness.Controller.Refresh(); // Must not throw.
 
         Assert.Equal(1, harness.ClearedCount);
+    }
+
+    [Fact]
+    public void QueuedCallback_WithStaleViewModel_SkippedAtExecutionTime()
+    {
+        // The staleness check at event time passes, but by the time the queued
+        // dispatcher callback runs, navigation has moved to another ViewModel.
+        // The execution-time re-check must skip the stale callback.
+        var dispatcher = new FakeDispatcher(hasAccess: false);
+        var service = new FakeNavigationService();
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (view, vm) => shown.Add((view, vm)),
+            clearView: () => { },
+            onViewCreationFailed: (_, _) => { });
+        controller.Attach(service);
+
+        var vmA = new StubViewModel();
+        var vmB = new StubViewModel();
+        service.CurrentByRegion["MainRegion"] = vmA;
+        service.RaiseNavigated("MainRegion", vmA); // passes check, queued
+
+        // Navigation moves on before the queue runs.
+        service.CurrentByRegion["MainRegion"] = vmB;
+
+        dispatcher.RunPosted();
+
+        Assert.Empty(shown); // stale VM-A must not be applied
     }
 }

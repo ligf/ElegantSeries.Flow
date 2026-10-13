@@ -294,7 +294,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
         // Scope disposal runs outside the lock; the entries are already detached above.
         DisposeScopesSync(targets, pendingEvents, errors);
-        pendingEvents.Add(() => RegionCacheCleared?.Invoke(regionName));
+        pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
 
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(errors);
@@ -322,7 +322,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
             foreach (var region in affectedRegions)
             {
                 var capturedRegion = region;
-                pendingEvents.Add(() => RegionCacheCleared?.Invoke(capturedRegion));
+                pendingEvents.Add(() => RaiseRegionCacheCleared(capturedRegion));
             }
         }
         finally
@@ -370,7 +370,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
         // Scope disposal runs outside the lock; the entries are already detached above.
         await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
-        pendingEvents.Add(() => RegionCacheCleared?.Invoke(regionName));
+        pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
 
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(errors);
@@ -398,7 +398,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
             foreach (var region in affectedRegions)
             {
                 var capturedRegion = region;
-                pendingEvents.Add(() => RegionCacheCleared?.Invoke(capturedRegion));
+                pendingEvents.Add(() => RaiseRegionCacheCleared(capturedRegion));
             }
         }
         finally

@@ -6,3 +6,4 @@ FLOWGEN004 | ElegantSeries.Flow.Generator | Error | Cannot infer ViewModel type 
 FLOWGEN005 | ElegantSeries.Flow.Generator | Error | Conflicting ViewModel type for [ViewFor]
 FLOWGEN006 | ElegantSeries.Flow.Generator | Error | Unresolvable ViewModel type for [ViewFor]
 FLOWGEN007 | ElegantSeries.Flow.Generator | Warning | Unsupported INavigationService lifetime in AddElegantSeriesFlow
+FLOWGEN008 | ElegantSeries.Flow.Generator | Error | Open generic view for [ViewFor]

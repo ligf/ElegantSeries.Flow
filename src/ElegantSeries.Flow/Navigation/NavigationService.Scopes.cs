@@ -155,7 +155,7 @@ public sealed partial class NavigationService
             {
                 var capturedRegion = region;
                 var capturedViewModel = target.ViewModel;
-                pendingEvents.Add(() => ViewModelReleased?.Invoke(capturedRegion, capturedViewModel));
+                pendingEvents.Add(() => RaiseViewModelReleased(capturedRegion, capturedViewModel));
             }
         }
     }
@@ -177,7 +177,7 @@ public sealed partial class NavigationService
             {
                 var capturedRegion = region;
                 var capturedViewModel = target.ViewModel;
-                pendingEvents.Add(() => ViewModelReleased?.Invoke(capturedRegion, capturedViewModel));
+                pendingEvents.Add(() => RaiseViewModelReleased(capturedRegion, capturedViewModel));
             }
         }
     }
@@ -247,7 +247,7 @@ public sealed partial class NavigationService
         foreach (var region in targets.SelectMany(t => t.Regions).Distinct())
         {
             var capturedRegion = region;
-            pendingEvents.Add(() => RegionCacheCleared?.Invoke(capturedRegion));
+            pendingEvents.Add(() => RaiseRegionCacheCleared(capturedRegion));
         }
     }
 
