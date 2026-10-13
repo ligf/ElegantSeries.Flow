@@ -40,7 +40,7 @@ public static class FlowViewServiceExtensions
     /// benefit, configuration errors fail fast at startup.
     /// </para>
     /// </remarks>
-    public static IServiceCollection AddFlowViews(
+    public static IServiceCollection AddElegantSeriesFlowViews(
         this IServiceCollection services,
         Action<IViewLocator>? configure = null)
     {

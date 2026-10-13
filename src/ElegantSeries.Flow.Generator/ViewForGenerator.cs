@@ -357,7 +357,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         sb.AppendLine("    /// <summary>");
         sb.AppendLine("    /// View registrations generated from <c>[ViewFor]</c> attributes.");
         sb.AppendLine("    /// Call <see cref=\"RegisterAttributedViews\"/> inside");
-        sb.AppendLine("    /// <c>services.AddFlowViews(...)</c> to register every attributed view.");
+        sb.AppendLine("    /// <c>services.AddElegantSeriesFlowViews(...)</c> to register every attributed view.");
         sb.AppendLine("    /// </summary>");
         sb.AppendLine("    public static class ViewForRegistrations");
         sb.AppendLine("    {");

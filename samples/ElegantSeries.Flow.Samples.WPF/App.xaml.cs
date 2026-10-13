@@ -40,7 +40,7 @@ public partial class App : Application
         // IViewLocator.Register* call (no runtime reflection). Manual
         // registration remains available for special cases — see the custom
         // view factory below.
-        services.AddFlowViews(views =>
+        services.AddElegantSeriesFlowViews(views =>
         {
             views.RegisterAttributedViews();
 

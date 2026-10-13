@@ -30,7 +30,7 @@ public sealed class ViewLocator : IViewLocator
     /// so <see cref="RegisterTransient{TView, TViewModel}"/> and
     /// <see cref="RegisterSingleton{TView, TViewModel}"/> throw
     /// <see cref="InvalidOperationException"/> on it. Prefer
-    /// <c>AddFlowViews(configure)</c>, which wires the service collection
+    /// <c>AddElegantSeriesFlowViews(configure)</c>, which wires the service collection
     /// automatically.
     /// </remarks>
     public ViewLocator()
@@ -40,7 +40,7 @@ public sealed class ViewLocator : IViewLocator
     /// <summary>
     /// Initializes a new instance of the <see cref="ViewLocator"/> class with
     /// access to the service collection, enabling ViewModel lifetime
-    /// registration. Used by <c>AddFlowViews(configure)</c>.
+    /// registration. Used by <c>AddElegantSeriesFlowViews(configure)</c>.
     /// </summary>
     /// <param name="services">The service collection ViewModel registrations are written to.</param>
     internal ViewLocator(IServiceCollection services)
@@ -93,7 +93,7 @@ public sealed class ViewLocator : IViewLocator
         if (_services is null)
         {
             throw new InvalidOperationException(
-                $"{methodName} requires the locator to be created by AddFlowViews(configure), " +
+                $"{methodName} requires the locator to be created by AddElegantSeriesFlowViews(configure), " +
                 "which provides access to the service collection. A directly constructed ViewLocator " +
                 "can only map views: use Register<TView, TViewModel>() and register the ViewModel " +
                 "in dependency injection separately.");

@@ -20,7 +20,7 @@ second window; each sample's `App` wires it to its own platform `SecondWindow`
 Both samples demonstrate the library's full feature set:
 
 1. **DI setup** — `AddElegantSeriesFlow()` (singleton); views + ViewModels
-   registered AOT-safely via `AddFlowViews(...)`. Most views carry a `[ViewFor]`
+   registered AOT-safely via `AddElegantSeriesFlowViews(...)`. Most views carry a `[ViewFor]`
    attribute and are registered by the ElegantSeries.Flow source generator
    (`views.RegisterAttributedViews()` — see item 21); the separate
    `services.AddTransient` + generated mapping style is kept for Home/Detail
@@ -123,7 +123,7 @@ Both samples demonstrate the library's full feature set:
     `[ViewFor(typeof(XxxViewModel))]`; the ElegantSeries.Flow source generator
     (`ElegantSeries.Flow.Generator`, referenced as an Analyzer) turns them into
     `IViewLocator.Register*` calls inside the generated
-    `RegisterAttributedViews()` extension (called from `AddFlowViews`). The
+    `RegisterAttributedViews()` extension (called from `AddElegantSeriesFlowViews`). The
     attribute's `Lifetime` selects the registration: `Transient` (default) →
     `RegisterTransient`, `Singleton` → `RegisterSingleton`, `ViewOnly` →
     mapping-only `Register` (used by Home/Detail, whose DI stays manual).
