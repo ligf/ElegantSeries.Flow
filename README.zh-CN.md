@@ -44,30 +44,32 @@ dotnet add package ElegantSeries.Flow
 ```csharp
 using ElegantSeries.Flow.Extensions;
 
-services.AddSingletonFlowNavigation();   // 单例——单窗口应用
+services.AddElegantSeriesFlow();   // 单例——单窗口应用
 // 或
-services.AddScopedFlowNavigation();      // 作用域——每个窗口独立导航栈
+services.AddElegantSeriesFlow(ServiceLifetime.Scoped);      // 作用域——每个窗口独立导航栈
 ```
 
 **单例还是作用域？** *region* 是一个命名的导航槽——通常对应 UI 里的一个
 `NavigationHost` 控件——每个 region 拥有独立的页面栈（见[Region](#region)）。
 这个选择只决定这些栈的*作用域*：
 
-- `AddSingletonFlowNavigation()` 注册一个应用级 `INavigationService`。所有窗口
+- `AddElegantSeriesFlow()` 注册一个应用级 `INavigationService`。所有窗口
   共享同一套 region 栈：两个窗口各放一个 `"MainRegion"` 会互相干扰。
-- `AddScopedFlowNavigation()` 让每个 DI 作用域（通常一个窗口一个）拥有独立的
+- `AddElegantSeriesFlow(ServiceLifetime.Scoped)` 让每个 DI 作用域（通常一个窗口一个）拥有独立的
   `INavigationService`，region 栈完全隔离。
 
-两个方法都用 `TryAdd`，所以同时调用也只会注册第一个——一个容器里恰好只有
+`AddElegantSeriesFlow` 内部用 `TryAdd`，所以调两次也只会注册第一次——一个容器里恰好只有
 一个 `INavigationService`。ViewModel 的生命周期与此选择无关（见
-[页面级服务作用域](#页面级服务作用域)）。
+[页面级服务作用域](#页面级服务作用域)）。传入 `ServiceLifetime.Transient`
+会抛 `ArgumentOutOfRangeException`：导航服务是有状态的，transient 注册会让每个
+消费者拿到相互隔离的空栈。
 
 **混合配置**——一个全局栈加独立窗口：为共享栈注册单例，每个窗口手动从自己的
 作用域构造服务（不注册进 DI）。作用域的存活期必须覆盖窗口——窗口关闭时再释放，
 不能提前：
 
 ```csharp
-services.AddSingletonFlowNavigation(); // 全局栈
+services.AddElegantSeriesFlow(); // 全局栈
 
 // 每个窗口的独立栈：
 var windowScope = rootProvider.CreateScope(); // 窗口关闭时释放
@@ -360,7 +362,7 @@ Avalonia 示例的 csproj 里开了 `PublishAot=true`，作为框架 AOT 能力�
 | `ClearCache(region?)` / `ClearCacheAsync(region?)` | 清空单个 region 的 KeepAlive 缓存 |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | 清空所有 KeepAlive 缓存 |
 | `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` | 事件 |
-| `AddSingletonFlowNavigation()` / `AddScopedFlowNavigation()` | DI 注册 |
+| `AddElegantSeriesFlow()` / `AddElegantSeriesFlow(ServiceLifetime.Scoped)` | DI 注册 |
 
 ## 参与贡献
 
