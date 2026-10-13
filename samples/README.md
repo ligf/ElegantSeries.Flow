@@ -19,7 +19,7 @@ second window; each sample's `App` wires it to its own platform `SecondWindow`
 
 Both samples demonstrate the library's full feature set:
 
-1. **DI setup** — `AddFlow()` (singleton); views + ViewModels
+1. **DI setup** — `AddElegantSeriesFlow()` (singleton); views + ViewModels
    registered AOT-safely via `AddFlowViews(...)`. Most views carry a `[ViewFor]`
    attribute and are registered by the ElegantSeries.Flow source generator
    (`views.RegisterAttributedViews()` — see item 21); the separate
@@ -101,8 +101,8 @@ Both samples demonstrate the library's full feature set:
 16. **Scoped multi-window** — "Second window" opens a window with its own DI
     scope and manually-constructed `NavigationService`; its stacks are fully
     isolated from the main window's. (This is the manual form of
-    `services.AddFlow(ServiceLifetime.Scoped)`: the extension is a root-container
-    registration and cannot be combined with the app's `AddFlow()`
+    `services.AddElegantSeriesFlow(ServiceLifetime.Scoped)`: the extension is a root-container
+    registration and cannot be combined with the app's `AddElegantSeriesFlow()`
     singleton on the same container, since both use `TryAdd`.)
 17. **Bound RegionName** — the Bound Region page data-binds a single
     `NavigationHost`'s `RegionName` (and `NavigationService`) instead of

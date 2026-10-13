@@ -22,7 +22,7 @@ public partial class App : Application
         var services = new ServiceCollection();
 
         // Core navigation.
-        services.AddFlow();
+        services.AddElegantSeriesFlow();
 
         // ViewModel DI registrations that stay manual:
         // - Home/Detail carry [ViewFor(..., Lifetime = ViewOnly)]: the generator

@@ -55,7 +55,7 @@ public static class FlowServiceCollectionExtensions
     /// </para>
     /// <code>
     /// root container
-    ///  └─ window scope (AddFlow(ServiceLifetime.Scoped) → INavigationService per window)
+    ///  └─ window scope (AddElegantSeriesFlow(ServiceLifetime.Scoped) → INavigationService per window)
     ///       ├─ page scope (page 1: ViewModel + its Transient/Scoped graph)
     ///       └─ page scope (page 2: ViewModel + its Transient/Scoped graph)
     /// </code>
@@ -66,7 +66,7 @@ public static class FlowServiceCollectionExtensions
     /// one navigation service.
     /// </para>
     /// </remarks>
-    public static IServiceCollection AddFlow(
+    public static IServiceCollection AddElegantSeriesFlow(
         this IServiceCollection services,
         ServiceLifetime lifetime = ServiceLifetime.Singleton)
     {

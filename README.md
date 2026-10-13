@@ -45,9 +45,9 @@ Requires **.NET 10** or later.
 ```csharp
 using ElegantSeries.Flow.Extensions;
 
-services.AddFlow();   // singleton — single-window apps
+services.AddElegantSeriesFlow();   // singleton — single-window apps
 // or
-services.AddFlow(ServiceLifetime.Scoped);      // scoped — each window gets its own navigation stack
+services.AddElegantSeriesFlow(ServiceLifetime.Scoped);      // scoped — each window gets its own navigation stack
 ```
 
 **Singleton or scoped?** A *region* is a named navigation slot — typically one
@@ -55,13 +55,13 @@ services.AddFlow(ServiceLifetime.Scoped);      // scoped — each window gets it
 stack (see [Regions](#regions)). This choice only decides the *scope of those
 stacks*:
 
-- `AddFlow()` registers one app-wide `INavigationService`. Every window
+- `AddElegantSeriesFlow()` registers one app-wide `INavigationService`. Every window
   shares the same region stacks: two windows each hosting a `"MainRegion"` would
   interfere with each other.
-- `AddFlow(ServiceLifetime.Scoped)` gives each DI scope (typically one per window) its
+- `AddElegantSeriesFlow(ServiceLifetime.Scoped)` gives each DI scope (typically one per window) its
   own `INavigationService` with fully isolated region stacks.
 
-`AddFlow` uses `TryAdd` internally, so calling it twice registers only the first
+`AddElegantSeriesFlow` uses `TryAdd` internally, so calling it twice registers only the first
 one — a single container holds exactly one `INavigationService` registration. The
 ViewModels' lifetimes are independent of this choice (see
 [Page-level service scopes](#page-level-service-scopes)). Passing
@@ -75,7 +75,7 @@ window's scope (they are not registered in DI). The scope must live as long as
 the window — dispose it when the window closes, not earlier:
 
 ```csharp
-services.AddFlow(); // global stack
+services.AddElegantSeriesFlow(); // global stack
 
 // Per-window isolated stack:
 var windowScope = rootProvider.CreateScope(); // dispose when the window closes
@@ -384,7 +384,7 @@ framework's AOT story (verified by the Native AOT publish smoke test in CI).
 | `ClearCache(region?)` / `ClearCacheAsync(region?)` | Clear one region's KeepAlive cache |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | Clear all KeepAlive caches |
 | `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` | Events |
-| `AddFlow()` / `AddFlow(ServiceLifetime.Scoped)` | DI registration |
+| `AddElegantSeriesFlow()` / `AddElegantSeriesFlow(ServiceLifetime.Scoped)` | DI registration |
 
 ## Contributing
 

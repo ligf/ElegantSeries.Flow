@@ -22,9 +22,9 @@ public partial class SecondWindow : Window
         InitializeComponent();
 
         // Per-window scope -> per-window navigation service. This is the manual form of
-        // services.AddFlow(ServiceLifetime.Scoped) (one scoped INavigationService per window scope
+        // services.AddElegantSeriesFlow(ServiceLifetime.Scoped) (one scoped INavigationService per window scope
         // with isolated region stacks). The extension itself is a root-container
-        // registration and cannot be combined with this app's AddFlow()
+        // registration and cannot be combined with this app's AddElegantSeriesFlow()
         // singleton on the same container (both use TryAdd), so the second window
         // builds the scoped service directly from its own scope: same object graph,
         // same lifetime, same disposal semantics.
