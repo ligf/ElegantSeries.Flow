@@ -16,7 +16,7 @@ services.AddSingleton<INavigationService>(sp =>
     new NavigationService(sp));
 
 // WPF view infrastructure: singleton IViewLocator with explicit registrations.
-services.AddFlowViews(views =>
+services.AddElegantSeriesFlowViews(views =>
 {
     // View mapping + ViewModel DI registration in one call:
     views.RegisterTransient<OrderView, OrderViewModel>();

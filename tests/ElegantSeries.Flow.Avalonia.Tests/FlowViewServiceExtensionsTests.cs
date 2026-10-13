@@ -7,10 +7,10 @@ namespace ElegantSeries.Flow.Avalonia.Tests;
 public sealed class FlowViewServiceExtensionsTests
 {
     [Fact]
-    public void AddFlowViews_RegistersViewLocatorSingleton()
+    public void AddElegantSeriesFlowViews_RegistersViewLocatorSingleton()
     {
         var services = new ServiceCollection();
-        services.AddFlowViews();
+        services.AddElegantSeriesFlowViews();
 
         using var provider = services.BuildServiceProvider();
         var first = provider.GetRequiredService<IViewLocator>();
@@ -21,10 +21,10 @@ public sealed class FlowViewServiceExtensionsTests
     }
 
     [Fact]
-    public void AddFlowViews_WithConfigure_AppliesRegistrations()
+    public void AddElegantSeriesFlowViews_WithConfigure_AppliesRegistrations()
     {
         var services = new ServiceCollection();
-        services.AddFlowViews(locator => locator.Register<TestView, TestViewModel>());
+        services.AddElegantSeriesFlowViews(locator => locator.Register<TestView, TestViewModel>());
 
         using var provider = services.BuildServiceProvider();
         var resolved = provider.GetRequiredService<IViewLocator>();
@@ -34,12 +34,12 @@ public sealed class FlowViewServiceExtensionsTests
     }
 
     [Fact]
-    public void AddFlowViews_WithoutConfigure_DoesNotOverrideExistingRegistration()
+    public void AddElegantSeriesFlowViews_WithoutConfigure_DoesNotOverrideExistingRegistration()
     {
         var services = new ServiceCollection();
         var custom = new ViewLocator();
         services.AddSingleton<IViewLocator>(custom);
-        services.AddFlowViews();
+        services.AddElegantSeriesFlowViews();
 
         using var provider = services.BuildServiceProvider();
 
@@ -47,11 +47,11 @@ public sealed class FlowViewServiceExtensionsTests
     }
 
     [Fact]
-    public void AddFlowViews_WithConfigure_ReplacesExistingRegistration()
+    public void AddElegantSeriesFlowViews_WithConfigure_ReplacesExistingRegistration()
     {
         var services = new ServiceCollection();
         services.AddSingleton<IViewLocator>(new ViewLocator());
-        services.AddFlowViews(locator => locator.Register<TestView, TestViewModel>());
+        services.AddElegantSeriesFlowViews(locator => locator.Register<TestView, TestViewModel>());
 
         using var provider = services.BuildServiceProvider();
         var resolved = provider.GetRequiredService<IViewLocator>();
@@ -64,7 +64,7 @@ public sealed class FlowViewServiceExtensionsTests
     public void RegisterTransient_RegistersViewModelAsTransient_AndMapsView()
     {
         var services = new ServiceCollection();
-        services.AddFlowViews(views => views.RegisterTransient<TestView, TestViewModel>());
+        services.AddElegantSeriesFlowViews(views => views.RegisterTransient<TestView, TestViewModel>());
 
         using var provider = services.BuildServiceProvider();
         var first = provider.GetRequiredService<TestViewModel>();
@@ -78,7 +78,7 @@ public sealed class FlowViewServiceExtensionsTests
     public void RegisterSingleton_RegistersViewModelAsSingleton_AndMapsView()
     {
         var services = new ServiceCollection();
-        services.AddFlowViews(views => views.RegisterSingleton<TestView, TestViewModel>());
+        services.AddElegantSeriesFlowViews(views => views.RegisterSingleton<TestView, TestViewModel>());
 
         using var provider = services.BuildServiceProvider();
         var first = provider.GetRequiredService<TestViewModel>();
@@ -96,7 +96,7 @@ public sealed class FlowViewServiceExtensionsTests
         var ex = Assert.Throws<InvalidOperationException>(
             () => locator.RegisterTransient<TestView, TestViewModel>());
 
-        Assert.Contains("AddFlowViews", ex.Message);
+        Assert.Contains("AddElegantSeriesFlowViews", ex.Message);
         Assert.False(locator.IsRegistered<TestViewModel>());
     }
 
@@ -110,11 +110,11 @@ public sealed class FlowViewServiceExtensionsTests
     }
 
     [Fact]
-    public void AddFlowViews_ConfigureRunsEagerly_BeforeProviderIsBuilt()
+    public void AddElegantSeriesFlowViews_ConfigureRunsEagerly_BeforeProviderIsBuilt()
     {
         var services = new ServiceCollection();
         var ran = false;
-        services.AddFlowViews(_ => ran = true);
+        services.AddElegantSeriesFlowViews(_ => ran = true);
 
         // Eager: registrations (including ViewModel DI lifetimes) must take
         // effect before BuildServiceProvider(), not on first resolution.
@@ -126,7 +126,7 @@ public sealed class FlowViewServiceExtensionsTests
     {
         var services = new ServiceCollection();
         IViewLocator? locator = null;
-        services.AddFlowViews(views =>
+        services.AddElegantSeriesFlowViews(views =>
         {
             locator = views;
             views.Register<TestView, TestViewModel>();
@@ -146,7 +146,7 @@ public sealed class FlowViewServiceExtensionsTests
     {
         var services = new ServiceCollection();
         IViewLocator? locator = null;
-        services.AddFlowViews(views =>
+        services.AddElegantSeriesFlowViews(views =>
         {
             locator = views;
             views.RegisterTransient<TestView, TestViewModel>();

@@ -49,14 +49,14 @@ public static class FlowViewServiceExtensions
     /// </remarks>
     /// <example>
     /// <code>
-    /// services.AddFlowViews(locator =>
+    /// services.AddElegantSeriesFlowViews(locator =>
     /// {
     ///     locator.RegisterTransient&lt;HomeView, HomeViewModel&gt;();
     ///     locator.RegisterSingleton&lt;MenuView, MenuViewModel&gt;();
     /// });
     /// </code>
     /// </example>
-    public static IServiceCollection AddFlowViews(this IServiceCollection services, Action<IViewLocator>? configure = null)
+    public static IServiceCollection AddElegantSeriesFlowViews(this IServiceCollection services, Action<IViewLocator>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 

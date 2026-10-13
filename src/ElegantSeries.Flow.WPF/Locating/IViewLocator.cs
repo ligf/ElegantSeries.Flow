@@ -56,7 +56,7 @@ public interface IViewLocator
     /// <typeparam name="TViewModel">The ViewModel type the view is created for.</typeparam>
     /// <exception cref="InvalidOperationException">
     /// The locator was constructed directly instead of through
-    /// <c>AddFlowViews(configure)</c> and therefore has no access to the
+    /// <c>AddElegantSeriesFlowViews(configure)</c> and therefore has no access to the
     /// service collection; or a view is already registered for
     /// <typeparamref name="TViewModel"/>.
     /// </exception>
@@ -73,7 +73,7 @@ public interface IViewLocator
     /// </para>
     /// <para>
     /// Must be called before the service provider is built (i.e. during
-    /// <c>AddFlowViews</c> startup configuration). Registrations added to the
+    /// <c>AddElegantSeriesFlowViews</c> startup configuration). Registrations added to the
     /// service collection afterwards are silently ignored by Microsoft DI.
     /// </para>
     /// </remarks>
@@ -91,7 +91,7 @@ public interface IViewLocator
     /// <typeparam name="TViewModel">The ViewModel type the view is created for.</typeparam>
     /// <exception cref="InvalidOperationException">
     /// The locator was constructed directly instead of through
-    /// <c>AddFlowViews(configure)</c> and therefore has no access to the
+    /// <c>AddElegantSeriesFlowViews(configure)</c> and therefore has no access to the
     /// service collection; or a view is already registered for
     /// <typeparamref name="TViewModel"/>.
     /// </exception>
@@ -105,7 +105,7 @@ public interface IViewLocator
     /// </para>
     /// <para>
     /// Must be called before the service provider is built (i.e. during
-    /// <c>AddFlowViews</c> startup configuration). Registrations added to the
+    /// <c>AddElegantSeriesFlowViews</c> startup configuration). Registrations added to the
     /// service collection afterwards are silently ignored by Microsoft DI.
     /// </para>
     /// </remarks>

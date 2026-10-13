@@ -12,7 +12,7 @@ It contains no navigation logic itself — it binds the platform-agnostic
 | `BaseView<TViewModel>` | Typed `UserControl` base class with a `ViewModel` accessor and an `OnViewModelChanged` hook |
 | `NavigationHost` | `ContentControl` that shows the active page of a navigation region |
 | `IDispatcher` / `AvaloniaDispatcher` | UI-thread marshalling abstraction (testable) |
-| `FlowViewServiceExtensions` | `services.AddFlowViews(...)` DI registration |
+| `FlowViewServiceExtensions` | `services.AddElegantSeriesFlowViews(...)` DI registration |
 
 Requires `ElegantSeries.Flow` **>= 1.0.0**.
 
@@ -24,7 +24,7 @@ Requires `ElegantSeries.Flow` **>= 1.0.0**.
 // App startup (e.g. App.axaml.cs / composition root)
 services.AddSingleton<INavigationService, NavigationService>(); // core
 
-services.AddFlowViews(locator =>
+services.AddElegantSeriesFlowViews(locator =>
 {
     // View mapping + ViewModel DI registration in one call:
     locator.RegisterTransient<HomeView, HomeViewModel>();
