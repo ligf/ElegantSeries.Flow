@@ -97,6 +97,9 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
     /// <inheritdoc />
     public event Action<string>? RegionCacheCleared;
 
+    /// <inheritdoc />
+    public event Action<Exception>? SubscriberError;
+
     // ──────────────────────── Navigation (async) ────────────────────────
 
     /// <inheritdoc />
@@ -193,11 +196,11 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
             // Queue the work items while holding _navigationLock but not _stateLock,
             // mirroring the NavigateInternalAsync path.
-            QueueDeactivation(current, destroy: current.Mode != NavigationMode.KeepAlive, work);
+            QueueDeactivation(current, destroy: current.Mode != NavigationMode.KeepAlive, notifyLifecycle: true, work);
 
             AttachNavigation(previous.ViewModel);
             QueueActivate(previous.ViewModel, previous.Parameter, work);
-            work.Events.Add(() => RegionNavigated?.Invoke(regionName, previous.ViewModel));
+            QueueRegionNavigatedEvent(regionName, previous.ViewModel, work);
 
             success = true;
         }
@@ -293,7 +296,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         DisposeScopesSync(targets, pendingEvents, errors);
         pendingEvents.Add(() => RegionCacheCleared?.Invoke(regionName));
 
-        RaiseEvents(pendingEvents);
+        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(errors);
     }
 
@@ -329,7 +332,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
         DisposeScopesSync(targets, pendingEvents, errors);
 
-        RaiseEvents(pendingEvents);
+        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(errors);
     }
 
@@ -369,7 +372,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
         pendingEvents.Add(() => RegionCacheCleared?.Invoke(regionName));
 
-        RaiseEvents(pendingEvents);
+        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(errors);
     }
 
@@ -405,7 +408,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
         await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
 
-        RaiseEvents(pendingEvents);
+        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(errors);
     }
 
@@ -454,7 +457,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         // ObjectDisposedException. The _disposed flag already makes it unusable.
         DisposeScopesSync(targets, pendingEvents, errors);
         QueueCacheClearedEvents(targets, pendingEvents);
-        RaiseEvents(pendingEvents);
+        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
 
         ThrowCollectedErrors(errors);
     }
@@ -499,7 +502,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         // is not disposed.
         await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
         QueueCacheClearedEvents(targets, pendingEvents);
-        RaiseEvents(pendingEvents);
+        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
 
         ThrowCollectedErrors(errors);
     }

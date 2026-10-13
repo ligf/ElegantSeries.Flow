@@ -167,6 +167,21 @@ internal sealed class NavigationHostController<TView> where TView : class
             return;
         }
 
+        // Defense against stale events (e.g. reentrant navigation): only apply the
+        // event if the ViewModel is still the region's current page. The service
+        // already suppresses such events, but the check here protects against
+        // third-party INavigationService implementations.
+        INavigationService? service;
+        lock (_eventLock)
+        {
+            service = _navigationService;
+        }
+
+        if (service is not null && !ReferenceEquals(service.GetCurrentViewModel(regionName), viewModel))
+        {
+            return;
+        }
+
         if (_dispatcher.CheckAccess())
         {
             ApplyNavigation(viewModel);

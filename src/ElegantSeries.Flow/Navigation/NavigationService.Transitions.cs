@@ -10,9 +10,10 @@ public sealed partial class NavigationService
 {
     /// <summary>
     /// Invokes queued event handlers. Subscriber exceptions are swallowed so a faulty
-    /// subscriber can never corrupt navigation state.
+    /// subscriber can never corrupt navigation state; they are reported via
+    /// <paramref name="onError"/> for diagnostics.
     /// </summary>
-    private static void RaiseEvents(List<Action>? events)
+    private static void RaiseEvents(List<Action>? events, Action<Exception>? onError)
     {
         if (events is null or { Count: 0 }) return;
         foreach (var action in events)
@@ -21,9 +22,12 @@ public sealed partial class NavigationService
             {
                 action();
             }
-            catch
+            catch (Exception ex)
             {
                 // Swallow: event subscribers must never break navigation.
+                // Report for diagnostics; the reporter itself must not throw.
+                try { onError?.Invoke(ex); }
+                catch { }
             }
         }
     }
@@ -34,7 +38,7 @@ public sealed partial class NavigationService
     /// Lifecycle/disposal exceptions are collected and rethrown afterwards so one failing
     /// page never aborts the rest.
     /// </summary>
-    private static async Task RunTransitionAsync(TransitionWork work)
+    private async Task RunTransitionAsync(TransitionWork work)
     {
         foreach (var action in work.NavigatedFromActions)
             SafeLifecycle(action, work.Errors);
@@ -60,7 +64,7 @@ public sealed partial class NavigationService
             catch (Exception ex) { work.Errors.Add(ex); }
         }
 
-        RaiseEvents(work.Events);
+        RaiseEvents(work.Events, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(work.Errors);
     }
 
@@ -78,20 +82,31 @@ public sealed partial class NavigationService
     /// when needed) for one entry. Must be called while holding
     /// <see cref="_navigationLock"/> but not <see cref="_stateLock"/>.
     /// </summary>
-    private void QueueDeactivation(NavigationEntry entry, bool destroy, TransitionWork work)
+    /// <param name="entry">The stack entry being deactivated.</param>
+    /// <param name="destroy">True when the entry's page scope should be disposed.</param>
+    /// <param name="notifyLifecycle">
+    /// True when the entry was the active page: its <c>OnNavigatedFrom</c> callback runs.
+    /// False for entries that were already inactive (covered) — they are disposed without
+    /// a second lifecycle notification.
+    /// </param>
+    /// <param name="work">The transition work list to append to.</param>
+    private void QueueDeactivation(NavigationEntry entry, bool destroy, bool notifyLifecycle, TransitionWork work)
     {
         DetachNavigation(entry.ViewModel);
         var plan = BuildDeactivatePlan(entry, destroy);
 
-        // A ViewModel implementing INavigationAwareAsync gets the async callbacks
-        // instead of the synchronous ones.
-        if (entry.ViewModel is INavigationAwareAsync asyncAware)
+        if (notifyLifecycle)
         {
-            work.NavigatedFromAsyncActions.Add(() => asyncAware.OnNavigatedFromAsync(CancellationToken.None));
-        }
-        else if (entry.ViewModel is INavigationAware aware)
-        {
-            work.NavigatedFromActions.Add(() => aware.OnNavigatedFrom());
+            // A ViewModel implementing INavigationAwareAsync gets the async callbacks
+            // instead of the synchronous ones.
+            if (entry.ViewModel is INavigationAwareAsync asyncAware)
+            {
+                work.NavigatedFromAsyncActions.Add(() => asyncAware.OnNavigatedFromAsync(CancellationToken.None));
+            }
+            else if (entry.ViewModel is INavigationAware aware)
+            {
+                work.NavigatedFromActions.Add(() => aware.OnNavigatedFrom());
+            }
         }
 
         if (!plan.ShouldDispose)

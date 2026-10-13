@@ -140,6 +140,27 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void MultipleErrors_AllReportedTogether()
+    {
+        // Two views with unresolvable problems: both diagnostics must be reported
+        // in a single compilation, not one at a time.
+        var sources = AttributeStub + AvaloniaLocatorStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class HomeView { }
+
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class OtherView { }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(sources);
+
+        Assert.Equal(2, diagnostics.Count(d => d.Id == "FLOWGEN004"));
+    }
+
+    [Fact]
     public void BothPlatformsReferenced_ReportsFlowGen002()
     {
         var sources = AttributeStub + AvaloniaLocatorStub + WpfLocatorStub + BasicViews;
