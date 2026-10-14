@@ -142,9 +142,17 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         }
 
         // Run the navigation guard outside the locks to avoid deadlocks.
+        // Race against the caller's cancellation: stop waiting promptly if cancelled.
         if (currentVmForGuard is not null && guardContext is not null)
         {
-            if (!await InvokeFromGuardAsync(currentVmForGuard, guardContext).ConfigureAwait(false))
+            var guardTask = InvokeFromGuardAsync(currentVmForGuard, guardContext);
+            var completed = await Task.WhenAny(guardTask, Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)).ConfigureAwait(false);
+            if (!ReferenceEquals(completed, guardTask))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            if (!await guardTask.ConfigureAwait(false))
             {
                 return false;
             }
@@ -198,6 +206,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
             // mirroring the NavigateInternalAsync path.
             QueueDeactivation(current, destroy: current.Mode != NavigationMode.KeepAlive, notifyLifecycle: true, work);
 
+            // The reactivated entry gets a fresh lifecycle token: its previous CTS
+            // was cancelled when it was covered. In-flight callbacks from the old
+            // cycle remain tracked and are not forgotten.
+            previous.ResetLifecycle();
             AttachNavigation(previous.ViewModel);
             QueueActivate(previous, previous.Parameter, work);
             QueueRegionNavigatedEvent(regionName, previous.ViewModel, work);
@@ -474,6 +486,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
         List<ScopeDisposalTarget> targets;
+        List<NavigationEntry> entriesToCancel;
 
         await _navigationLock.WaitAsync().ConfigureAwait(false);
         try
@@ -485,6 +498,16 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
             _disposed = true;
 
+            // Cancel every entry's lifecycle token: this is a terminal navigation —
+            // no page will become active again. In-flight callbacks observe the
+            // cancellation and should stop touching their scopes.
+            entriesToCancel = CollectAllEntriesLocked();
+            foreach (var entry in entriesToCancel)
+            {
+                try { entry.LifecycleCts.Cancel(); }
+                catch (ObjectDisposedException) { }
+            }
+
             targets = TakeAllScopesForDisposal();
             foreach (var target in targets)
             {
@@ -494,6 +517,35 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         finally
         {
             _navigationLock.Release();
+        }
+
+        // Wait for in-flight lifecycle callbacks to finish (with timeout) before
+        // releasing scopes: a callback may still touch its scope's services.
+        // This mirrors the disposal gating in normal navigation transitions.
+        var gateTasks = new List<Task>();
+        foreach (var entry in entriesToCancel)
+        {
+            var gate = entry.InFlightGateTask;
+            if (gate is not null && !gate.IsCompleted)
+            {
+                gateTasks.Add(gate);
+            }
+        }
+
+        if (gateTasks.Count > 0)
+        {
+            var allGates = Task.WhenAll(gateTasks);
+            var completed = await Task.WhenAny(allGates, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
+            if (!ReferenceEquals(completed, allGates))
+            {
+                try
+                {
+                    SubscriberError?.Invoke(new TimeoutException(
+                        $"DisposeAsync timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
+                        "in-flight lifecycle callbacks. Scopes are being released anyway."));
+                }
+                catch { }
+            }
         }
 
         // Page-scope disposal executes arbitrary user code (and awaits it), so it runs

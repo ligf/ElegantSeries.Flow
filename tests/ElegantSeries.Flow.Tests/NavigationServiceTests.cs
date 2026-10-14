@@ -1862,6 +1862,33 @@ public class NavigationServiceTests
         public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
+    private sealed class TokenCapturingViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public CancellationToken LastToken { get; private set; }
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            LastToken = cancellationToken;
+            return Task.CompletedTask;
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class SelfReplacingViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            await Task.Yield();
+            if (Navigation is not null)
+            {
+                await Navigation.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.Replace).ConfigureAwait(false);
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
     private sealed class ReentrantAsyncViewModel : NavigationViewModelBase, INavigationAwareAsync
     {
         public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
@@ -2388,6 +2415,75 @@ public class NavigationServiceTests
 
         Assert.True(result);
         Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task GoBack_ReactivatesWithFreshToken()
+    {
+        // A -> B -> GoBack: A's OnNavigatedToAsync must receive a NON-cancelled token.
+        // (Regression: PR #42 reused the entry whose CTS was cancelled when B covered A.)
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<TokenCapturingViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TokenCapturingViewModel>();
+        var vm = (TokenCapturingViewModel)nav.GetCurrentViewModel()!;
+        Assert.False(vm.LastToken.IsCancellationRequested); // first activation
+
+        await nav.NavigateToAsync<TestHomeViewModel>(); // covers A, cancels its CTS
+        Assert.True(vm.LastToken.IsCancellationRequested);
+
+        await nav.GoBackAsync(); // reactivates A
+        Assert.False(vm.LastToken.IsCancellationRequested); // fresh token!
+        Assert.Same(vm, nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task DisposeAsync_WaitsForInFlightLifecycle()
+    {
+        // DisposeAsync must cancel in-flight callbacks and wait for them (with timeout)
+        // before releasing scopes — not dispose out from under a running callback.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SlowInitViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        _ = nav.NavigateToAsync<SlowInitViewModel>();
+        var slowVm = (SlowInitViewModel)nav.GetCurrentViewModel()!;
+        slowVm.SimulateSlowCleanup = true;
+        await slowVm.InitStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var disposeTask = ((IAsyncDisposable)nav).DisposeAsync().AsTask();
+        await Task.Delay(300);
+        Assert.False(disposeTask.IsCompleted); // waiting for slow cleanup
+
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(slowVm.TokenWasCancelled);
+    }
+
+    [Fact]
+    public async Task ReentrantReplace_DoesNotSelfWait()
+    {
+        // A's OnNavigatedToAsync does Replace to B: the disposal gate must not wait
+        // for A's own callback (self-wait would burn the 5s timeout).
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SelfReplacingViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var startTime = DateTime.UtcNow;
+        var result = await nav.NavigateToAsync<SelfReplacingViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
+        var elapsed = DateTime.UtcNow - startTime;
+
+        Assert.True(result);
+        Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
+        Assert.True(elapsed < TimeSpan.FromSeconds(4), $"Took {elapsed}, self-wait would take ~5s");
     }
 
     [Fact]

@@ -16,6 +16,14 @@ public sealed partial class NavigationService
     private static readonly TimeSpan DisposalGateTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// Tracks the entry whose async lifecycle callback is running on the current
+    /// async flow. Used by disposal gating to avoid self-wait: a reentrant
+    /// navigation issued from inside a callback must not wait for that same
+    /// callback to finish.
+    /// </summary>
+    private static readonly AsyncLocal<NavigationEntry?> _currentLifecycleEntry = new();
+
+    /// <summary>
     /// Raises <see cref="RegionNavigated"/> subscriber-by-subscriber, so one throwing
     /// subscriber cannot prevent the others from receiving the event.
     /// </summary>
@@ -192,9 +200,11 @@ public sealed partial class NavigationService
             if (entry.ViewModel is INavigationAwareAsync asyncAware)
             {
                 var token = entry.LifecycleCts.Token;
+                var gateTask = entry.EnterInFlightLifecycle();
                 work.NavigatedFromAsyncActions.Add(async () =>
                 {
-                    var gateTask = EnterInFlightLifecycle(entry);
+                    var previousCurrent = _currentLifecycleEntry.Value;
+                    _currentLifecycleEntry.Value = entry;
                     try
                     {
                         await asyncAware.OnNavigatedFromAsync(token).ConfigureAwait(false);
@@ -205,7 +215,8 @@ public sealed partial class NavigationService
                     }
                     finally
                     {
-                        ExitInFlightLifecycle(entry, gateTask);
+                        _currentLifecycleEntry.Value = previousCurrent;
+                        entry.ExitInFlightLifecycle(gateTask);
                     }
                 });
             }
@@ -225,8 +236,13 @@ public sealed partial class NavigationService
             // Wait with a timeout so a ViewModel that ignores cancellation cannot
             // block navigation forever; on timeout the scope is released anyway and
             // the hang is reported via SubscriberError.
-            var gateTask = entry.InFlightLifecycleGate?.Task;
-            if (gateTask is not null && !gateTask.IsCompleted)
+            //
+            // Self-wait avoidance: if this disposal runs inside the entry's own
+            // lifecycle callback (reentrant navigation), waiting would deadlock
+            // until the timeout. The callback is on this async flow — skip the wait.
+            var gateTask = entry.InFlightGateTask;
+            if (gateTask is not null && !gateTask.IsCompleted &&
+                !ReferenceEquals(_currentLifecycleEntry.Value, entry))
             {
                 var completed = await Task.WhenAny(gateTask, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
                 if (!ReferenceEquals(completed, gateTask))
@@ -262,58 +278,42 @@ public sealed partial class NavigationService
     }
 
     /// <summary>
-    /// Marks the start of an async lifecycle callback for the entry. Returns the gate
-    /// task that completes when all in-flight callbacks for the entry finish.
-    /// </summary>
-    private static Task EnterInFlightLifecycle(NavigationEntry entry)
-    {
-        entry.InFlightLifecycleCount++;
-        if (entry.InFlightLifecycleCount == 1)
-        {
-            entry.InFlightLifecycleGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        }
-        return entry.InFlightLifecycleGate!.Task;
-    }
-
-    /// <summary>
-    /// Marks the end of an async lifecycle callback for the entry.
-    /// </summary>
-    private static void ExitInFlightLifecycle(NavigationEntry entry, Task gateTask)
-    {
-        entry.InFlightLifecycleCount--;
-        if (entry.InFlightLifecycleCount == 0 && ReferenceEquals(entry.InFlightLifecycleGate?.Task, gateTask))
-        {
-            entry.InFlightLifecycleGate.TrySetResult();
-            entry.InFlightLifecycleGate = null;
-        }
-    }
-
-    /// <summary>
     /// Queues the activation work (OnNavigatedTo callback) for one entry.
     /// A ViewModel implementing <see cref="INavigationAwareAsync"/> gets the async
     /// callback instead of the synchronous one. The async callback receives the
     /// entry's lifecycle token and is tracked as in-flight for disposal gating.
+    /// Must be called while holding <see cref="_navigationLock"/>: the in-flight
+    /// registration happens synchronously at queue time so a concurrent disposal
+    /// cannot miss it.
     /// </summary>
     private void QueueActivate(NavigationEntry entry, object? parameter, TransitionWork work)
     {
         var viewModel = entry.ViewModel;
         if (viewModel is INavigationAwareAsync asyncAware)
         {
+            // Register in-flight SYNCHRONOUSLY at queue time (we hold _navigationLock):
+            // a concurrent disposal starting after this point must observe it.
+            var gateTask = entry.EnterInFlightLifecycle();
+            var token = entry.LifecycleCts.Token;
             work.NavigatedToAsyncActions.Add(async () =>
             {
-                var gateTask = EnterInFlightLifecycle(entry);
+                // Mark the entry whose callback is running: a reentrant navigation
+                // that disposes this same entry must not wait for itself.
+                var previousCurrent = _currentLifecycleEntry.Value;
+                _currentLifecycleEntry.Value = entry;
                 try
                 {
-                    await asyncAware.OnNavigatedToAsync(parameter, entry.LifecycleCts.Token).ConfigureAwait(false);
+                    await asyncAware.OnNavigatedToAsync(parameter, token).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (entry.LifecycleCts.Token.IsCancellationRequested)
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
                     // Expected: the page left the active position while its init was
                     // still running. Not an error — the navigation itself succeeded.
                 }
                 finally
                 {
-                    ExitInFlightLifecycle(entry, gateTask);
+                    _currentLifecycleEntry.Value = previousCurrent;
+                    entry.ExitInFlightLifecycle(gateTask);
                 }
             });
         }
@@ -407,6 +407,10 @@ public sealed partial class NavigationService
     /// <summary>One page on a region's navigation stack. The scope owns the ViewModel's lifetime.</summary>
     private sealed class NavigationEntry
     {
+        private readonly object _inFlightLock = new();
+        private int _inFlightCount;
+        private TaskCompletionSource? _inFlightGate;
+
         public NavigationEntry(string regionName, INavigationViewModel viewModel, object? parameter, NavigationMode mode, IServiceScope scope)
         {
             RegionName = regionName;
@@ -427,19 +431,69 @@ public sealed partial class NavigationService
         /// replaced, or cleared). Async lifecycle callbacks receive this token and
         /// should stop using the page's dependencies when it fires.
         /// </summary>
-        public CancellationTokenSource LifecycleCts { get; } = new();
+        public CancellationTokenSource LifecycleCts { get; private set; } = new();
 
         /// <summary>
-        /// Number of async lifecycle callbacks currently running for this entry.
-        /// Used by disposal gating to avoid releasing the page scope while its
-        /// async lifecycle still runs.
+        /// Starts a new activation cycle for this entry (e.g. GoBack reactivation).
+        /// Replaces the cancelled <see cref="LifecycleCts"/> with a fresh one.
+        /// In-flight callbacks from the previous cycle keep running under their own
+        /// token and remain tracked — they are not forgotten.
         /// </summary>
-        public int InFlightLifecycleCount { get; set; }
+        public void ResetLifecycle()
+        {
+            try { LifecycleCts.Dispose(); }
+            catch { }
+            LifecycleCts = new CancellationTokenSource();
+        }
 
         /// <summary>
-        /// Completes when <see cref="InFlightLifecycleCount"/> drops to zero.
-        /// Null when no async lifecycle is in flight.
+        /// Registers an async lifecycle callback as in-flight. Must be called when the
+        /// callback is QUEUED (while holding the navigation lock), not when it starts
+        /// executing — otherwise a concurrent disposal could miss it.
         /// </summary>
-        public TaskCompletionSource? InFlightLifecycleGate { get; set; }
+        /// <returns>The gate task completing when all in-flight callbacks finish.</returns>
+        public Task EnterInFlightLifecycle()
+        {
+            lock (_inFlightLock)
+            {
+                _inFlightCount++;
+                if (_inFlightCount == 1)
+                {
+                    _inFlightGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                }
+                return _inFlightGate!.Task;
+            }
+        }
+
+        /// <summary>
+        /// Unregisters an async lifecycle callback.
+        /// </summary>
+        public void ExitInFlightLifecycle(Task gateTask)
+        {
+            lock (_inFlightLock)
+            {
+                _inFlightCount--;
+                if (_inFlightCount == 0 && _inFlightGate is not null && ReferenceEquals(_inFlightGate.Task, gateTask))
+                {
+                    _inFlightGate.TrySetResult();
+                    _inFlightGate = null;
+                }
+            }
+        }
+
+        /// <summary>
+        /// The gate task completing when all in-flight callbacks finish, or
+        /// <see langword="null"/> when none is in flight. For disposal gating.
+        /// </summary>
+        public Task? InFlightGateTask
+        {
+            get
+            {
+                lock (_inFlightLock)
+                {
+                    return _inFlightGate?.Task;
+                }
+            }
+        }
     }
 }
