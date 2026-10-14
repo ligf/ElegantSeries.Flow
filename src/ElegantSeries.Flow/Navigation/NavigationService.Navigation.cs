@@ -69,7 +69,18 @@ public sealed partial class NavigationService
         if (currentVmForGuard is not null)
         {
             var guardContext = new NavigationGuardContext(regionName, typeof(TViewModel), mode, parameter, isBack: false);
-            if (!await InvokeFromGuardAsync(currentVmForGuard, guardContext).ConfigureAwait(false))
+            // Race the guard against the caller's cancellation: if the caller cancels
+            // while the guard is still running, stop waiting and report cancellation.
+            // The guard task itself cannot be aborted — it keeps running in the
+            // background, but the navigation request is abandoned promptly.
+            var guardTask = InvokeFromGuardAsync(currentVmForGuard, guardContext);
+            var completed = await Task.WhenAny(guardTask, Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)).ConfigureAwait(false);
+            if (!ReferenceEquals(completed, guardTask))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            if (!await guardTask.ConfigureAwait(false))
             {
                 return false;
             }

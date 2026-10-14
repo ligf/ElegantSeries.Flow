@@ -187,6 +187,27 @@ public sealed partial class NavigationService
     /// deferred disposals) and clears all of them. Each distinct scope is returned once.
     /// The caller must not hold <see cref="_stateLock"/>.
     /// </summary>
+    /// <summary>
+    /// Collects every entry from all region stacks and the KeepAlive cache.
+    /// The caller must hold <see cref="_navigationLock"/> (and <see cref="_stateLock"/>
+    /// is acquired internally for the cache).
+    /// </summary>
+    private List<NavigationEntry> CollectAllEntriesLocked()
+    {
+        var entries = new List<NavigationEntry>();
+        using (_stateLock.EnterScope())
+        {
+            foreach (var stack in _regionStacks.Values)
+            {
+                entries.AddRange(stack);
+            }
+
+            entries.AddRange(_keepAliveCache.Values);
+        }
+
+        return entries;
+    }
+
     private List<ScopeDisposalTarget> TakeAllScopesForDisposal()
     {
         var regionsByScope = new Dictionary<IServiceScope, HashSet<string>>(ReferenceEqualityComparer.Instance);

@@ -71,6 +71,13 @@ public static class FlowServiceCollectionExtensions
     /// on the region's stack pops back to the shared instance instead of pushing a duplicate.
     /// </para>
     /// <para>
+    /// A <c>Singleton</c> ViewModel must not be the active page of two independent
+    /// navigation services at once (e.g. two windows in <c>Scoped</c> mode): it has a
+    /// single <c>Navigation</c> reference, so the second activation would hijack the
+    /// first window's navigation routing. Prefer <c>Transient</c> (or window-scoped)
+    /// for ViewModels with mutable page state.
+    /// </para>
+    /// <para>
     /// With <see cref="ServiceLifetime.Scoped"/>, the navigation service itself is scoped
     /// to the window scope (one stack per window), but page scopes are <i>not</i> nested
     /// inside it — see the Scoped contract in <paramref name="lifetime"/> above.

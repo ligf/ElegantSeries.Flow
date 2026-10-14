@@ -274,8 +274,10 @@ yet when `OnNavigatedTo` runs.
 
 A callback that throws does not abort the transition: the exception is collected and
 rethrown afterwards (single as-is, several as `AggregateException`). The token passed to
-`INavigationAwareAsync` callbacks is always `CancellationToken.None` — once the stack has
-been updated the transition runs to completion.
+`INavigationAwareAsync` callbacks is cancelled when the page leaves the active position
+(covered, popped, replaced, or cleared) — even if the callback is still running. Honor
+the token: stop touching the page's dependencies once it fires. An `OperationCanceledException`
+caused by this lifecycle cancellation is treated as normal control flow, not an error.
 
 ### Cancellation
 
