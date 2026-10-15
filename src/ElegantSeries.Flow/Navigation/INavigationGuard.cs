@@ -23,10 +23,16 @@ public interface INavigationGuard
     /// <summary>
     /// Determines whether navigation away from the current ViewModel is allowed.
     /// </summary>
+    /// <param name="cancellationToken">
+    /// Signals that the navigation request was cancelled while the guard was running.
+    /// The guard should stop promptly when signalled; the navigation service stops
+    /// waiting for the guard once this token fires, but the guard task itself cannot
+    /// be force-aborted, so cooperative cancellation is the guard's responsibility.
+    /// </param>
     /// <returns>
     /// <see langword="true"/> to allow navigation; <see langword="false"/> to cancel it.
     /// </returns>
-    Task<bool> CanNavigateFromAsync();
+    Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -51,8 +57,14 @@ public interface INavigationGuardWithContext
     /// Determines whether navigation away from the current ViewModel is allowed.
     /// </summary>
     /// <param name="context">Describes the pending navigation.</param>
+    /// <param name="cancellationToken">
+    /// Signals that the navigation request was cancelled while the guard was running.
+    /// The guard should stop promptly when signalled; the navigation service stops
+    /// waiting for the guard once this token fires, but the guard task itself cannot
+    /// be force-aborted, so cooperative cancellation is the guard's responsibility.
+    /// </param>
     /// <returns>
     /// <see langword="true"/> to allow navigation; <see langword="false"/> to cancel it.
     /// </returns>
-    Task<bool> CanNavigateFromAsync(NavigationGuardContext context);
+    Task<bool> CanNavigateFromAsync(NavigationGuardContext context, CancellationToken cancellationToken);
 }

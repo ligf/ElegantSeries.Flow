@@ -90,6 +90,36 @@ internal sealed class FakeNavigationService : INavigationService
     public event Action<string>? RegionCacheCleared;
     public event Action<Exception>? SubscriberError;
 
+    public IDisposable SubscribeRegionNavigated(Action<string, INavigationViewModel> handler)
+    {
+        RegionNavigated += handler;
+        return new FakeSubscription(() => RegionNavigated -= handler);
+    }
+
+    public IDisposable SubscribeViewModelReleased(Action<string, INavigationViewModel> handler)
+    {
+        ViewModelReleased += handler;
+        return new FakeSubscription(() => ViewModelReleased -= handler);
+    }
+
+    public IDisposable SubscribeRegionCacheCleared(Action<string> handler)
+    {
+        RegionCacheCleared += handler;
+        return new FakeSubscription(() => RegionCacheCleared -= handler);
+    }
+
+    public IDisposable SubscribeSubscriberError(Action<Exception> handler)
+    {
+        SubscriberError += handler;
+        return new FakeSubscription(() => SubscriberError -= handler);
+    }
+
+    private sealed class FakeSubscription(Action unsubscribe) : IDisposable
+    {
+        private Action? _unsubscribe = unsubscribe;
+        public void Dispose() => Interlocked.Exchange(ref _unsubscribe, null)?.Invoke();
+    }
+
     public void RaiseSubscriberError(Exception ex)
         => SubscriberError?.Invoke(ex);
 

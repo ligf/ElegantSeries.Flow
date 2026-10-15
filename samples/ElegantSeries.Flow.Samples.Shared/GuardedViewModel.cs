@@ -32,7 +32,7 @@ public sealed partial class GuardedViewModel : BaseViewModel, INavigationGuard, 
 
     // Plain guard: no context — the veto rule is the same, but the message
     // cannot say where the navigation was headed.
-    public Task<bool> CanNavigateFromAsync()
+    public Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
     {
         if (!IsDirty)
             return Task.FromResult(true);
@@ -41,12 +41,12 @@ public sealed partial class GuardedViewModel : BaseViewModel, INavigationGuard, 
         return Task.FromResult(false);
     }
 
-    public Task<bool> CanNavigateFromAsync(NavigationGuardContext context)
+    public Task<bool> CanNavigateFromAsync(NavigationGuardContext context, CancellationToken cancellationToken)
     {
         // This method always wins when implemented (see the class doc); the
         // flag only selects which logic runs inside it.
         if (UsePlainGuard)
-            return CanNavigateFromAsync();
+            return CanNavigateFromAsync(cancellationToken);
 
         if (!IsDirty)
             return Task.FromResult(true);

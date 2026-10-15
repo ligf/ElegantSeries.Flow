@@ -59,7 +59,7 @@ public class StateMismatchGuardViewModel : NavigationViewModelBase, INavigationG
 {
     private bool _nestedDone;
 
-    public async Task<bool> CanNavigateFromAsync()
+    public async Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
     {
         if (!_nestedDone)
         {
@@ -132,7 +132,7 @@ public class GuardedViewModel : NavigationViewModelBase, INavigationGuard
 {
     public bool AllowNavigation { get; set; } = true;
 
-    public Task<bool> CanNavigateFromAsync()
+    public Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
     {
         return Task.FromResult(AllowNavigation);
     }
@@ -2020,7 +2020,7 @@ public class NavigationServiceTests
         public NavigationGuardContext? LastContext { get; private set; }
         public bool Allow { get; set; } = true;
 
-        public Task<bool> CanNavigateFromAsync(NavigationGuardContext context)
+        public Task<bool> CanNavigateFromAsync(NavigationGuardContext context, CancellationToken cancellationToken)
         {
             LastContext = context;
             return Task.FromResult(Allow);
@@ -2032,13 +2032,13 @@ public class NavigationServiceTests
         public bool PlainGuardCalled { get; private set; }
         public bool ContextGuardCalled { get; private set; }
 
-        public Task<bool> CanNavigateFromAsync()
+        public Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
         {
             PlainGuardCalled = true;
             return Task.FromResult(true);
         }
 
-        public Task<bool> CanNavigateFromAsync(NavigationGuardContext context)
+        public Task<bool> CanNavigateFromAsync(NavigationGuardContext context, CancellationToken cancellationToken)
         {
             ContextGuardCalled = true;
             return Task.FromResult(true);
@@ -2049,7 +2049,7 @@ public class NavigationServiceTests
     {
         public NavigationGuardContext? LastContext { get; private set; }
 
-        public Task<bool> CanNavigateFromAsync(NavigationGuardContext context)
+        public Task<bool> CanNavigateFromAsync(NavigationGuardContext context, CancellationToken cancellationToken)
         {
             LastContext = context;
             return Task.FromResult(true);
@@ -2792,6 +2792,76 @@ public class NavigationServiceTests
         }
 
         public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task Navigate_StateMismatchAbandonsAndReturnsFalse()
+    {
+        // If the stack top changes while the from-guard is running, the navigation
+        // must be abandoned (return false) and its speculatively created scope released.
+        StateMismatchTargetViewModel.DisposeCount = 0;
+
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<StateMismatchGuardViewModel>();
+        services.AddTransient<StateMismatchTargetViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<StateMismatchGuardViewModel>();
+        var guardVm = Assert.IsType<StateMismatchGuardViewModel>(nav.GetCurrentViewModel());
+
+        // First navigation blocks in the guard.
+        var firstNav = Task.Run(() => nav.NavigateToAsync<StateMismatchTargetViewModel>());
+        // Wait until the guard is actually running.
+        await guardVm.GuardEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Second navigation: guard lets it through immediately; stack top changes.
+        guardVm.AllowThrough = true;
+        var secondResult = await nav.NavigateToAsync<TestDetailViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(secondResult);
+
+        // Release the first guard; it must detect the mismatch and abandon.
+        guardVm.ReleaseGuard();
+        var firstResult = await firstNav.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(firstResult);
+        // The abandoned navigation's speculatively created scope was released, not leaked.
+        Assert.Equal(1, StateMismatchTargetViewModel.DisposeCount);
+        // Active page is the second navigation's target.
+        Assert.IsType<TestDetailViewModel>(nav.GetCurrentViewModel());
+    }
+
+    private sealed class StateMismatchGuardViewModel : NavigationViewModelBase, INavigationGuard
+    {
+        public readonly TaskCompletionSource GuardEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _guardRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public volatile bool AllowThrough;
+
+        public async Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
+        {
+            if (AllowThrough)
+            {
+                return true;
+            }
+
+            GuardEntered.TrySetResult();
+            await _guardRelease.Task.ConfigureAwait(false);
+            return true;
+        }
+
+        public void ReleaseGuard() => _guardRelease.TrySetResult();
+    }
+
+    private sealed class StateMismatchTargetViewModel : NavigationViewModelBase, IDisposable
+    {
+        public static int DisposeCount;
+
+        public void Dispose()
+        {
+            Interlocked.Increment(ref DisposeCount);
+        }
     }
 
     #endregion

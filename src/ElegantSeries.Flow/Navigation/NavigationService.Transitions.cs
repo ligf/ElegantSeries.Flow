@@ -13,7 +13,7 @@ public sealed partial class NavigationService
     /// complete before releasing its page scope anyway. Guards against a ViewModel
     /// that ignores its cancellation token blocking navigation forever.
     /// </summary>
-    private static readonly TimeSpan DisposalGateTimeout = TimeSpan.FromSeconds(5);
+    private TimeSpan DisposalGateTimeout => _options.DisposalGateTimeout;
 
     /// <summary>
     /// Tracks the entry whose async lifecycle callback is running on the current
