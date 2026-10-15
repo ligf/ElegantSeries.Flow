@@ -403,8 +403,24 @@ public sealed partial class NavigationService
     /// service was disposed concurrently). Exceptions are swallowed: a redundant scope must
     /// never break navigation.
     /// </summary>
-    private static async ValueTask DisposeScopeBestEffortAsync(IServiceScope scope)
+    /// <remarks>
+    /// Goes through the <see cref="_disposedScopes"/> exactly-once check like all other
+    /// disposal paths: callers must only pass scopes that were never tracked, but the
+    /// check makes a future misuse fail safe instead of double-disposing.
+    /// </remarks>
+    private async ValueTask DisposeScopeBestEffortAsync(IServiceScope scope)
     {
+        bool shouldDispose;
+        using (_stateLock.EnterScope())
+        {
+            shouldDispose = _disposedScopes.Add(scope);
+        }
+
+        if (!shouldDispose)
+        {
+            return;
+        }
+
         try
         {
             if (scope is IAsyncDisposable asyncScope)
