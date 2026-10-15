@@ -84,6 +84,75 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
     /// </summary>
     private readonly Lock _stateLock = new();
 
+    /// <summary>
+    /// Tracks deferred scope disposals (from reentrant navigation or sync APIs
+    /// that cannot block). Each task waits for its gate then disposes the scope.
+    /// Guarded by <see cref="_deferredLock"/>. <see cref="DisposeAsync"/> waits
+    /// for all tracked tasks.
+    /// </summary>
+    private readonly List<Task> _deferredDisposalTasks = [];
+    private readonly Lock _deferredLock = new();
+
+    /// <summary>
+    /// Defers a scope disposal until the given gate task completes, then disposes
+    /// the scope on the thread pool. The returned task is tracked so
+    /// <see cref="DisposeAsync"/> can wait for all deferred disposals.
+    /// </summary>
+    private void TrackDeferredDisposal(Task gateTask, IServiceScope scope, Action<Exception>? errorHandler)
+    {
+        var task = Task.Run(async () =>
+        {
+            try
+            {
+                await gateTask.ConfigureAwait(false);
+                if (scope is IAsyncDisposable asyncScope)
+                {
+                    await asyncScope.DisposeAsync().ConfigureAwait(false);
+                }
+                else
+                {
+                    scope.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                try { errorHandler?.Invoke(ex); }
+                catch { }
+            }
+            finally
+            {
+                using (_stateLock.EnterScope())
+                    _pendingScopeDisposals.Remove(scope);
+            }
+        });
+
+        lock (_deferredLock)
+        {
+            _deferredDisposalTasks.Add(task);
+            // Prune completed tasks to avoid unbounded growth.
+            if (_deferredDisposalTasks.Count > 32)
+            {
+                _deferredDisposalTasks.RemoveAll(t => t.IsCompleted);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Waits for all tracked deferred disposals to complete.
+    /// </summary>
+    private async Task WaitForDeferredDisposalsAsync()
+    {
+        Task[] tasks;
+        lock (_deferredLock)
+        {
+            tasks = [.. _deferredDisposalTasks];
+        }
+        if (tasks.Length > 0)
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+    }
+
     private bool _disposed;
 
     // ────────────────────────────── Events ──────────────────────────────
@@ -174,6 +243,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
             throw new OperationCanceledException(cancellationToken);
         }
 
+        CancellationTokenSource? retiredCts = null;
         try
         {
             // No page scope is created on this path, so cancellation before the pop
@@ -209,7 +279,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
             // The reactivated entry gets a fresh lifecycle token: its previous CTS
             // was cancelled when it was covered. In-flight callbacks from the old
             // cycle remain tracked and are not forgotten.
-            previous.ResetLifecycle();
+            // The retired CTS is cancelled after the navigation lock is released:
+            // Cancel() invokes user callbacks synchronously and must not run
+            // while holding locks (deadlock risk).
+            retiredCts = previous.BeginNewActivation();
             AttachNavigation(previous.ViewModel);
             QueueActivate(previous, previous.Parameter, work);
             QueueRegionNavigatedEvent(regionName, previous.ViewModel, work);
@@ -221,8 +294,11 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
             _navigationLock.Release();
         }
 
+        // Cancel outside the lock (see above).
         if (success)
         {
+            NavigationEntry.CancelOutsideLocks(retiredCts);
+            work.CancelQueuedCts();
             await RunTransitionAsync(work).ConfigureAwait(false);
         }
 
@@ -479,6 +555,14 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
     /// <remarks>
     /// Best-effort: every page scope is attempted even if one of them throws.
     /// Collected exceptions are rethrown after cleanup and events.
+    /// <para>
+    /// Lifecycle contract: all page lifecycle tokens are cancelled before scopes
+    /// are released, but this method does NOT wait for in-flight async lifecycle
+    /// callbacks to complete (blocking would risk deadlock on UI threads).
+    /// Callers must ensure their <c>INavigationAwareAsync</c> callbacks observe
+    /// cancellation promptly and stop touching page dependencies once cancelled.
+    /// For a guaranteed wait, use <see cref="DisposeAsync"/> instead.
+    /// </para>
     /// </remarks>
     public void Dispose()
     {
@@ -554,15 +638,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
             _disposed = true;
 
-            // Cancel every entry's lifecycle token: this is a terminal navigation —
-            // no page will become active again. In-flight callbacks observe the
-            // cancellation and should stop touching their scopes.
+            // Collect entries to cancel AFTER the lock is released: Cancel()
+            // invokes user callbacks synchronously and must not run while
+            // holding locks (deadlock risk).
             entriesToCancel = CollectAllEntriesLocked();
-            foreach (var entry in entriesToCancel)
-            {
-                try { entry.LifecycleCts.Cancel(); }
-                catch (ObjectDisposedException) { }
-            }
 
             targets = TakeAllScopesForDisposal();
             foreach (var target in targets)
@@ -573,6 +652,14 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         finally
         {
             _navigationLock.Release();
+        }
+
+        // Cancel tokens outside the lock (see above). This is a terminal navigation —
+        // no page will become active again. In-flight callbacks observe the
+        // cancellation and should stop touching their scopes.
+        foreach (var entry in entriesToCancel)
+        {
+            NavigationEntry.CancelOutsideLocks(entry.LifecycleCts);
         }
 
         // Wait for in-flight lifecycle callbacks to finish (with timeout) before
@@ -609,6 +696,11 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         // blocking on another page's disposal. See Dispose() for why the lock itself
         // is not disposed.
         await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
+
+        // Wait for deferred disposals (e.g. from reentrant navigation): their scopes
+        // were not in the targets above because the entries were already detached.
+        await WaitForDeferredDisposalsAsync().ConfigureAwait(false);
+
         QueueCacheClearedEvents(targets, pendingEvents);
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
 

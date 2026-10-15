@@ -2691,5 +2691,50 @@ public class NavigationServiceTests
         Assert.True(vm.LeaveCompleted);
     }
 
+    [Fact]
+    public async Task Refresh_CancelCallbackMustNotDeadlock()
+    {
+        // A cancellation callback that reenters the navigation service must not
+        // deadlock: Cancel() runs outside the navigation locks.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ReentrantCancelViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<ReentrantCancelViewModel>();
+        var vm = Assert.IsType<ReentrantCancelViewModel>(nav.GetCurrentViewModel());
+        vm.EnableReentrantCancel(nav);
+
+        // Refresh triggers BeginNewActivation -> Cancel() outside locks.
+        // If Cancel ran while holding the lock, the reentrant ClearCache would deadlock.
+        var result = await nav.NavigateToAsync<ReentrantCancelViewModel>(refreshIfActive: true)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(result);
+        Assert.True(vm.CancelCallbackRan);
+    }
+
+    private sealed class ReentrantCancelViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        private INavigationService? _nav;
+        public bool CancelCallbackRan { get; private set; }
+
+        public void EnableReentrantCancel(INavigationService nav) => _nav = nav;
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            // Register a callback that reenters the service (takes the navigation lock).
+            cancellationToken.Register(() =>
+            {
+                CancelCallbackRan = true;
+                // This would deadlock if Cancel() ran while holding _navigationLock.
+                _nav?.ClearCache("MainRegion");
+            });
+            return Task.CompletedTask;
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
     #endregion
 }

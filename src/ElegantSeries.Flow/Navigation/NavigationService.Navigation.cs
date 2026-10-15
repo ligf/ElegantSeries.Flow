@@ -101,6 +101,7 @@ public sealed partial class NavigationService
             INavigationViewModel? fastVm = null;
             NavigationEntry? fastEntry = null;
             bool fastRefresh = false;
+            CancellationTokenSource? fastRetiredCts = null;
 
             await _navigationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
@@ -122,10 +123,12 @@ public sealed partial class NavigationService
                                 // slot, mode and page scope. The entry's in-flight
                                 // tracking (counter + gate) and lifecycle state stay
                                 // with the page, so an in-progress activation remains
-                                // tracked and its token is cancelled by the new cycle.
+                                // tracked. The retired CTS is cancelled after locks are
+                                // released (Cancel invokes user callbacks; must not
+                                // run while holding locks).
                                 // Only the parameter is updated.
                                 peeked.Parameter = parameter;
-                                peeked.BeginNewActivation();
+                                fastRetiredCts = peeked.BeginNewActivation();
                                 fastEntry = peeked;
                             }
                         }
@@ -146,8 +149,15 @@ public sealed partial class NavigationService
                 _navigationLock.Release();
             }
 
+            // Cancel the retired CTS outside locks.
+            if (fastRetiredCts is not null)
+            {
+                NavigationEntry.CancelOutsideLocks(fastRetiredCts);
+            }
+
             if (fastVm is not null)
             {
+                fastWork.CancelQueuedCts();
                 await RunTransitionAsync(fastWork).ConfigureAwait(false);
                 return true;
             }
@@ -254,6 +264,10 @@ public sealed partial class NavigationService
         NavigationEntry? pushedEntry = null;
         NavigationEntry? refreshEntry = null;
         NavigationEntry? reactivatedEntry = null;
+        // Retired CTSs to cancel after the navigation lock is released.
+        // Cancel() invokes user callbacks synchronously and must not run
+        // while holding locks (deadlock risk).
+        List<CancellationTokenSource> retiredCtsList = [];
 
         try
         {
@@ -311,11 +325,11 @@ public sealed partial class NavigationService
                                 // mode and its page scope; only the activation callbacks
                                 // run again. The entry is reused (not swapped) so its
                                 // in-flight tracking and lifecycle state stay with the
-                                // page; the parameter is updated in place and a new
-                                // activation cycle cancels the previous one.
+                                // page; the parameter is updated in place. The retired
+                                // CTS is cancelled after locks are released (see below).
                                 var current = stack.Peek();
                                 current.Parameter = parameter;
-                                current.BeginNewActivation();
+                                retiredCtsList.Add(current.BeginNewActivation());
                                 refreshEntry = current;
                             }
 
@@ -353,10 +367,10 @@ public sealed partial class NavigationService
                                 // Reuse the entry so re-activation carries the new
                                 // parameter; the ViewModel instance, page scope, mode,
                                 // in-flight tracking and lifecycle state are preserved.
-                                // A new activation cycle cancels the previous one.
+                                // The retired CTS is cancelled after locks are released.
                                 var target = stack.Peek();
                                 target.Parameter = parameter;
-                                target.BeginNewActivation();
+                                retiredCtsList.Add(target.BeginNewActivation());
                                 reactivatedEntry = target;
 
                                 success = true;
@@ -503,6 +517,14 @@ public sealed partial class NavigationService
             _navigationLock.Release();
         }
 
+        // Cancel retired CTSs outside the lock: Cancel() invokes user callbacks
+        // synchronously and must not run while holding locks (deadlock risk).
+        // Exceptions are swallowed; the navigation state was already committed.
+        foreach (var cts in retiredCtsList)
+        {
+            NavigationEntry.CancelOutsideLocks(cts);
+        }
+
         // A scope resolved but never pushed is owned by nobody: release it best-effort
         // without disturbing the navigation outcome.
         if (scopeToRelease is not null)
@@ -526,6 +548,9 @@ public sealed partial class NavigationService
         {
             return false;
         }
+
+        // Cancel queued CTSs now that the lock is released (see TransitionWork).
+        work.CancelQueuedCts();
 
         await RunTransitionAsync(work).ConfigureAwait(false);
 

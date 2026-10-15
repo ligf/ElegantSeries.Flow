@@ -270,6 +270,13 @@ public interface INavigationService
     /// APIs. Use <see cref="ClearCacheAsync"/> when pages need asynchronous cleanup.
     /// </para>
     /// <para>
+    /// Lifecycle contract: cached pages' lifecycle tokens are cancelled, but this
+    /// method does NOT wait for in-flight async lifecycle callbacks (e.g. a running
+    /// <c>OnNavigatedFromAsync</c>) to complete. Callers must ensure their callbacks
+    /// observe cancellation promptly. Use <see cref="ClearCacheAsync"/> to wait
+    /// for in-flight callbacks with a timeout.
+    /// </para>
+    /// <para>
     /// This method blocks until any in-flight navigation transition releases the
     /// navigation lock. Prefer <see cref="ClearCacheAsync"/> on UI threads to avoid
     /// stalling the interface.
