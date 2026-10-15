@@ -280,9 +280,9 @@ public sealed partial class NavigationService
                     // but be safe): dispose inline.
                     await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false);
                 }
-                // The scope stays in _pendingScopeDisposals until the deferred
-                // disposal runs; TrackDeferredDisposal removes it afterwards.
-                // (Removal is handled by the deferred task's continuation.)
+                // Ownership transfers atomically to the deferred task: TrackDeferredDisposal
+                // removes the scope from _pendingScopeDisposals, so a concurrent Dispose/
+                // DisposeAsync cannot collect and double-dispose it.
             }
             else
             {

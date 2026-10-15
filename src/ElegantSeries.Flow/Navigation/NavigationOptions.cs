@@ -22,7 +22,14 @@ public sealed class NavigationOptions
     /// when ViewModels are known to honor cancellation promptly.
     /// </para>
     /// </remarks>
-    public TimeSpan DisposalGateTimeout { get; set; } = TimeSpan.FromSeconds(5);
+    public TimeSpan DisposalGateTimeout
+    {
+        get => _disposalGateTimeout;
+        set => _disposalGateTimeout = value > TimeSpan.Zero
+            ? value
+            : throw new ArgumentOutOfRangeException(nameof(value), "DisposalGateTimeout must be positive.");
+    }
+    private TimeSpan _disposalGateTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// How long synchronous APIs (<c>ClearCache</c>, <c>ClearAllCache</c>, <c>Dispose</c>)
@@ -41,5 +48,12 @@ public sealed class NavigationOptions
     /// legitimately take much longer.
     /// </para>
     /// </remarks>
-    public TimeSpan SyncLockTimeout { get; set; } = TimeSpan.FromSeconds(2);
+    public TimeSpan SyncLockTimeout
+    {
+        get => _syncLockTimeout;
+        set => _syncLockTimeout = value > TimeSpan.Zero
+            ? value
+            : throw new ArgumentOutOfRangeException(nameof(value), "SyncLockTimeout must be positive.");
+    }
+    private TimeSpan _syncLockTimeout = TimeSpan.FromSeconds(2);
 }

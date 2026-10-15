@@ -77,6 +77,12 @@ public sealed partial class NavigationService
             var completed = await Task.WhenAny(guardTask, Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)).ConfigureAwait(false);
             if (!ReferenceEquals(completed, guardTask))
             {
+                // The guard is still running; observe its eventual exception so it
+                // doesn't surface as UnobservedTaskException. The navigation is
+                // cancelled regardless of the guard's eventual result.
+                _ = guardTask.ContinueWith(
+                    t => { try { SubscriberError?.Invoke(t.Exception!.InnerException ?? t.Exception!); } catch { } },
+                    TaskContinuationOptions.OnlyOnFaulted);
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
