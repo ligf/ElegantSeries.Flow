@@ -108,6 +108,13 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     private readonly Lock _stateLock = new();
 
     /// <summary>
+    /// Scopes that have been disposed (or collected for disposal by Dispose/DisposeAsync).
+    /// Ensures exactly-once disposal when deferred tasks race with Dispose.
+    /// Guarded by <see cref="_stateLock"/>.
+    /// </summary>
+    private readonly HashSet<IServiceScope> _disposedScopes = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
     /// Tracks deferred scope disposals (from reentrant navigation or sync APIs
     /// that cannot block). Each task waits for its gate then disposes the scope.
     /// Guarded by <see cref="_deferredLock"/>. <see cref="DisposeAsync"/> waits
@@ -125,22 +132,11 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     {
         // Atomic ownership transfer: remove the scope from _pendingScopeDisposals
         // so that TakeAllScopesForDisposal (Dispose/DisposeAsync) cannot collect it.
-        // The deferred task becomes the sole owner. Without this, a concurrent
-        // Dispose could dispose the scope while the deferred task still holds it
-        // (double disposal).
-        bool wasPending;
+        // The deferred task becomes the primary owner. If Dispose already collected
+        // it (race), the task's _disposedScopes check skips the second disposal.
         using (_stateLock.EnterScope())
         {
-            wasPending = _pendingScopeDisposals.Remove(scope);
-        }
-
-        // If the scope was not pending and the service is disposed, Dispose() already
-        // collected and disposed it — do not create a second owner.
-        // (_disposed is written under _navigationLock; this is a best-effort check
-        // for a narrow race. The atomic remove above is the primary protection.)
-        if (!wasPending && Volatile.Read(ref _disposed))
-        {
-            return;
+            _pendingScopeDisposals.Remove(scope);
         }
 
         var task = Task.Run(async () =>
@@ -148,13 +144,24 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             try
             {
                 await gateTask.ConfigureAwait(false);
-                if (scope is IAsyncDisposable asyncScope)
+
+                bool shouldDispose;
+                using (_stateLock.EnterScope())
                 {
-                    await asyncScope.DisposeAsync().ConfigureAwait(false);
+                    // Exactly-once: skip if Dispose/DisposeAsync already took it.
+                    shouldDispose = _disposedScopes.Add(scope);
                 }
-                else
+
+                if (shouldDispose)
                 {
-                    scope.Dispose();
+                    if (scope is IAsyncDisposable asyncScope)
+                    {
+                        await asyncScope.DisposeAsync().ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        scope.Dispose();
+                    }
                 }
             }
             catch (Exception ex)

@@ -27,7 +27,7 @@ public sealed class NavigationOptions
         get => _disposalGateTimeout;
         set => _disposalGateTimeout = value > TimeSpan.Zero
             ? value
-            : throw new ArgumentOutOfRangeException(nameof(value), "DisposalGateTimeout must be positive.");
+            : throw new ArgumentOutOfRangeException(nameof(DisposalGateTimeout), "DisposalGateTimeout must be positive.");
     }
     private TimeSpan _disposalGateTimeout = TimeSpan.FromSeconds(5);
 
@@ -53,7 +53,7 @@ public sealed class NavigationOptions
         get => _syncLockTimeout;
         set => _syncLockTimeout = value > TimeSpan.Zero
             ? value
-            : throw new ArgumentOutOfRangeException(nameof(value), "SyncLockTimeout must be positive.");
+            : throw new ArgumentOutOfRangeException(nameof(SyncLockTimeout), "SyncLockTimeout must be positive.");
     }
     private TimeSpan _syncLockTimeout = TimeSpan.FromSeconds(2);
 }
