@@ -16,7 +16,16 @@ public sealed partial class NavigationService
     /// </summary>
     private List<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>> RemoveRegionCacheEntriesLocked(string regionName)
     {
-        var keysToRemove = _keepAliveCache.Keys.Where(k => k.Region == regionName).ToList();
+        // Hand-written loop: avoids LINQ allocation/closure while holding _stateLock.
+        List<(string Region, Type ViewModelType)> keysToRemove = [];
+        foreach (var key in _keepAliveCache.Keys)
+        {
+            if (key.Region == regionName)
+            {
+                keysToRemove.Add(key);
+            }
+        }
+
         List<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>> removed = [];
         foreach (var key in keysToRemove)
         {

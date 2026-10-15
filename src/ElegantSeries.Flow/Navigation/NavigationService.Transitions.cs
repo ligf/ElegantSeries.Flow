@@ -155,6 +155,15 @@ public sealed partial class NavigationService
             catch (Exception ex) { work.Errors.Add(ex); }
         }
 
+        // Navigation property notifications: PropertyChanged handlers are user code
+        // and run outside the navigation lock (a handler that reenters the service
+        // would deadlock if run under the lock).
+        foreach (var vm in work.NavigationChangedNotifications)
+        {
+            try { vm.RaiseNavigationChanged(); }
+            catch (Exception ex) { work.Errors.Add(ex); }
+        }
+
         RaiseEvents(work.Events, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(work.Errors);
     }
@@ -183,7 +192,7 @@ public sealed partial class NavigationService
     /// <param name="work">The transition work list to append to.</param>
     private void QueueDeactivation(NavigationEntry entry, bool destroy, bool notifyLifecycle, TransitionWork work)
     {
-        DetachNavigation(entry.ViewModel);
+        DetachNavigation(entry.ViewModel, work);
 
         // The entry is leaving the active position: its token must be cancelled.
         // Deferred until after the navigation lock is released: Cancel() invokes
@@ -406,14 +415,24 @@ public sealed partial class NavigationService
     /// <summary>
     /// Clears the navigation service reference of a ViewModel that is no longer active.
     /// </summary>
-    private static void DetachNavigation(INavigationViewModel viewModel)
-        => viewModel.Navigation = null;
+    private static void DetachNavigation(INavigationViewModel viewModel, TransitionWork work)
+    {
+        // Set silently under the lock; PropertyChanged handlers are user code and
+        // must not run while holding the navigation lock (deadlock risk if a
+        // handler reenters the service). The notification is queued for after
+        // the lock is released.
+        viewModel.SetNavigationSilent(null);
+        work.NavigationChangedNotifications.Add(viewModel);
+    }
 
     /// <summary>
     /// Attaches this navigation service to the newly activated ViewModel.
     /// </summary>
-    private void AttachNavigation(INavigationViewModel viewModel)
-        => viewModel.Navigation = this;
+    private void AttachNavigation(INavigationViewModel viewModel, TransitionWork work)
+    {
+        viewModel.SetNavigationSilent(this);
+        work.NavigationChangedNotifications.Add(viewModel);
+    }
 
     // ────────────────────── Nested types ──────────────────────
 
@@ -441,6 +460,12 @@ public sealed partial class NavigationService
         /// run while holding locks (deadlock risk).
         /// </summary>
         public List<CancellationTokenSource> CtsToCancel { get; } = [];
+
+        /// <summary>
+        /// ViewModels whose Navigation property changed under the lock.
+        /// PropertyChanged handlers are user code and must run outside the lock.
+        /// </summary>
+        public List<INavigationViewModel> NavigationChangedNotifications { get; } = [];
 
         /// <summary>
         /// Cancels all queued CTSs outside of locks. Exceptions from user

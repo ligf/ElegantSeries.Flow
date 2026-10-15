@@ -381,7 +381,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             // Cancel() invokes user callbacks synchronously and must not run
             // while holding locks (deadlock risk).
             retiredCts = previous.BeginNewActivation();
-            AttachNavigation(previous.ViewModel);
+            AttachNavigation(previous.ViewModel, work);
             QueueActivate(previous, previous.Parameter, work);
             QueueRegionNavigatedEvent(regionName, previous.ViewModel, work);
 
@@ -398,6 +398,16 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             NavigationEntry.CancelOutsideLocks(retiredCts);
             work.CancelQueuedCts();
             await RunTransitionAsync(work).ConfigureAwait(false);
+        }
+        else
+        {
+            // Fire queued PropertyChanged notifications: silent sets happened
+            // under the lock, but RunTransitionAsync won't run.
+            foreach (var vm in work.NavigationChangedNotifications)
+            {
+                try { vm.RaiseNavigationChanged(); }
+                catch { }
+            }
         }
 
         return success;
@@ -723,7 +733,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             targets = TakeAllScopesForDisposal();
             foreach (var target in targets)
             {
-                DetachNavigation(target.ViewModel);
+                // Terminal shutdown: set silently, no PropertyChanged notification needed.
+                target.ViewModel.SetNavigationSilent(null);
             }
         }
         finally
@@ -788,7 +799,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             targets = TakeAllScopesForDisposal();
             foreach (var target in targets)
             {
-                DetachNavigation(target.ViewModel);
+                // Terminal shutdown: set silently, no PropertyChanged notification needed.
+                target.ViewModel.SetNavigationSilent(null);
             }
         }
         finally

@@ -39,6 +39,7 @@ public sealed class AvaloniaDispatcher : IDispatcher
     public void Post(Action action)
     {
         ArgumentNullException.ThrowIfNull(action);
-        _dispatcher.Post(action);
+        // View switching is user-visible; prioritize above input handling.
+        _dispatcher.Post(action, DispatcherPriority.Render);
     }
 }
