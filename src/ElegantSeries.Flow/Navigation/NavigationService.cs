@@ -359,6 +359,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
         List<ScopeDisposalTarget> targets;
+        var ctsToCancel = new List<CancellationTokenSource>();
 
         // Serialized with navigation transitions: otherwise a concurrent navigation
         // could adopt a cache entry whose scope this call is about to dispose.
@@ -376,13 +377,20 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
                 // Signal in-flight callbacks to stop. Sync ClearCache cannot wait
                 // for async callbacks without risking deadlock, but it must cancel
                 // their tokens before the scopes are released below.
-                CancelAndCollectGates(removed.Select(kv => kv.Value));
+                // CTSs are cancelled after the lock is released (see below).
+                CancelAndCollectGates(removed.Select(kv => kv.Value), ctsToCancel);
                 targets = TakeCacheEntriesForDisposalLocked(removed);
             }
         }
         finally
         {
             _navigationLock.Release();
+        }
+
+        // Cancel outside the lock: Cancel() invokes user callbacks synchronously.
+        foreach (var cts in ctsToCancel)
+        {
+            NavigationEntry.CancelOutsideLocks(cts);
         }
 
         // Scope disposal runs outside the lock; the entries are already detached above.
@@ -404,6 +412,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         // Serialized with navigation transitions (see ClearCache).
         _navigationLock.Wait();
         List<ScopeDisposalTarget> targets;
+        var ctsToCancel = new List<CancellationTokenSource>();
         try
         {
             if (_disposed)
@@ -413,7 +422,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
             targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries);
             // Signal in-flight callbacks to stop (sync path cannot wait).
-            CancelAndCollectGates(removedEntries);
+            // Cancelled after lock release (see below).
+            CancelAndCollectGates(removedEntries, ctsToCancel);
             foreach (var region in affectedRegions)
             {
                 var capturedRegion = region;
@@ -423,6 +433,12 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         finally
         {
             _navigationLock.Release();
+        }
+
+        // Cancel outside the lock.
+        foreach (var cts in ctsToCancel)
+        {
+            NavigationEntry.CancelOutsideLocks(cts);
         }
 
         DisposeScopesSync(targets, pendingEvents, errors);
@@ -443,6 +459,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         var errors = new List<Exception>();
         List<ScopeDisposalTarget> targets;
         List<Task> gates;
+        var ctsToCancel = new List<CancellationTokenSource>();
 
         // Serialized with navigation transitions: otherwise a concurrent navigation
         // could adopt a cache entry whose scope this call is about to dispose.
@@ -457,13 +474,19 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
             using (_stateLock.EnterScope())
             {
                 var removed = RemoveRegionCacheEntriesLocked(regionName);
-                gates = CancelAndCollectGates(removed.Select(kv => kv.Value));
+                gates = CancelAndCollectGates(removed.Select(kv => kv.Value), ctsToCancel);
                 targets = TakeCacheEntriesForDisposalLocked(removed);
             }
         }
         finally
         {
             _navigationLock.Release();
+        }
+
+        // Cancel outside the lock: Cancel() invokes user callbacks synchronously.
+        foreach (var cts in ctsToCancel)
+        {
+            NavigationEntry.CancelOutsideLocks(cts);
         }
 
         // Wait for in-flight lifecycle callbacks (with timeout) before releasing
@@ -506,6 +529,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         await _navigationLock.WaitAsync().ConfigureAwait(false);
         List<ScopeDisposalTarget> targets;
         List<Task> gates;
+        var ctsToCancel = new List<CancellationTokenSource>();
         try
         {
             if (_disposed)
@@ -514,7 +538,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
             }
 
             targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries);
-            gates = CancelAndCollectGates(removedEntries);
+            gates = CancelAndCollectGates(removedEntries, ctsToCancel);
             foreach (var region in affectedRegions)
             {
                 var capturedRegion = region;
@@ -524,6 +548,12 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         finally
         {
             _navigationLock.Release();
+        }
+
+        // Cancel outside the lock.
+        foreach (var cts in ctsToCancel)
+        {
+            NavigationEntry.CancelOutsideLocks(cts);
         }
 
         // Wait for in-flight callbacks (with timeout) before releasing scopes.
@@ -571,6 +601,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
         List<ScopeDisposalTarget> targets;
+        List<CancellationTokenSource> ctsToCancel = [];
 
         _navigationLock.Wait();
         try
@@ -582,12 +613,14 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
             _disposed = true;
 
-            // Cancel lifecycle tokens BEFORE taking scopes: TakeAllScopesForDisposal
+            // Collect CTSs BEFORE taking scopes: TakeAllScopesForDisposal
             // clears the stacks, after which the entries are no longer findable.
-            // Sync Dispose cannot wait for async callbacks (blocking would risk
-            // deadlock on UI threads), but it must signal them to stop before
+            // They are cancelled after the lock is released (see below): Cancel()
+            // invokes user callbacks synchronously and must not run while holding
+            // locks. Sync Dispose cannot wait for async callbacks (blocking would
+            // risk deadlock on UI threads), but it must signal them to stop before
             // their scopes are released below.
-            CancelAllLifecycleTokensLocked();
+            ctsToCancel = CollectAllLifecycleCtsLocked();
 
             targets = TakeAllScopesForDisposal();
             foreach (var target in targets)
@@ -598,6 +631,12 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         finally
         {
             _navigationLock.Release();
+        }
+
+        // Cancel outside the lock.
+        foreach (var cts in ctsToCancel)
+        {
+            NavigationEntry.CancelOutsideLocks(cts);
         }
 
         // Page-scope disposal executes arbitrary user code, so it runs outside
