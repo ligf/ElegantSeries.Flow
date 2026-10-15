@@ -97,13 +97,14 @@ public sealed partial class NavigationService
     /// (before the entries are detached). The caller waits for the gates outside
     /// the lock, then disposes the scopes.
     /// </summary>
-    private static List<Task> CancelAndCollectGates(IEnumerable<NavigationEntry> entries)
+    private static List<Task> CancelAndCollectGates(IEnumerable<NavigationEntry> entries, List<CancellationTokenSource> ctsToCancel)
     {
         var gates = new List<Task>();
         foreach (var entry in entries)
         {
-            try { entry.LifecycleCts.Cancel(); }
-            catch (ObjectDisposedException) { }
+            // Defer Cancel() until after locks are released: it invokes user
+            // callbacks synchronously which may reenter the service (deadlock).
+            ctsToCancel.Add(entry.LifecycleCts);
             var gate = entry.InFlightGateTask;
             if (gate is not null && !gate.IsCompleted)
             {
@@ -238,18 +239,21 @@ public sealed partial class NavigationService
     }
 
     /// <summary>
-    /// Cancels the lifecycle token of every tracked entry. Called by sync
-    /// <see cref="NavigationService.Dispose"/> (which cannot wait for async
-    /// callbacks) to signal in-flight work to stop before scopes are released.
-    /// Must be called while holding the navigation lock.
+    /// Collects the lifecycle CTS of every tracked entry for cancellation outside
+    /// the lock. Called by sync <see cref="NavigationService.Dispose"/> (which
+    /// cannot wait for async callbacks) to signal in-flight work to stop before
+    /// scopes are released. Must be called while holding the navigation lock;
+    /// the returned sources must be cancelled after the lock is released via
+    /// <see cref="NavigationEntry.CancelOutsideLocks"/>.
     /// </summary>
-    private void CancelAllLifecycleTokensLocked()
+    private List<CancellationTokenSource> CollectAllLifecycleCtsLocked()
     {
+        var list = new List<CancellationTokenSource>();
         foreach (var entry in CollectAllEntriesLocked())
         {
-            try { entry.LifecycleCts.Cancel(); }
-            catch (ObjectDisposedException) { }
+            list.Add(entry.LifecycleCts);
         }
+        return list;
     }
 
     private List<ScopeDisposalTarget> TakeAllScopesForDisposal()

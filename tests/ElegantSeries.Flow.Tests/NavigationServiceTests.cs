@@ -2714,12 +2714,63 @@ public class NavigationServiceTests
         Assert.True(vm.CancelCallbackRan);
     }
 
+    [Fact]
+    public async Task ClearCache_CancelCallbackMustNotDeadlock()
+    {
+        // A KeepAlive entry's cancel callback that reenters ClearCache must not
+        // deadlock: ClearCache collects CTSs under the lock and cancels after release.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ReentrantCancelViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<ReentrantCancelViewModel>(mode: NavigationMode.KeepAlive);
+        var vm = Assert.IsType<ReentrantCancelViewModel>(nav.GetCurrentViewModel());
+        vm.EnableReentrantCancel(nav);
+
+        // ClearCache cancels the KeepAlive entry's token; the callback reenters ClearCache.
+        // If Cancel ran while holding _navigationLock, this would deadlock.
+        var clearTask = Task.Run(() => nav.ClearCache("MainRegion"));
+        await clearTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(vm.CancelCallbackRan);
+    }
+
+    [Fact]
+    public async Task Dispose_CancelCallbackMustNotDeadlock()
+    {
+        // A cancel callback that reenters Dispose must not deadlock: sync Dispose
+        // collects CTSs under the lock and cancels after release.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ReentrantCancelViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<ReentrantCancelViewModel>();
+        var vm = Assert.IsType<ReentrantCancelViewModel>(nav.GetCurrentViewModel());
+        vm.EnableReentrantDispose(nav);
+
+        // Dispose cancels the entry's token; the callback reenters Dispose.
+        // If Cancel ran while holding _navigationLock, this would deadlock.
+        var disposeTask = Task.Run(() => ((IDisposable)nav).Dispose());
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(vm.CancelCallbackRan);
+    }
+
     private sealed class ReentrantCancelViewModel : NavigationViewModelBase, INavigationAwareAsync
     {
         private INavigationService? _nav;
+        private bool _reenterDispose;
         public bool CancelCallbackRan { get; private set; }
 
         public void EnableReentrantCancel(INavigationService nav) => _nav = nav;
+
+        public void EnableReentrantDispose(INavigationService nav)
+        {
+            _nav = nav;
+            _reenterDispose = true;
+        }
 
         public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
         {
@@ -2728,7 +2779,14 @@ public class NavigationServiceTests
             {
                 CancelCallbackRan = true;
                 // This would deadlock if Cancel() ran while holding _navigationLock.
-                _nav?.ClearCache("MainRegion");
+                if (_reenterDispose)
+                {
+                    ((IDisposable?)_nav)?.Dispose();
+                }
+                else
+                {
+                    _nav?.ClearCache("MainRegion");
+                }
             });
             return Task.CompletedTask;
         }
