@@ -2864,5 +2864,90 @@ public class NavigationServiceTests
         }
     }
 
+    [Fact]
+    public async Task DisposeAsync_DuringDeferredDisposal_DisposesScopeExactlyOnce()
+    {
+        // A scope transferred to deferred disposal (self-dispose via reentrant
+        // navigation) must not be collected by TakeAllScopesForDisposal: otherwise
+        // DisposeAsync and the deferred task would double-dispose it.
+        // Scenario: KeepAlive page in stack+cache -> ClearCache moves scope to
+        // _pendingScopeDisposals -> reentrant navigation removes last stack ref
+        // (deferred disposal takes ownership) -> concurrent DisposeAsync.
+        DeferredDisposeViewModel.DisposeCount = 0;
+
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<DeferredDisposeViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<DeferredDisposeViewModel>(mode: NavigationMode.KeepAlive);
+        var vm = Assert.IsType<DeferredDisposeViewModel>(nav.GetCurrentViewModel());
+        vm.SetNavigation(nav);
+
+        // Cache cleared while still referenced by the stack: scope enters pending.
+        nav.ClearCache("MainRegion");
+
+        // Start navigating away; the async OnNavigatedFrom blocks and triggers
+        // a reentrant Replace that destroys this page while its callback runs
+        // (self-dispose -> deferred disposal takes ownership).
+        var navTask = Task.Run(() => nav.NavigateToAsync<TestDetailViewModel>());
+        await vm.CallbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The reentrant navigation has run; the scope is now under deferred disposal.
+        // DisposeAsync must not collect it (would double-dispose when the deferred
+        // task fires). It waits for the deferred task instead.
+        var disposeTask = Task.Run(async () =>
+        {
+            await ((IAsyncDisposable)nav).DisposeAsync();
+        });
+
+        // Let the callback finish; both paths now complete.
+        vm.ReleaseCallback();
+        await navTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(1, DeferredDisposeViewModel.DisposeCount);
+    }
+
+    private sealed class DeferredDisposeViewModel : NavigationViewModelBase, INavigationAwareAsync, IDisposable
+    {
+        public static int DisposeCount;
+        public readonly TaskCompletionSource CallbackEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private INavigationService? _nav;
+        private bool _reentered;
+
+        public void SetNavigation(INavigationService nav) => _nav = nav;
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            await Task.CompletedTask;
+        }
+
+        public async Task OnNavigatedFromAsync(CancellationToken cancellationToken)
+        {
+            if (!_reentered)
+            {
+                _reentered = true;
+                CallbackEntered.TrySetResult();
+                // Reentrant navigation destroying this page while its callback runs.
+                if (_nav is not null)
+                {
+                    await _nav.NavigateToAsync<TestDetailViewModel>(mode: NavigationMode.Replace);
+                }
+            }
+            await _release.Task.ConfigureAwait(false);
+        }
+
+        public void ReleaseCallback() => _release.TrySetResult();
+
+        public void Dispose()
+        {
+            Interlocked.Increment(ref DisposeCount);
+        }
+    }
+
     #endregion
 }

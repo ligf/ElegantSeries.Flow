@@ -123,6 +123,26 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// </summary>
     private void TrackDeferredDisposal(Task gateTask, IServiceScope scope, Action<Exception>? errorHandler)
     {
+        // Atomic ownership transfer: remove the scope from _pendingScopeDisposals
+        // so that TakeAllScopesForDisposal (Dispose/DisposeAsync) cannot collect it.
+        // The deferred task becomes the sole owner. Without this, a concurrent
+        // Dispose could dispose the scope while the deferred task still holds it
+        // (double disposal).
+        bool wasPending;
+        using (_stateLock.EnterScope())
+        {
+            wasPending = _pendingScopeDisposals.Remove(scope);
+        }
+
+        // If the scope was not pending and the service is disposed, Dispose() already
+        // collected and disposed it — do not create a second owner.
+        // (_disposed is written under _navigationLock; this is a best-effort check
+        // for a narrow race. The atomic remove above is the primary protection.)
+        if (!wasPending && Volatile.Read(ref _disposed))
+        {
+            return;
+        }
+
         var task = Task.Run(async () =>
         {
             try
@@ -142,11 +162,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 try { errorHandler?.Invoke(ex); }
                 catch { }
             }
-            finally
-            {
-                using (_stateLock.EnterScope())
-                    _pendingScopeDisposals.Remove(scope);
-            }
+            // No longer removes from _pendingScopeDisposals: ownership was transferred
+            // atomically above, so it is already gone.
         });
 
         lock (_deferredLock)
