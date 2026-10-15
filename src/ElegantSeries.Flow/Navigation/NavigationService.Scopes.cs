@@ -330,8 +330,20 @@ public sealed partial class NavigationService
     /// first throwing disposable (platform behavior, sync and async alike). Across page
     /// scopes the navigation service still attempts every scope.
     /// </remarks>
-    private static async ValueTask DisposeScopeAsync(IServiceScope scope, List<Exception> errors)
+    private async ValueTask DisposeScopeAsync(IServiceScope scope, List<Exception> errors)
     {
+        bool shouldDispose;
+        using (_stateLock.EnterScope())
+        {
+            // Exactly-once: skip if already disposed (e.g. by a racing Dispose).
+            shouldDispose = _disposedScopes.Add(scope);
+        }
+
+        if (!shouldDispose)
+        {
+            return;
+        }
+
         try
         {
             if (scope is IAsyncDisposable asyncScope)
@@ -362,8 +374,20 @@ public sealed partial class NavigationService
     /// <c>GoBackAsync</c>, <c>NavigateToAsync</c>); the synchronous APIs only support
     /// synchronously-disposable pages.
     /// </remarks>
-    private static void DisposeScopeSync(IServiceScope scope, List<Exception> errors)
+    private void DisposeScopeSync(IServiceScope scope, List<Exception> errors)
     {
+        bool shouldDispose;
+        using (_stateLock.EnterScope())
+        {
+            // Exactly-once: skip if already disposed (e.g. by a racing Dispose).
+            shouldDispose = _disposedScopes.Add(scope);
+        }
+
+        if (!shouldDispose)
+        {
+            return;
+        }
+
         try
         {
             scope.Dispose();
