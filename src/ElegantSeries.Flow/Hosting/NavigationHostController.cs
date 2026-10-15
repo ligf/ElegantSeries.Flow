@@ -52,6 +52,7 @@ internal sealed class NavigationHostController<TView> where TView : class
     private readonly ConditionalWeakTable<INavigationViewModel, StrongBox<TView>> _viewCache = new();
     private readonly Lock _eventLock = new();
     private INavigationService? _navigationService;
+    private IDisposable? _navigatedSubscription;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="NavigationHostController{TView}"/> class.
@@ -97,7 +98,7 @@ internal sealed class NavigationHostController<TView> where TView : class
         {
             DetachLocked();
             _navigationService = navigationService;
-            navigationService.RegionNavigated += OnRegionNavigated;
+            _navigatedSubscription = navigationService.SubscribeRegionNavigated(OnRegionNavigated);
         }
     }
 
@@ -155,7 +156,8 @@ internal sealed class NavigationHostController<TView> where TView : class
     {
         if (_navigationService is not null)
         {
-            _navigationService.RegionNavigated -= OnRegionNavigated;
+            _navigatedSubscription?.Dispose();
+            _navigatedSubscription = null;
             _navigationService = null;
         }
     }

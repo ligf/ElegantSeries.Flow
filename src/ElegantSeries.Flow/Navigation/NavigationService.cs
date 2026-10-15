@@ -87,15 +87,15 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// </summary>
     /// <param name="caller">Calling method name, for the exception message.</param>
     /// <exception cref="TimeoutException">
-    /// Thrown when the lock cannot be acquired within <see cref="NavigationOptions.DisposalGateTimeout"/>.
+    /// Thrown when the lock cannot be acquired within <see cref="NavigationOptions.SyncLockTimeout"/>.
     /// Prefer the async counterpart on UI threads.
     /// </exception>
     private void WaitNavigationLock(string caller)
     {
-        if (!_navigationLock.Wait(_options.DisposalGateTimeout))
+        if (!_navigationLock.Wait(_options.SyncLockTimeout))
         {
             throw new TimeoutException(
-                $"{caller} timed out after {_options.DisposalGateTimeout.TotalSeconds:F0}s waiting for the navigation lock. " +
+                $"{caller} timed out after {_options.SyncLockTimeout.TotalSeconds:F0}s waiting for the navigation lock. " +
                 $"A navigation is likely running a slow lifecycle callback. Prefer the async counterpart " +
                 $"({caller}Async) on UI threads to avoid blocking.");
         }
