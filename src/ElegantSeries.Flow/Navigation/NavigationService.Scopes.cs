@@ -92,6 +92,28 @@ public sealed partial class NavigationService
     }
 
     /// <summary>
+    /// Cancels the lifecycle tokens of removed cache entries and collects their
+    /// in-flight gate tasks. Must be called while holding the navigation lock
+    /// (before the entries are detached). The caller waits for the gates outside
+    /// the lock, then disposes the scopes.
+    /// </summary>
+    private static List<Task> CancelAndCollectGates(IEnumerable<NavigationEntry> entries)
+    {
+        var gates = new List<Task>();
+        foreach (var entry in entries)
+        {
+            try { entry.LifecycleCts.Cancel(); }
+            catch (ObjectDisposedException) { }
+            var gate = entry.InFlightGateTask;
+            if (gate is not null && !gate.IsCompleted)
+            {
+                gates.Add(gate);
+            }
+        }
+        return gates;
+    }
+
+    /// <summary>
     /// Determines whether any region stack or the KeepAlive cache still references the
     /// given page scope. The caller must hold <see cref="_stateLock"/>.
     /// </summary>
@@ -124,7 +146,7 @@ public sealed partial class NavigationService
     /// can be disposed now versus ones whose disposal must be deferred.
     /// The caller must hold <see cref="_navigationLock"/> (but not <see cref="_stateLock"/>).
     /// </summary>
-    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions)
+    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions, out List<NavigationEntry> removedEntries)
     {
         using (_stateLock.EnterScope())
         {
@@ -132,8 +154,15 @@ public sealed partial class NavigationService
                 .Union(_regionStacks.Keys)
                 .Distinct()
                 .ToList();
-            return TakeCacheEntriesForDisposalLocked(RemoveAllCacheEntriesLocked());
+            var removed = RemoveAllCacheEntriesLocked();
+            removedEntries = removed.Select(kv => kv.Value).ToList();
+            return TakeCacheEntriesForDisposalLocked(removed);
         }
+    }
+
+    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions)
+    {
+        return TakeAllCacheEntriesLocked(out affectedRegions, out _);
     }
 
     // ───────────────────── Disposal internals ─────────────────────
@@ -206,6 +235,21 @@ public sealed partial class NavigationService
         }
 
         return entries;
+    }
+
+    /// <summary>
+    /// Cancels the lifecycle token of every tracked entry. Called by sync
+    /// <see cref="NavigationService.Dispose"/> (which cannot wait for async
+    /// callbacks) to signal in-flight work to stop before scopes are released.
+    /// Must be called while holding the navigation lock.
+    /// </summary>
+    private void CancelAllLifecycleTokensLocked()
+    {
+        foreach (var entry in CollectAllEntriesLocked())
+        {
+            try { entry.LifecycleCts.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }
     }
 
     private List<ScopeDisposalTarget> TakeAllScopesForDisposal()

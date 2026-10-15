@@ -1889,6 +1889,83 @@ public class NavigationServiceTests
         public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
+    private sealed class RefreshTrackingViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public CancellationToken LastToken { get; private set; }
+        public TaskCompletionSource? BlockActivation { get; set; }
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            LastToken = cancellationToken;
+            if (BlockActivation is not null)
+            {
+                var gate = BlockActivation;
+                BlockActivation = null; // Only block once.
+                await gate.Task.ConfigureAwait(false);
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class CancellableViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public CancellationToken Token { get; private set; }
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            Token = cancellationToken;
+            return Task.CompletedTask;
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class DisposableTracker : IDisposable
+    {
+        private bool _disposed;
+        public bool UsedAfterReplace { get; private set; }
+        public void MarkUsed()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(DisposableTracker));
+            UsedAfterReplace = true;
+        }
+        public void Dispose() => _disposed = true;
+    }
+
+    private sealed class SelfReplacingAndContinuingViewModel(DisposableTracker tracker) : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            await Task.Yield();
+            if (Navigation is not null)
+            {
+                // Reentrant self-destroying navigation...
+                await Navigation.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.Replace).ConfigureAwait(false);
+                // ...then continue using scope services. Throws if scope was disposed.
+                tracker.MarkUsed();
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+    private sealed class SlowLeaveViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public TaskCompletionSource? LeaveGate { get; set; }
+        public bool LeaveCompleted { get; private set; }
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public async Task OnNavigatedFromAsync(CancellationToken cancellationToken)
+        {
+            if (LeaveGate is not null)
+            {
+                await LeaveGate.Task.ConfigureAwait(false);
+            }
+            LeaveCompleted = true;
+        }
+    }
+
     private sealed class ReentrantAsyncViewModel : NavigationViewModelBase, INavigationAwareAsync
     {
         public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
@@ -2506,6 +2583,112 @@ public class NavigationServiceTests
         Assert.IsType<TestHomeViewModel>(secondVm);
         var error = Assert.Single(errors);
         Assert.IsType<InvalidOperationException>(error);
+    }
+
+    [Fact]
+    public async Task Refresh_CancelsOldActivationAndReusesEntry()
+    {
+        // Refresh must not orphan the old activation: the old token is cancelled,
+        // the entry (and its in-flight tracking) is reused, and the new activation
+        // gets a fresh token.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<RefreshTrackingViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var result = await nav.NavigateToAsync<RefreshTrackingViewModel>();
+        Assert.True(result);
+        var vm = Assert.IsType<RefreshTrackingViewModel>(nav.GetCurrentViewModel());
+        var firstToken = vm.LastToken;
+        Assert.False(firstToken.IsCancellationRequested);
+
+        // Block the refresh activation, then verify the old token was cancelled.
+        var blockGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        vm.BlockActivation = blockGate;
+        var refreshTask = nav.NavigateToAsync<RefreshTrackingViewModel>(refreshIfActive: true);
+        await Task.Delay(200); // Let the refresh activation start and block.
+
+        Assert.True(firstToken.IsCancellationRequested, "Refresh must cancel the previous activation token");
+
+        blockGate.SetResult();
+        await refreshTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.NotEqual(firstToken, vm.LastToken);
+        Assert.False(vm.LastToken.IsCancellationRequested);
+    }
+
+    [Fact]
+    public async Task SyncDispose_CancelsLifecycleTokens()
+    {
+        // Sync Dispose cannot wait for async callbacks, but it must cancel
+        // their tokens before releasing scopes.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<CancellableViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        var result = await nav.NavigateToAsync<CancellableViewModel>();
+        Assert.True(result);
+        var vm = Assert.IsType<CancellableViewModel>(nav.GetCurrentViewModel());
+
+        nav.Dispose();
+
+        Assert.True(vm.Token.IsCancellationRequested, "Sync Dispose must cancel lifecycle tokens");
+    }
+
+    [Fact]
+    public async Task ReentrantReplace_DefersScopeDisposalUntilCallbackExits()
+    {
+        // When a callback awaits a self-destroying navigation and then continues
+        // using scope services, the scope must not be disposed until the callback
+        // exits. DisposableTracker.MarkUsed throws if called after disposal.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SelfReplacingAndContinuingViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddScoped<DisposableTracker>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        // If the scope were disposed immediately on Replace, MarkUsed would throw
+        // ObjectDisposedException inside the callback, failing the navigation.
+        var result = await nav.NavigateToAsync<SelfReplacingAndContinuingViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(result);
+        Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task ClearCacheAsync_WaitsForInFlightLifecycle()
+    {
+        // ClearCacheAsync must not release a cached scope while its
+        // OnNavigatedFromAsync is still running.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SlowLeaveViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<SlowLeaveViewModel>(mode: NavigationMode.KeepAlive);
+        var vm = (SlowLeaveViewModel)nav.GetCurrentViewModel()!;
+        vm.LeaveGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Navigate away (KeepAlive -> cached), leave callback starts and blocks.
+        var away = nav.NavigateToAsync<TestHomeViewModel>();
+        await Task.Delay(100);
+        Assert.False(vm.LeaveCompleted);
+
+        // Clear cache while leave is in-flight: should wait, not dispose early.
+        var clear = nav.ClearCacheAsync("MainRegion");
+        await Task.Delay(200);
+        Assert.False(vm.LeaveCompleted, "ClearCacheAsync must wait for in-flight leave callback");
+
+        vm.LeaveGate.SetResult();
+        await away;
+        await clear.AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(vm.LeaveCompleted);
     }
 
     #endregion
