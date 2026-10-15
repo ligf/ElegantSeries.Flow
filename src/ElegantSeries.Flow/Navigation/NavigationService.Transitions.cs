@@ -185,10 +185,12 @@ public sealed partial class NavigationService
     {
         DetachNavigation(entry.ViewModel);
 
-        // The entry is leaving the active position: signal its async lifecycle to stop.
-        // Idempotent — a covered entry cancelled here stays cancelled if later disposed.
-        try { entry.LifecycleCts.Cancel(); }
-        catch (ObjectDisposedException) { }
+        // The entry is leaving the active position: its token must be cancelled.
+        // Deferred until after the navigation lock is released: Cancel() invokes
+        // user callbacks synchronously which may reenter the service (deadlock
+        // if called while holding the lock). Idempotent — a covered entry
+        // cancelled here stays cancelled if later disposed.
+        work.CtsToCancel.Add(entry.LifecycleCts);
 
         var plan = BuildDeactivatePlan(entry, destroy);
 
@@ -263,10 +265,24 @@ public sealed partial class NavigationService
             if (isSelfDispose)
             {
                 // The callback is still on this async flow and may touch the
-                // scope's services after the navigation returns. Release the
-                // scope when the last in-flight callback exits. It stays in
-                // _pendingScopeDisposals until the deferred disposal runs.
-                entry.DeferScopeDisposal(ex => { try { SubscriberError?.Invoke(ex); } catch { } });
+                // scope's services after the navigation returns. Defer the disposal
+                // until the in-flight callbacks exit; tracked at service level so
+                // DisposeAsync can wait for it.
+                var gate = entry.InFlightGateTask;
+                if (gate is not null && !gate.IsCompleted)
+                {
+                    TrackDeferredDisposal(gate, entry.Scope,
+                        ex => { try { SubscriberError?.Invoke(ex); } catch { } });
+                }
+                else
+                {
+                    // No callback in flight (shouldn't happen for self-dispose,
+                    // but be safe): dispose inline.
+                    await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false);
+                }
+                // The scope stays in _pendingScopeDisposals until the deferred
+                // disposal runs; TrackDeferredDisposal removes it afterwards.
+                // (Removal is handled by the deferred task's continuation.)
             }
             else
             {
@@ -418,6 +434,26 @@ public sealed partial class NavigationService
         public List<Action> Events { get; } = [];
 
         public List<Exception> Errors { get; } = [];
+
+        /// <summary>
+        /// Cancellation token sources to cancel after the navigation lock is
+        /// released. Cancel() invokes user callbacks synchronously and must not
+        /// run while holding locks (deadlock risk).
+        /// </summary>
+        public List<CancellationTokenSource> CtsToCancel { get; } = [];
+
+        /// <summary>
+        /// Cancels all queued CTSs outside of locks. Exceptions from user
+        /// callbacks are swallowed; the navigation state was already committed.
+        /// </summary>
+        public void CancelQueuedCts()
+        {
+            foreach (var cts in CtsToCancel)
+            {
+                NavigationEntry.CancelOutsideLocks(cts);
+            }
+            CtsToCancel.Clear();
+        }
     }
 
     /// <summary>Deactivation plan for one entry: whether to dispose its page scope and which regions to notify.</summary>
@@ -430,7 +466,6 @@ public sealed partial class NavigationService
         private int _inFlightCount;
         private TaskCompletionSource? _inFlightGate;
         private List<CancellationTokenSource> _retiredCts = new();
-        private List<(IServiceScope Scope, Action<Exception>? ErrorHandler)> _deferredScopeDisposals = new();
 
         public NavigationEntry(string regionName, INavigationViewModel viewModel, object? parameter, NavigationMode mode, IServiceScope scope)
         {
@@ -456,31 +491,46 @@ public sealed partial class NavigationService
 
         /// <summary>
         /// Starts a new activation cycle for this entry (e.g. GoBack reactivation
-        /// or refresh). Cancels the previous cycle's token and replaces
-        /// <see cref="LifecycleCts"/> with a fresh source. The old source is NOT
-        /// disposed here — in-flight callbacks from the previous cycle may still
-        /// hold its token and call <c>Register</c> on it (which would throw
-        /// <see cref="ObjectDisposedException"/> on a disposed source). Retired
-        /// sources are disposed when the in-flight count drops to zero.
+        /// or refresh). Replaces <see cref="LifecycleCts"/> with a fresh source and
+        /// retires the old one. The old source is NOT cancelled or disposed here —
+        /// <see cref="CancellationTokenSource"/> synchronously invokes user
+        /// callbacks which may reenter the navigation service; calling it while
+        /// holding the navigation/state locks risks deadlock. The caller must
+        /// cancel the returned source after releasing all locks via
+        /// <see cref="CancelOutsideLocks"/>.
+        /// In-flight callbacks from the previous cycle keep running under their own
+        /// token and remain tracked. Retired sources are disposed when the
+        /// in-flight count drops to zero.
         /// </summary>
-        public void BeginNewActivation()
+        /// <returns>The retired cancellation token source, to be cancelled by the
+        /// caller after releasing locks.</returns>
+        public CancellationTokenSource BeginNewActivation()
         {
-            CancellationTokenSource oldCts;
             lock (_inFlightLock)
             {
-                oldCts = LifecycleCts;
-                try { oldCts.Cancel(); }
-                catch (ObjectDisposedException) { }
+                var oldCts = LifecycleCts;
                 LifecycleCts = new CancellationTokenSource();
                 _retiredCts.Add(oldCts);
+                return oldCts;
             }
         }
 
         /// <summary>
-        /// Legacy alias kept for the GoBack reactivation path; prefer
-        /// <see cref="BeginNewActivation"/>.
+        /// Cancels a retired CTS outside of any navigation locks. User cancellation
+        /// callbacks run synchronously inside <c>Cancel()</c> and may throw or
+        /// reenter; exceptions are swallowed to avoid corrupting the
+        /// already-committed navigation state.
         /// </summary>
-        public void ResetLifecycle() => BeginNewActivation();
+        public static void CancelOutsideLocks(CancellationTokenSource cts)
+        {
+            try { cts.Cancel(); }
+            catch (ObjectDisposedException) { }
+            catch
+            {
+                // User cancellation callbacks must not break navigation.
+                // The navigation state was already committed before this ran.
+            }
+        }
 
         /// <summary>
         /// Registers an async lifecycle callback as in-flight. Must be called when the
@@ -510,7 +560,6 @@ public sealed partial class NavigationService
         public void ExitInFlightLifecycle(Task gateTask)
         {
             List<CancellationTokenSource>? retiredToDispose = null;
-            List<(IServiceScope Scope, Action<Exception>? ErrorHandler)>? scopesToDispose = null;
             lock (_inFlightLock)
             {
                 _inFlightCount--;
@@ -519,18 +568,10 @@ public sealed partial class NavigationService
                     _inFlightGate.TrySetResult();
                     _inFlightGate = null;
                 }
-                if (_inFlightCount == 0)
+                if (_inFlightCount == 0 && _retiredCts.Count > 0)
                 {
-                    if (_retiredCts.Count > 0)
-                    {
-                        retiredToDispose = _retiredCts;
-                        _retiredCts = new();
-                    }
-                    if (_deferredScopeDisposals.Count > 0)
-                    {
-                        scopesToDispose = _deferredScopeDisposals;
-                        _deferredScopeDisposals = new();
-                    }
+                    retiredToDispose = _retiredCts;
+                    _retiredCts = new();
                 }
             }
 
@@ -541,70 +582,6 @@ public sealed partial class NavigationService
                 {
                     try { cts.Dispose(); }
                     catch { }
-                }
-            }
-            if (scopesToDispose is not null)
-            {
-                // Deferred disposal from reentrant self-destroying navigation.
-                // Run on the thread pool: the scope may need async disposal and
-                // we must not block the exiting callback. The entry is already
-                // detached from the stack/cache, so no other path will dispose
-                // this scope.
-                foreach (var (scope, errorHandler) in scopesToDispose)
-                {
-                    var capturedScope = scope;
-                    var capturedHandler = errorHandler;
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            if (capturedScope is IAsyncDisposable asyncScope)
-                            {
-                                await asyncScope.DisposeAsync().ConfigureAwait(false);
-                            }
-                            else
-                            {
-                                capturedScope.Dispose();
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            try { capturedHandler?.Invoke(ex); }
-                            catch { }
-                        }
-                    });
-                }
-            }
-        }
-
-        /// <summary>
-        /// Defers the disposal of the entry's page scope until all in-flight
-        /// lifecycle callbacks have exited. Used when a reentrant navigation
-        /// destroys the entry whose callback is currently running: disposing
-        /// immediately would pull dependencies out from under the running
-        /// callback, while waiting would deadlock (the callback is awaiting
-        /// the navigation). The scope is released when the last callback exits.
-        /// </summary>
-        /// <param name="errorHandler">Reports disposal errors (may be null).</param>
-        public void DeferScopeDisposal(Action<Exception>? errorHandler)
-        {
-            lock (_inFlightLock)
-            {
-                // Only defer if there's actually a callback running; otherwise
-                // the scope would never be released by ExitInFlightLifecycle.
-                if (_inFlightCount > 0)
-                {
-                    _deferredScopeDisposals.Add((Scope, errorHandler));
-                }
-                else
-                {
-                    // No callback in flight: dispose inline (best effort).
-                    try { Scope.Dispose(); }
-                    catch (Exception ex)
-                    {
-                        try { errorHandler?.Invoke(ex); }
-                        catch { }
-                    }
                 }
             }
         }
