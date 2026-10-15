@@ -495,7 +495,7 @@ public sealed partial class NavigationService
 
                 if (success && pushedEntry is not null)
                 {
-                    AttachNavigation(pushedEntry.ViewModel);
+                    AttachNavigation(pushedEntry.ViewModel, work);
                     QueueActivate(pushedEntry, parameter, work);
                     var capturedVm = pushedEntry.ViewModel;
                     QueueRegionNavigatedEvent(regionName, capturedVm, work);
@@ -513,7 +513,7 @@ public sealed partial class NavigationService
                 {
                     // Pop-to-existing: the instance was detached when it was covered;
                     // re-attach it as the active page.
-                    AttachNavigation(reactivatedEntry.ViewModel);
+                    AttachNavigation(reactivatedEntry.ViewModel, work);
                     QueueActivate(reactivatedEntry, parameter, work);
                     var capturedVm = reactivatedEntry.ViewModel;
                     QueueRegionNavigatedEvent(regionName, capturedVm, work);
@@ -549,11 +549,27 @@ public sealed partial class NavigationService
 
         if (duplicateException is not null)
         {
+            // Fire queued PropertyChanged notifications before throwing: the silent
+            // sets already happened under the lock, and RunTransitionAsync won't run.
+            foreach (var vm in work.NavigationChangedNotifications)
+            {
+                try { vm.RaiseNavigationChanged(); }
+                catch { }
+            }
+
             ExceptionDispatchInfo.Capture(duplicateException).Throw();
         }
 
         if (!success)
         {
+            // Same as duplicateException above: silent sets happened, but
+            // RunTransitionAsync won't run, so fire notifications here.
+            foreach (var vm in work.NavigationChangedNotifications)
+            {
+                try { vm.RaiseNavigationChanged(); }
+                catch { }
+            }
+
             return false;
         }
 

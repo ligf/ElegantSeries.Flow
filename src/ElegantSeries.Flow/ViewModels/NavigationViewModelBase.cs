@@ -58,6 +58,18 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     }
 
     /// <inheritdoc />
+    void INavigationViewModel.SetNavigationSilent(INavigationService? service)
+    {
+        _navigation = service;
+    }
+
+    /// <inheritdoc />
+    void INavigationViewModel.RaiseNavigationChanged()
+    {
+        OnPropertyChanged(nameof(Navigation));
+    }
+
+    /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>

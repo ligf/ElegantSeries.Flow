@@ -29,4 +29,17 @@ public interface INavigationViewModel
     /// framework can attach and detach. Do not set this property from application code.
     /// </remarks>
     INavigationService? Navigation { get; internal set; }
+
+    /// <summary>
+    /// Sets the navigation service without raising <c>PropertyChanged</c>.
+    /// Called by the navigation service while holding its internal locks; the service
+    /// raises the notification outside the lock via <see cref="RaiseNavigationChanged"/>.
+    /// </summary>
+    internal void SetNavigationSilent(INavigationService? service);
+
+    /// <summary>
+    /// Raises <c>PropertyChanged</c> for <see cref="Navigation"/>.
+    /// Called by the navigation service outside its internal locks.
+    /// </summary>
+    internal void RaiseNavigationChanged();
 }

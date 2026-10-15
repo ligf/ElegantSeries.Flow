@@ -37,6 +37,7 @@ public sealed class WpfDispatcher : IDispatcher
     public void Post(Action action)
     {
         ArgumentNullException.ThrowIfNull(action);
-        _dispatcher.BeginInvoke(action);
+        // View switching is user-visible; prioritize above input handling.
+        _dispatcher.BeginInvoke(action, System.Windows.Threading.DispatcherPriority.Render);
     }
 }

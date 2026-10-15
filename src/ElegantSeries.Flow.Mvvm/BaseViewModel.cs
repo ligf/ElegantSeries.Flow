@@ -52,6 +52,18 @@ public abstract partial class BaseViewModel : ObservableObject, INavigationViewM
         set => Navigation = value;
     }
 
+    /// <inheritdoc />
+    void INavigationViewModel.SetNavigationSilent(INavigationService? service)
+    {
+        _navigation = service;
+    }
+
+    /// <inheritdoc />
+    void INavigationViewModel.RaiseNavigationChanged()
+    {
+        OnPropertyChanged(nameof(Navigation));
+    }
+
     /// <summary>
     /// Navigates to the specified ViewModel type.
     /// </summary>
