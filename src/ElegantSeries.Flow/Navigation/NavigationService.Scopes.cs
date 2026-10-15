@@ -300,12 +300,6 @@ public sealed partial class NavigationService
             _regionStacks.Clear();
             _keepAliveCache.Clear();
             _pendingScopeDisposals.Clear();
-
-            // Mark collected scopes so deferred tasks skip them (exactly-once).
-            foreach (var scope in regionsByScope.Keys)
-            {
-                _disposedScopes.Add(scope);
-            }
         }
 
         return regionsByScope
