@@ -390,8 +390,12 @@ framework's AOT story (verified by the Native AOT publish smoke test in CI).
 | `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentMode(region?)` | Queries |
 | `ClearCache(region?)` / `ClearCacheAsync(region?)` | Clear one region's KeepAlive cache |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | Clear all KeepAlive caches |
-| `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` | Events |
+| `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` / `SubscriberError` | Events |
+| `SubscribeRegionNavigated` / `SubscribeViewModelReleased` / `SubscribeRegionCacheCleared` / `SubscribeSubscriberError` | Disposable event subscriptions |
 | `AddElegantSeriesFlow()` / `AddElegantSeriesFlow(ServiceLifetime.Scoped)` | DI registration |
+| `AddElegantSeriesFlow(configure, lifetime?)` | DI registration with `NavigationOptions` |
+| `NavigationOptions.DisposalGateTimeout` | Async lifecycle wait timeout (default 5s) |
+| `NavigationOptions.SyncLockTimeout` | Sync API lock acquisition timeout (default 2s) |
 
 ## Contributing
 

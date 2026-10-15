@@ -23,4 +23,23 @@ public sealed class NavigationOptions
     /// </para>
     /// </remarks>
     public TimeSpan DisposalGateTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// How long synchronous APIs (<c>ClearCache</c>, <c>ClearAllCache</c>, <c>Dispose</c>)
+    /// wait to acquire the navigation lock before throwing <see cref="TimeoutException"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Synchronous APIs cannot wait indefinitely: on a UI thread an unbounded wait for
+    /// a lock held by a slow navigation would freeze the UI. When the timeout expires,
+    /// a <see cref="TimeoutException"/> is thrown whose message points to the async
+    /// counterpart.
+    /// </para>
+    /// <para>
+    /// Default is 2 seconds. This is separate from <see cref="DisposalGateTimeout"/>:
+    /// acquiring the lock should normally take milliseconds, while page cleanup may
+    /// legitimately take much longer.
+    /// </para>
+    /// </remarks>
+    public TimeSpan SyncLockTimeout { get; set; } = TimeSpan.FromSeconds(2);
 }

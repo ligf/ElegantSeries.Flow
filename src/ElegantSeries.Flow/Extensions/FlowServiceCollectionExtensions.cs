@@ -99,6 +99,12 @@ public static class FlowServiceCollectionExtensions
     /// <summary>
     /// Registers the ElegantSeries.Flow navigation service with custom options.
     /// </summary>
+    /// <remarks>
+    /// The options are registered with <c>TryAddSingleton</c>: if
+    /// <c>AddElegantSeriesFlow</c> is called multiple times, the first configuration
+    /// wins and later ones are silently ignored. Configure once, typically at
+    /// application startup.
+    /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Configures <see cref="NavigationOptions"/>.</param>
     /// <param name="lifetime">Singleton (default, one service per app) or Scoped (one per window/scope).</param>
