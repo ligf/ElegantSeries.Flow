@@ -501,4 +501,74 @@ public class ViewForGeneratorTests
 
         Assert.Empty(diagnostics.Where(d => d.Id == "FLOWGEN009"));
     }
+
+    [Fact]
+    public void ViewModelNotImplementingInterface_ReportsFlowGen010()
+    {
+        // [ViewFor(typeof(PlainClass))] where PlainClass does not implement
+        // INavigationViewModel must produce FLOWGEN010.
+        var sources = AttributeStub + AvaloniaLocatorStub + NavigationViewModelStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.PlainClass))]
+                public class DetailView
+                {
+                }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class PlainClass
+                {
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN010");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void ViewModelImplementingInterface_DoesNotReportFlowGen010()
+    {
+        // A ViewModel implementing INavigationViewModel is fine.
+        var sources = AttributeStub + AvaloniaLocatorStub + NavigationViewModelStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.GoodViewModel))]
+                public class DetailView
+                {
+                }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class GoodViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Id == "FLOWGEN010"));
+    }
+
+    private const string NavigationViewModelStub = """
+        namespace ElegantSeries.Flow.Navigation
+        {
+            public interface INavigationViewModel
+            {
+                INavigationService? Navigation { get; set; }
+            }
+
+            public interface INavigationService
+            {
+            }
+        }
+        """;
 }

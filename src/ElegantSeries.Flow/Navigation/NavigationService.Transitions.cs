@@ -303,8 +303,9 @@ public sealed partial class NavigationService
 
             // The lifecycle CTS is no longer needed once the entry is gone —
             // except for self-dispose, where the running callback still holds
-            // the token. It will be retired and disposed when the in-flight
-            // count drops to zero (see BeginNewActivation/ExitInFlightLifecycle).
+            // the token. In that case the CTS is intentionally not disposed here;
+            // it becomes eligible for GC once the callback completes (a CTS with
+            // no registered callbacks holds no unmanaged resources).
             if (!isSelfDispose)
             {
                 try { entry.LifecycleCts.Dispose(); }

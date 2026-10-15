@@ -72,7 +72,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
     private sealed class ViewMapping
     {
-        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType, bool isOpenGenericView, bool isOpenGenericViewModel)
+        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType, bool isOpenGenericView, bool isOpenGenericViewModel, string? viewModelNotImplementingInterface)
         {
             ViewName = viewName;
             ViewModelName = viewModelName;
@@ -84,6 +84,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             UnresolvableViewModelType = unresolvableViewModelType;
             IsOpenGenericView = isOpenGenericView;
             IsOpenGenericViewModel = isOpenGenericViewModel;
+            ViewModelNotImplementingInterface = viewModelNotImplementingInterface;
         }
 
         public string ViewName { get; }
@@ -129,6 +130,12 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         /// (e.g. <c>DetailViewModel&lt;&gt;</c>), which cannot be registered (FLOWGEN009).
         /// </summary>
         public bool IsOpenGenericViewModel { get; }
+
+        /// <summary>
+        /// The ViewModel type name when it does not implement INavigationViewModel
+        /// (FLOWGEN010); otherwise <see langword="null"/>.
+        /// </summary>
+        public string? ViewModelNotImplementingInterface { get; }
     }
 
     private static ViewMapping? GetMapping(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
@@ -152,6 +159,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         string? conflictingBaseViewModel = null;
         var unresolvableViewModelType = false;
         var isOpenGenericViewModel = false;
+        string? viewModelNotImplementingInterface = null;
 
         if (attribute.ConstructorArguments.Length == 0)
         {
@@ -173,6 +181,22 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             isOpenGenericViewModel = explicitViewModel.IsGenericType &&
                 (explicitViewModel.IsUnboundGenericType ||
                  explicitViewModel.TypeArguments.Any(a => a is ITypeParameterSymbol));
+            if (!isOpenGenericViewModel)
+            {
+                // The ViewModel must implement INavigationViewModel; otherwise the
+                // generated Register call violates its generic constraint.
+                // Skip error types (e.g. typo'd names): the compiler already reports them.
+                if (explicitViewModel is { TypeKind: not TypeKind.Error })
+                {
+                    var navigationViewModel = ctx.SemanticModel.Compilation
+                        .GetTypeByMetadataName("ElegantSeries.Flow.Navigation.INavigationViewModel");
+                    if (navigationViewModel is not null &&
+                        !explicitViewModel.AllInterfaces.Contains(navigationViewModel, SymbolEqualityComparer.Default))
+                    {
+                        viewModelNotImplementingInterface = viewModelName;
+                    }
+                }
+            }
             if (baseViewModel is not null &&
                 !SymbolEqualityComparer.Default.Equals(baseViewModel, explicitViewModel))
             {
@@ -231,7 +255,8 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             conflictingBaseViewModel,
             unresolvableViewModelType,
             isOpenGenericView,
-            isOpenGenericViewModel);
+            isOpenGenericViewModel,
+            viewModelNotImplementingInterface);
     }
 
     /// <summary>
@@ -302,7 +327,8 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         mapping.UnresolvableViewModelType ||
         mapping.InvalidLifetime is not null ||
         mapping.IsOpenGenericView ||
-        mapping.IsOpenGenericViewModel;
+        mapping.IsOpenGenericViewModel ||
+        mapping.ViewModelNotImplementingInterface is not null;
 
     private static void Generate(
         SourceProductionContext spc,
@@ -382,6 +408,13 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             {
                 spc.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticDescriptors.OpenGenericViewModel, mapping.Location, mapping.ViewName, mapping.ViewModelName));
+                hasMappingErrors = true;
+            }
+
+            if (mapping.ViewModelNotImplementingInterface is not null)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.ViewModelNotImplementingInterface, mapping.Location, mapping.ViewName, mapping.ViewModelNotImplementingInterface));
                 hasMappingErrors = true;
             }
         }
@@ -519,6 +552,14 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             id: "FLOWGEN009",
             title: "Open generic ViewModel for [ViewFor]",
             messageFormat: "[ViewFor] on view '{0}' specifies an open generic ViewModel type '{1}'; only closed (constructed) ViewModel types can be registered",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor ViewModelNotImplementingInterface = new DiagnosticDescriptor(
+            id: "FLOWGEN010",
+            title: "ViewModel does not implement INavigationViewModel",
+            messageFormat: "[ViewFor] on view '{0}' specifies ViewModel type '{1}' which does not implement INavigationViewModel",
             category: "ElegantSeries.Flow.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);

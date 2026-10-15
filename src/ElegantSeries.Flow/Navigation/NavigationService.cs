@@ -134,7 +134,20 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         {
             try
             {
-                await gateTask.ConfigureAwait(false);
+                // Wait for the in-flight callback with the same timeout semantics as
+                // other disposal gates: an unresponsive ViewModel must not block
+                // disposal forever. On timeout, report and release the scope anyway.
+                var completed = await Task.WhenAny(gateTask, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
+                if (!ReferenceEquals(completed, gateTask))
+                {
+                    try
+                    {
+                        errorHandler?.Invoke(new TimeoutException(
+                            $"Deferred disposal gate timed out after {DisposalGateTimeout.TotalSeconds:F0}s. " +
+                            "The page scope is being released anyway; the ViewModel ignored its cancellation token."));
+                    }
+                    catch { }
+                }
 
                 bool shouldDispose;
                 using (_stateLock.EnterScope())
@@ -175,12 +188,12 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             }
         }
 
-        // Ownership transfer: remove from _pendingScopeDisposals so TakeAllScopesForDisposal
-        // cannot collect it. The deferred task is already tracked above, so DisposeAsync
-        // will wait for it. If Dispose already collected it (race), the task's
-        // _disposedScopes check skips the second disposal.
         using (_stateLock.EnterScope())
         {
+            // Ownership transfer: remove from _pendingScopeDisposals so TakeAllScopesForDisposal
+            // cannot collect it. The deferred task is already tracked above, so DisposeAsync
+            // will wait for it. If Dispose already collected it (race), the task's
+            // _disposedScopes check skips the second disposal.
             _pendingScopeDisposals.Remove(scope);
         }
     }

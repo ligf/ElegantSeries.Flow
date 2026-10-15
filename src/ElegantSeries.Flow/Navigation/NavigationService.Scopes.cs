@@ -427,9 +427,7 @@ public sealed partial class NavigationService
         {
             errors.Add(ex);
         }
-    }
-
-    /// <summary>
+    }    /// <summary>
     /// Releases a page scope that was created but never became a page (lost a race or the
     /// service was disposed concurrently). Exceptions are swallowed: a redundant scope must
     /// never break navigation.
