@@ -50,7 +50,7 @@ namespace ElegantSeries.Flow.Navigation;
 /// around by the navigation service.
 /// </para>
 /// </remarks>
-public sealed partial class NavigationService(IServiceProvider serviceProvider) : INavigationService, IDisposable, IAsyncDisposable
+public sealed partial class NavigationService(IServiceProvider serviceProvider, NavigationOptions? options = null) : INavigationService, IDisposable, IAsyncDisposable
 {
     // ────────────────────────────── Fields ──────────────────────────────
 
@@ -69,6 +69,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
     /// <summary>KeepAlive pages keyed by (region, ViewModel type). Guarded by <see cref="_stateLock"/>.</summary>
     private readonly Dictionary<(string Region, Type ViewModelType), NavigationEntry> _keepAliveCache = [];
 
+    private readonly NavigationOptions _options = options ?? new NavigationOptions();
+
     /// <summary>
     /// Page scopes removed from the cache while still referenced elsewhere.
     /// They are disposed once their last reference disappears. Guarded by <see cref="_stateLock"/>.
@@ -77,6 +79,27 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
     /// <summary>Serializes navigation transitions and disposal.</summary>
     private readonly SemaphoreSlim _navigationLock = new(1, 1);
+
+    /// <summary>
+    /// Acquires <see cref="_navigationLock"/> for a synchronous API, with a timeout.
+    /// Sync APIs cannot wait indefinitely: on a UI thread an unbounded wait for a
+    /// lock held by a slow navigation would freeze the UI.
+    /// </summary>
+    /// <param name="caller">Calling method name, for the exception message.</param>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the lock cannot be acquired within <see cref="NavigationOptions.DisposalGateTimeout"/>.
+    /// Prefer the async counterpart on UI threads.
+    /// </exception>
+    private void WaitNavigationLock(string caller)
+    {
+        if (!_navigationLock.Wait(_options.DisposalGateTimeout))
+        {
+            throw new TimeoutException(
+                $"{caller} timed out after {_options.DisposalGateTimeout.TotalSeconds:F0}s waiting for the navigation lock. " +
+                $"A navigation is likely running a slow lifecycle callback. Prefer the async counterpart " +
+                $"({caller}Async) on UI threads to avoid blocking.");
+        }
+    }
 
     /// <summary>
     /// Guards <see cref="_regionStacks"/>, <see cref="_keepAliveCache"/> and
@@ -169,6 +192,48 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
     /// <inheritdoc />
     public event Action<Exception>? SubscriberError;
 
+    /// <inheritdoc />
+    public IDisposable SubscribeRegionNavigated(Action<string, INavigationViewModel> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        RegionNavigated += handler;
+        return new EventSubscription(() => RegionNavigated -= handler);
+    }
+
+    /// <inheritdoc />
+    public IDisposable SubscribeViewModelReleased(Action<string, INavigationViewModel> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        ViewModelReleased += handler;
+        return new EventSubscription(() => ViewModelReleased -= handler);
+    }
+
+    /// <inheritdoc />
+    public IDisposable SubscribeRegionCacheCleared(Action<string> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        RegionCacheCleared += handler;
+        return new EventSubscription(() => RegionCacheCleared -= handler);
+    }
+
+    /// <inheritdoc />
+    public IDisposable SubscribeSubscriberError(Action<Exception> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        SubscriberError += handler;
+        return new EventSubscription(() => SubscriberError -= handler);
+    }
+
+    private sealed class EventSubscription(Action unsubscribe) : IDisposable
+    {
+        private Action? _unsubscribe = unsubscribe;
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref _unsubscribe, null)?.Invoke();
+        }
+    }
+
     // ──────────────────────── Navigation (async) ────────────────────────
 
     /// <inheritdoc />
@@ -212,9 +277,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
         // Run the navigation guard outside the locks to avoid deadlocks.
         // Race against the caller's cancellation: stop waiting promptly if cancelled.
+        // The guard receives the token for cooperative cancellation.
         if (currentVmForGuard is not null && guardContext is not null)
         {
-            var guardTask = InvokeFromGuardAsync(currentVmForGuard, guardContext);
+            var guardTask = InvokeFromGuardAsync(currentVmForGuard, guardContext, cancellationToken);
             var completed = await Task.WhenAny(guardTask, Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)).ConfigureAwait(false);
             if (!ReferenceEquals(completed, guardTask))
             {
@@ -363,7 +429,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
         // Serialized with navigation transitions: otherwise a concurrent navigation
         // could adopt a cache entry whose scope this call is about to dispose.
-        _navigationLock.Wait();
+        WaitNavigationLock("ClearCache");
         try
         {
             if (_disposed)
@@ -410,7 +476,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         var errors = new List<Exception>();
 
         // Serialized with navigation transitions (see ClearCache).
-        _navigationLock.Wait();
+        WaitNavigationLock("ClearAllCache");
         List<ScopeDisposalTarget> targets;
         var ctsToCancel = new List<CancellationTokenSource>();
         try
@@ -603,7 +669,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         List<ScopeDisposalTarget> targets;
         List<CancellationTokenSource> ctsToCancel = [];
 
-        _navigationLock.Wait();
+        WaitNavigationLock("Dispose");
         try
         {
             if (_disposed)

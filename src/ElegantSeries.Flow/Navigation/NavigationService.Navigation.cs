@@ -71,9 +71,9 @@ public sealed partial class NavigationService
             var guardContext = new NavigationGuardContext(regionName, typeof(TViewModel), mode, parameter, isBack: false);
             // Race the guard against the caller's cancellation: if the caller cancels
             // while the guard is still running, stop waiting and report cancellation.
-            // The guard task itself cannot be aborted — it keeps running in the
-            // background, but the navigation request is abandoned promptly.
-            var guardTask = InvokeFromGuardAsync(currentVmForGuard, guardContext);
+            // The guard receives the token for cooperative cancellation, but the
+            // guard task itself cannot be force-aborted.
+            var guardTask = InvokeFromGuardAsync(currentVmForGuard, guardContext, cancellationToken);
             var completed = await Task.WhenAny(guardTask, Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)).ConfigureAwait(false);
             if (!ReferenceEquals(completed, guardTask))
             {
@@ -580,16 +580,19 @@ public sealed partial class NavigationService
     /// plain <see cref="INavigationGuard"/> is used. Must be called outside the
     /// navigation locks.
     /// </summary>
-    private static async Task<bool> InvokeFromGuardAsync(INavigationViewModel viewModel, NavigationGuardContext context)
+    private static async Task<bool> InvokeFromGuardAsync(
+        INavigationViewModel viewModel,
+        NavigationGuardContext context,
+        CancellationToken cancellationToken)
     {
         if (viewModel is INavigationGuardWithContext contextGuard)
         {
-            return await contextGuard.CanNavigateFromAsync(context).ConfigureAwait(false);
+            return await contextGuard.CanNavigateFromAsync(context, cancellationToken).ConfigureAwait(false);
         }
 
         if (viewModel is INavigationGuard guard)
         {
-            return await guard.CanNavigateFromAsync().ConfigureAwait(false);
+            return await guard.CanNavigateFromAsync(cancellationToken).ConfigureAwait(false);
         }
 
         return true;

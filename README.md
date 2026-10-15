@@ -358,6 +358,11 @@ rethrown preserving its original stack trace, several are wrapped in an
 after the first throwing disposable (platform behavior, sync and async alike). Only
 cross-page isolation is provided by the navigation service.
 
+**Best practice:** keep each disposable's `Dispose` idempotent and non-throwing where
+possible; if a page owns several critical resources that must all be released, coordinate
+their teardown in the ViewModel (e.g. `OnNavigatedFromAsync` or the ViewModel's own
+`Dispose`) rather than relying on container order.
+
 ## Thread safety
 
 All public members are safe to call from any thread. Navigation transitions and disposal

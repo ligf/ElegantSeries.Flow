@@ -93,7 +93,26 @@ public static class FlowServiceCollectionExtensions
         this IServiceCollection services,
         ServiceLifetime lifetime = ServiceLifetime.Singleton)
     {
+        return AddElegantSeriesFlow(services, _ => { }, lifetime);
+    }
+
+    /// <summary>
+    /// Registers the ElegantSeries.Flow navigation service with custom options.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">Configures <see cref="NavigationOptions"/>.</param>
+    /// <param name="lifetime">Singleton (default, one service per app) or Scoped (one per window/scope).</param>
+    public static IServiceCollection AddElegantSeriesFlow(
+        this IServiceCollection services,
+        Action<NavigationOptions> configure,
+        ServiceLifetime lifetime = ServiceLifetime.Singleton)
+    {
         ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var options = new NavigationOptions();
+        configure(options);
+        services.TryAddSingleton(options);
 
         switch (lifetime)
         {

@@ -127,6 +127,30 @@ public interface INavigationService
     /// <remarks>Parameter: the subscriber exception.</remarks>
     event Action<Exception>? SubscriberError;
 
+    /// <summary>
+    /// Subscribes to <see cref="RegionNavigated"/>. Dispose the returned object
+    /// to unsubscribe — safer than manual <c>-=</c> for hosts with complex lifetimes.
+    /// </summary>
+    IDisposable SubscribeRegionNavigated(Action<string, INavigationViewModel> handler);
+
+    /// <summary>
+    /// Subscribes to <see cref="ViewModelReleased"/>. Dispose the returned object
+    /// to unsubscribe.
+    /// </summary>
+    IDisposable SubscribeViewModelReleased(Action<string, INavigationViewModel> handler);
+
+    /// <summary>
+    /// Subscribes to <see cref="RegionCacheCleared"/>. Dispose the returned object
+    /// to unsubscribe.
+    /// </summary>
+    IDisposable SubscribeRegionCacheCleared(Action<string> handler);
+
+    /// <summary>
+    /// Subscribes to <see cref="SubscriberError"/>. Dispose the returned object
+    /// to unsubscribe.
+    /// </summary>
+    IDisposable SubscribeSubscriberError(Action<Exception> handler);
+
     // ──────────────────────── Query Methods (Sync) ────────────────────────
 
     /// <summary>
@@ -187,6 +211,14 @@ public interface INavigationService
     /// Thrown when <paramref name="cancellationToken"/> is cancelled before the region
     /// stack is updated.
     /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Keep ViewModel constructors lightweight and side-effect free: the navigation
+    /// service may resolve a ViewModel speculatively and discard it (releasing its
+    /// scope) if the region state changed concurrently. Put initialization work in
+    /// <c>OnNavigatedToAsync</c> instead, where the page is guaranteed to be active.
+    /// </para>
+    /// </remarks>
     Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
         string regionName = DefaultRegionName,
         NavigationMode mode = NavigationMode.New,
