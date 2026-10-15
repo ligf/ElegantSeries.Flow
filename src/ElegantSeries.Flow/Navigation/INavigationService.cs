@@ -66,6 +66,12 @@ namespace ElegantSeries.Flow.Navigation;
 /// service still attempts every scope: a single failure is rethrown as-is, several are
 /// wrapped in <see cref="AggregateException"/>.
 /// </para>
+/// <para>
+/// This interface does not extend <see cref="IDisposable"/> or
+/// <see cref="IAsyncDisposable"/>: the service is typically a singleton owned by the
+/// DI container, which disposes it. To dispose explicitly (e.g. in tests), cast to
+/// the concrete <c>NavigationService</c> or to <see cref="IAsyncDisposable"/>.
+/// </para>
 /// </remarks>
 public interface INavigationService
 {

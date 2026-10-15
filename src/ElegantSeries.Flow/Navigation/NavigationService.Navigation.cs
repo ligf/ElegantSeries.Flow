@@ -82,7 +82,9 @@ public sealed partial class NavigationService
                 // cancelled regardless of the guard's eventual result.
                 _ = guardTask.ContinueWith(
                     t => { try { SubscriberError?.Invoke(t.Exception!.InnerException ?? t.Exception!); } catch { } },
-                    TaskContinuationOptions.OnlyOnFaulted);
+                    CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted,
+                    TaskScheduler.Default);
                 cancellationToken.ThrowIfCancellationRequested();
             }
 

@@ -308,6 +308,14 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             var completed = await Task.WhenAny(guardTask, Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)).ConfigureAwait(false);
             if (!ReferenceEquals(completed, guardTask))
             {
+                // The guard is still running; observe its eventual exception so it
+                // doesn't surface as UnobservedTaskException. The navigation is
+                // cancelled regardless of the guard's eventual result.
+                _ = guardTask.ContinueWith(
+                    t => { try { SubscriberError?.Invoke(t.Exception!.InnerException ?? t.Exception!); } catch { } },
+                    CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted,
+                    TaskScheduler.Default);
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
@@ -740,6 +748,11 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         QueueCacheClearedEvents(targets, pendingEvents);
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
 
+        // Note: _disposedScopes is intentionally NOT cleared here. Deferred disposal
+        // tasks (from reentrant navigation) continue running in the background and
+        // still check the set for exactly-once coordination. The service is being
+        // shut down, so the bounded growth is acceptable.
+
         ThrowCollectedErrors(errors);
     }
 
@@ -829,6 +842,11 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         // Wait for deferred disposals (e.g. from reentrant navigation): their scopes
         // were not in the targets above because the entries were already detached.
         await WaitForDeferredDisposalsAsync().ConfigureAwait(false);
+
+        // Note: _disposedScopes is intentionally NOT cleared. A navigation that was
+        // in-flight during DisposeAsync may call TrackDeferredDisposal after the
+        // WaitForDeferredDisposalsAsync snapshot; its task still needs the set for
+        // exactly-once coordination. The set is released with the service itself.
 
         QueueCacheClearedEvents(targets, pendingEvents);
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
