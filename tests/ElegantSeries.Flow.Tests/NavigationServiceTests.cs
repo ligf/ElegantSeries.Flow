@@ -2794,26 +2794,26 @@ public class NavigationServiceTests
         public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
-    [Fact(Skip = "Diagnosing CI hang; re-enable after root cause found")]
+    [Fact]
     public async Task Navigate_StateMismatchAbandonsAndReturnsFalse()
     {
         // If the stack top changes while the from-guard is running, the navigation
         // must be abandoned (return false) and its speculatively created scope released.
-        StateMismatchTargetViewModel.DisposeCount = 0;
+        ConcurrentTargetViewModel.DisposeCount = 0;
 
         var services = new ServiceCollection();
         services.AddElegantSeriesFlow();
-        services.AddTransient<StateMismatchGuardViewModel>();
-        services.AddTransient<StateMismatchTargetViewModel>();
+        services.AddTransient<ConcurrentGuardViewModel>();
+        services.AddTransient<ConcurrentTargetViewModel>();
         services.AddTransient<TestDetailViewModel>();
         var provider = services.BuildServiceProvider();
         var nav = provider.GetRequiredService<INavigationService>();
 
-        await nav.NavigateToAsync<StateMismatchGuardViewModel>();
-        var guardVm = Assert.IsType<StateMismatchGuardViewModel>(nav.GetCurrentViewModel());
+        await nav.NavigateToAsync<ConcurrentGuardViewModel>();
+        var guardVm = Assert.IsType<ConcurrentGuardViewModel>(nav.GetCurrentViewModel());
 
         // First navigation blocks in the guard.
-        var firstNav = Task.Run(() => nav.NavigateToAsync<StateMismatchTargetViewModel>());
+        var firstNav = Task.Run(() => nav.NavigateToAsync<ConcurrentTargetViewModel>());
         // Wait until the guard is actually running.
         await guardVm.GuardEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
@@ -2828,12 +2828,12 @@ public class NavigationServiceTests
         var firstResult = await firstNav.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.False(firstResult);
         // The abandoned navigation's speculatively created scope was released, not leaked.
-        Assert.Equal(1, StateMismatchTargetViewModel.DisposeCount);
+        Assert.Equal(1, ConcurrentTargetViewModel.DisposeCount);
         // Active page is the second navigation's target.
         Assert.IsType<TestDetailViewModel>(nav.GetCurrentViewModel());
     }
 
-    private sealed class StateMismatchGuardViewModel : NavigationViewModelBase, INavigationGuard
+    private sealed class ConcurrentGuardViewModel : NavigationViewModelBase, INavigationGuard
     {
         public readonly TaskCompletionSource GuardEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _guardRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -2854,7 +2854,7 @@ public class NavigationServiceTests
         public void ReleaseGuard() => _guardRelease.TrySetResult();
     }
 
-    private sealed class StateMismatchTargetViewModel : NavigationViewModelBase, IDisposable
+    private sealed class ConcurrentTargetViewModel : NavigationViewModelBase, IDisposable
     {
         public static int DisposeCount;
 
