@@ -292,6 +292,18 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         return null;
     }
 
+    /// <summary>
+    /// True when the mapping already has a diagnostic error (FLOWGEN003-006/008/009).
+    /// Such mappings are excluded from the duplicate check to avoid noise diagnostics.
+    /// </summary>
+    private static bool HasMappingError(ViewMapping mapping) =>
+        mapping.CannotInferViewModel ||
+        mapping.ConflictingBaseViewModel is not null ||
+        mapping.UnresolvableViewModelType ||
+        mapping.InvalidLifetime is not null ||
+        mapping.IsOpenGenericView ||
+        mapping.IsOpenGenericViewModel;
+
     private static void Generate(
         SourceProductionContext spc,
         Compilation compilation,
@@ -375,9 +387,16 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         }
 
         // Duplicate ViewModel mappings would throw at runtime; fail at compile time instead.
+        // Skip mappings that already have errors: their ViewModelName may be empty or
+        // otherwise invalid, which would produce noise diagnostics on top of the real ones.
         var seenViewModels = new HashSet<string>();
         foreach (var mapping in mappings)
         {
+            if (HasMappingError(mapping))
+            {
+                continue;
+            }
+
             if (!seenViewModels.Add(mapping.ViewModelName))
             {
                 spc.ReportDiagnostic(Diagnostic.Create(
