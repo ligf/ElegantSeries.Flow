@@ -446,4 +446,59 @@ public class ViewForGeneratorTests
 
         return (runResult.Results.Single(), runResult.Diagnostics, updatedCompilation);
     }
+
+    [Fact]
+    public void OpenGenericViewModel_ReportsFlowGen009()
+    {
+        // [ViewFor(typeof(DetailViewModel<>))] with an open generic ViewModel must
+        // produce FLOWGEN009, not generate uncompilable registration code.
+        var sources = AttributeStub + AvaloniaLocatorStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.DetailViewModel<>))]
+                public class DetailView
+                {
+                }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class DetailViewModel<T>
+                {
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN009");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void ClosedGenericViewModel_DoesNotReportFlowGen009()
+    {
+        // A closed generic ViewModel (e.g. DetailViewModel<string>) is fine.
+        var sources = AttributeStub + AvaloniaLocatorStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.DetailViewModel<string>))]
+                public class DetailView
+                {
+                }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class DetailViewModel<T>
+                {
+                }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Id == "FLOWGEN009"));
+    }
 }

@@ -72,7 +72,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
     private sealed class ViewMapping
     {
-        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType, bool isOpenGenericView)
+        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType, bool isOpenGenericView, bool isOpenGenericViewModel)
         {
             ViewName = viewName;
             ViewModelName = viewModelName;
@@ -83,6 +83,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             ConflictingBaseViewModel = conflictingBaseViewModel;
             UnresolvableViewModelType = unresolvableViewModelType;
             IsOpenGenericView = isOpenGenericView;
+            IsOpenGenericViewModel = isOpenGenericViewModel;
         }
 
         public string ViewName { get; }
@@ -122,6 +123,12 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         /// which cannot be registered (FLOWGEN008).
         /// </summary>
         public bool IsOpenGenericView { get; }
+
+        /// <summary>
+        /// True when the explicitly specified ViewModel is an open generic type
+        /// (e.g. <c>DetailViewModel&lt;&gt;</c>), which cannot be registered (FLOWGEN009).
+        /// </summary>
+        public bool IsOpenGenericViewModel { get; }
     }
 
     private static ViewMapping? GetMapping(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
@@ -144,6 +151,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         var cannotInfer = false;
         string? conflictingBaseViewModel = null;
         var unresolvableViewModelType = false;
+        var isOpenGenericViewModel = false;
 
         if (attribute.ConstructorArguments.Length == 0)
         {
@@ -159,6 +167,12 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         else if (attribute.ConstructorArguments[0].Value is INamedTypeSymbol explicitViewModel)
         {
             viewModelName = explicitViewModel.ToDisplayString(format);
+            // Open generic ViewModels (e.g. DetailViewModel<>) cannot be registered:
+            // the generated code would reference an undefined type parameter.
+            // typeof(X<>) yields an unbound generic type.
+            isOpenGenericViewModel = explicitViewModel.IsGenericType &&
+                (explicitViewModel.IsUnboundGenericType ||
+                 explicitViewModel.TypeArguments.Any(a => a is ITypeParameterSymbol));
             if (baseViewModel is not null &&
                 !SymbolEqualityComparer.Default.Equals(baseViewModel, explicitViewModel))
             {
@@ -203,7 +217,9 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
         // Open generic views (e.g. GenericView<T>) cannot be registered: the generated
         // code would reference an undefined type parameter.
-        bool isOpenGenericView = viewType.IsGenericType && viewType.TypeParameters.Length > 0;
+        bool isOpenGenericView = viewType.IsGenericType &&
+            (viewType.IsUnboundGenericType ||
+             viewType.TypeArguments.Any(a => a is ITypeParameterSymbol));
 
         return new ViewMapping(
             viewName,
@@ -214,7 +230,8 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             cannotInfer,
             conflictingBaseViewModel,
             unresolvableViewModelType,
-            isOpenGenericView);
+            isOpenGenericView,
+            isOpenGenericViewModel);
     }
 
     /// <summary>
@@ -348,6 +365,13 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                     DiagnosticDescriptors.OpenGenericView, mapping.Location, mapping.ViewName));
                 hasMappingErrors = true;
             }
+
+            if (mapping.IsOpenGenericViewModel)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.OpenGenericViewModel, mapping.Location, mapping.ViewName, mapping.ViewModelName));
+                hasMappingErrors = true;
+            }
         }
 
         // Duplicate ViewModel mappings would throw at runtime; fail at compile time instead.
@@ -468,6 +492,14 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             id: "FLOWGEN008",
             title: "Open generic view for [ViewFor]",
             messageFormat: "[ViewFor] on view '{0}' is an open generic type; only closed (constructed) view types can be registered",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor OpenGenericViewModel = new DiagnosticDescriptor(
+            id: "FLOWGEN009",
+            title: "Open generic ViewModel for [ViewFor]",
+            messageFormat: "[ViewFor] on view '{0}' specifies an open generic ViewModel type '{1}'; only closed (constructed) ViewModel types can be registered",
             category: "ElegantSeries.Flow.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
