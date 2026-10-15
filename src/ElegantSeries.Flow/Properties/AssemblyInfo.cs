@@ -18,3 +18,7 @@ using System.Runtime.CompilerServices;
 // Logic tests compile against Core only (no UI runtime) and exercise the
 // shared host internals directly.
 [assembly: InternalsVisibleTo("ElegantSeries.Flow.WPF.Tests")]
+
+// Core navigation tests verify internal lifecycle behavior (e.g. that cache
+// clearing does not cancel an active page's token).
+[assembly: InternalsVisibleTo("ElegantSeries.Flow.Tests")]

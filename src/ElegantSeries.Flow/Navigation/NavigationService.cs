@@ -130,15 +130,6 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// </summary>
     private void TrackDeferredDisposal(Task gateTask, IServiceScope scope, Action<Exception>? errorHandler)
     {
-        // Atomic ownership transfer: remove the scope from _pendingScopeDisposals
-        // so that TakeAllScopesForDisposal (Dispose/DisposeAsync) cannot collect it.
-        // The deferred task becomes the primary owner. If Dispose already collected
-        // it (race), the task's _disposedScopes check skips the second disposal.
-        using (_stateLock.EnterScope())
-        {
-            _pendingScopeDisposals.Remove(scope);
-        }
-
         var task = Task.Run(async () =>
         {
             try
@@ -169,10 +160,11 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 try { errorHandler?.Invoke(ex); }
                 catch { }
             }
-            // No longer removes from _pendingScopeDisposals: ownership was transferred
-            // atomically above, so it is already gone.
         });
 
+        // Register the task BEFORE removing from _pendingScopeDisposals: DisposeAsync
+        // snapshots _deferredDisposalTasks; if the scope becomes invisible first,
+        // DisposeAsync could miss both the scope and the task.
         lock (_deferredLock)
         {
             _deferredDisposalTasks.Add(task);
@@ -181,6 +173,15 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             {
                 _deferredDisposalTasks.RemoveAll(t => t.IsCompleted);
             }
+        }
+
+        // Ownership transfer: remove from _pendingScopeDisposals so TakeAllScopesForDisposal
+        // cannot collect it. The deferred task is already tracked above, so DisposeAsync
+        // will wait for it. If Dispose already collected it (race), the task's
+        // _disposedScopes check skips the second disposal.
+        using (_stateLock.EnterScope())
+        {
+            _pendingScopeDisposals.Remove(scope);
         }
     }
 
@@ -486,7 +487,9 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 // for async callbacks without risking deadlock, but it must cancel
                 // their tokens before the scopes are released below.
                 // CTSs are cancelled after the lock is released (see below).
-                CancelAndCollectGates(removed.Select(kv => kv.Value), ctsToCancel);
+                // Only entries no longer referenced by the stack: clearing the cache
+                // must not cancel an active page's lifecycle token.
+                CancelAndCollectGates(FilterUnreferencedEntries(removed.Select(kv => kv.Value)), ctsToCancel);
                 targets = TakeCacheEntriesForDisposalLocked(removed);
             }
         }
@@ -528,10 +531,11 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 return;
             }
 
-            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries);
+            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries, out var unreferencedEntries);
             // Signal in-flight callbacks to stop (sync path cannot wait).
             // Cancelled after lock release (see below).
-            CancelAndCollectGates(removedEntries, ctsToCancel);
+            // Only unreferenced entries: must not cancel an active page's token.
+            CancelAndCollectGates(unreferencedEntries, ctsToCancel);
             foreach (var region in affectedRegions)
             {
                 var capturedRegion = region;
@@ -582,7 +586,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             using (_stateLock.EnterScope())
             {
                 var removed = RemoveRegionCacheEntriesLocked(regionName);
-                gates = CancelAndCollectGates(removed.Select(kv => kv.Value), ctsToCancel);
+                // Only unreferenced entries: must not cancel an active page's token.
+                gates = CancelAndCollectGates(FilterUnreferencedEntries(removed.Select(kv => kv.Value)), ctsToCancel);
                 targets = TakeCacheEntriesForDisposalLocked(removed);
             }
         }
@@ -645,8 +650,9 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 return;
             }
 
-            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries);
-            gates = CancelAndCollectGates(removedEntries, ctsToCancel);
+            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries, out var unreferencedEntries);
+            // Only unreferenced entries: must not cancel an active page's token.
+            gates = CancelAndCollectGates(unreferencedEntries, ctsToCancel);
             foreach (var region in affectedRegions)
             {
                 var capturedRegion = region;

@@ -124,6 +124,25 @@ public sealed partial class NavigationService
     }
 
     /// <summary>
+    /// Filters cache-removed entries to only those whose scopes are no longer referenced
+    /// by any navigation stack. Entries still referenced (active pages) keep their
+    /// lifecycle tokens: clearing the cache must not cancel an active page.
+    /// The caller must hold <see cref="_stateLock"/>.
+    /// </summary>
+    private List<NavigationEntry> FilterUnreferencedEntries(IEnumerable<NavigationEntry> entries)
+    {
+        var result = new List<NavigationEntry>();
+        foreach (var entry in entries)
+        {
+            if (!IsScopeReferencedLocked(entry.Scope))
+            {
+                result.Add(entry);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Determines whether any region stack or the KeepAlive cache still references the
     /// given page scope. The caller must hold <see cref="_stateLock"/>.
     /// </summary>
@@ -156,7 +175,7 @@ public sealed partial class NavigationService
     /// can be disposed now versus ones whose disposal must be deferred.
     /// The caller must hold <see cref="_navigationLock"/> (but not <see cref="_stateLock"/>).
     /// </summary>
-    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions, out List<NavigationEntry> removedEntries)
+    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions, out List<NavigationEntry> removedEntries, out List<NavigationEntry> unreferencedEntries)
     {
         using (_stateLock.EnterScope())
         {
@@ -166,13 +185,16 @@ public sealed partial class NavigationService
                 .ToList();
             var removed = RemoveAllCacheEntriesLocked();
             removedEntries = removed.Select(kv => kv.Value).ToList();
+            // Only unreferenced entries get their lifecycle tokens cancelled:
+            // clearing the cache must not cancel an active page.
+            unreferencedEntries = FilterUnreferencedEntries(removedEntries);
             return TakeCacheEntriesForDisposalLocked(removed);
         }
     }
 
-    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions)
+    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions, out List<NavigationEntry> removedEntries)
     {
-        return TakeAllCacheEntriesLocked(out affectedRegions, out _);
+        return TakeAllCacheEntriesLocked(out affectedRegions, out removedEntries, out _);
     }
 
     // ───────────────────── Disposal internals ─────────────────────

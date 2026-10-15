@@ -2705,6 +2705,9 @@ public class NavigationServiceTests
         await nav.NavigateToAsync<ReentrantCancelViewModel>();
         var vm = Assert.IsType<ReentrantCancelViewModel>(nav.GetCurrentViewModel());
         vm.EnableReentrantCancel(nav);
+        var cts = GetActiveEntryCts(nav, "MainRegion");
+        Assert.NotNull(cts);
+        vm.RegisterReentrantCallback(cts.Token);
 
         // Refresh triggers BeginNewActivation -> Cancel() outside locks.
         // If Cancel ran while holding the lock, the reentrant ClearCache would deadlock.
@@ -2715,10 +2718,10 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task ClearCache_CancelCallbackMustNotDeadlock()
+    public async Task ClearCache_DoesNotCancelActiveKeepAlivePageToken()
     {
-        // A KeepAlive entry's cancel callback that reenters ClearCache must not
-        // deadlock: ClearCache collects CTSs under the lock and cancels after release.
+        // P1-1: clearing the cache must not cancel the lifecycle token of a page
+        // that is still active (on the navigation stack).
         var services = new ServiceCollection();
         services.AddElegantSeriesFlow();
         services.AddTransient<ReentrantCancelViewModel>();
@@ -2728,12 +2731,78 @@ public class NavigationServiceTests
         await nav.NavigateToAsync<ReentrantCancelViewModel>(mode: NavigationMode.KeepAlive);
         var vm = Assert.IsType<ReentrantCancelViewModel>(nav.GetCurrentViewModel());
         vm.EnableReentrantCancel(nav);
+        var cts = GetKeepAliveEntryCts(nav, "MainRegion", typeof(ReentrantCancelViewModel));
+        Assert.NotNull(cts);
+        vm.RegisterReentrantCallback(cts.Token);
 
-        // ClearCache cancels the KeepAlive entry's token; the callback reenters ClearCache.
-        // If Cancel ran while holding _navigationLock, this would deadlock.
-        var clearTask = Task.Run(() => nav.ClearCache("MainRegion"));
-        await clearTask.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.True(vm.CancelCallbackRan);
+        // The page is still active: ClearCache must leave its token uncancelled.
+        nav.ClearCache("MainRegion");
+        Assert.False(cts.IsCancellationRequested);
+        Assert.False(vm.CancelCallbackRan);
+        Assert.IsType<ReentrantCancelViewModel>(nav.GetCurrentViewModel());
+    }
+
+    private static CancellationTokenSource? GetActiveEntryCts(
+        INavigationService nav, string regionName)
+    {
+        // Test hook: reach the internal region stack to observe the active entry's token.
+        var serviceType = nav.GetType();
+        var stacksField = serviceType.GetField("_regionStacks",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var stacks = stacksField?.GetValue(nav) as System.Collections.IDictionary;
+        if (stacks is null || !stacks.Contains(regionName))
+        {
+            return null;
+        }
+
+        var stack = stacks[regionName] as System.Collections.IEnumerable;
+        if (stack is null)
+        {
+            return null;
+        }
+
+        // Stack<T> enumerates LIFO; the first item is the top (active entry).
+        foreach (var entry in stack)
+        {
+            var ctsProp = entry?.GetType().GetProperty("LifecycleCts");
+            return ctsProp?.GetValue(entry) as CancellationTokenSource;
+        }
+
+        return null;
+    }
+
+    private static CancellationTokenSource? GetKeepAliveEntryCts(
+        INavigationService nav, string regionName, Type viewModelType)
+    {
+        // Test hook: reach the internal KeepAlive cache entry to observe its token.
+        var serviceType = nav.GetType();
+        var cacheField = serviceType.GetField("_keepAliveCache",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var cache = cacheField?.GetValue(nav) as System.Collections.IDictionary;
+        if (cache is null)
+        {
+            return null;
+        }
+
+        foreach (System.Collections.DictionaryEntry kv in cache)
+        {
+            var key = kv.Key;
+            // Key is ValueTuple<string, Type>: (Region, ViewModelType).
+            // ValueTuple uses public fields, not properties.
+            var keyType = key.GetType();
+            var item1Field = keyType.GetField("Item1");
+            var item2Field = keyType.GetField("Item2");
+            var item1 = (string?)item1Field?.GetValue(key);
+            var item2 = (Type?)item2Field?.GetValue(key);
+            if (item1 == regionName && item2 == viewModelType)
+            {
+                var entry = kv.Value;
+                var ctsProp = entry?.GetType().GetProperty("LifecycleCts");
+                return ctsProp?.GetValue(entry) as CancellationTokenSource;
+            }
+        }
+
+        return null;
     }
 
     [Fact]
@@ -2750,6 +2819,9 @@ public class NavigationServiceTests
         await nav.NavigateToAsync<ReentrantCancelViewModel>();
         var vm = Assert.IsType<ReentrantCancelViewModel>(nav.GetCurrentViewModel());
         vm.EnableReentrantDispose(nav);
+        var cts = GetActiveEntryCts(nav, "MainRegion");
+        Assert.NotNull(cts);
+        vm.RegisterReentrantCallback(cts.Token);
 
         // Dispose cancels the entry's token; the callback reenters Dispose.
         // If Cancel ran while holding _navigationLock, this would deadlock.
@@ -2766,16 +2838,9 @@ public class NavigationServiceTests
 
         public void EnableReentrantCancel(INavigationService nav) => _nav = nav;
 
-        public void EnableReentrantDispose(INavigationService nav)
+        public void RegisterReentrantCallback(CancellationToken token)
         {
-            _nav = nav;
-            _reenterDispose = true;
-        }
-
-        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
-        {
-            // Register a callback that reenters the service (takes the navigation lock).
-            cancellationToken.Register(() =>
+            token.Register(() =>
             {
                 CancelCallbackRan = true;
                 // This would deadlock if Cancel() ran while holding _navigationLock.
@@ -2788,8 +2853,16 @@ public class NavigationServiceTests
                     _nav?.ClearCache("MainRegion");
                 }
             });
-            return Task.CompletedTask;
         }
+
+        public void EnableReentrantDispose(INavigationService nav)
+        {
+            _nav = nav;
+            _reenterDispose = true;
+        }
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
 
         public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
