@@ -237,12 +237,14 @@ public sealed partial class NavigationService
             // block navigation forever; on timeout the scope is released anyway and
             // the hang is reported via SubscriberError.
             //
-            // Self-wait avoidance: if this disposal runs inside the entry's own
-            // lifecycle callback (reentrant navigation), waiting would deadlock
-            // until the timeout. The callback is on this async flow — skip the wait.
+            // Self-dispose handling: if this disposal runs inside the entry's own
+            // lifecycle callback (reentrant navigation), waiting for the gate
+            // would deadlock until the timeout, AND disposing immediately would
+            // pull the scope's services out from under the still-running callback.
+            // Defer the disposal until the callback exits.
+            bool isSelfDispose = ReferenceEquals(_currentLifecycleEntry.Value, entry);
             var gateTask = entry.InFlightGateTask;
-            if (gateTask is not null && !gateTask.IsCompleted &&
-                !ReferenceEquals(_currentLifecycleEntry.Value, entry))
+            if (gateTask is not null && !gateTask.IsCompleted && !isSelfDispose)
             {
                 var completed = await Task.WhenAny(gateTask, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
                 if (!ReferenceEquals(completed, gateTask))
@@ -258,14 +260,31 @@ public sealed partial class NavigationService
                 }
             }
 
-            await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false);
+            if (isSelfDispose)
+            {
+                // The callback is still on this async flow and may touch the
+                // scope's services after the navigation returns. Release the
+                // scope when the last in-flight callback exits. It stays in
+                // _pendingScopeDisposals until the deferred disposal runs.
+                entry.DeferScopeDisposal(ex => { try { SubscriberError?.Invoke(ex); } catch { } });
+            }
+            else
+            {
+                await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false);
 
-            using (_stateLock.EnterScope())
-                _pendingScopeDisposals.Remove(entry.Scope);
+                using (_stateLock.EnterScope())
+                    _pendingScopeDisposals.Remove(entry.Scope);
+            }
 
-            // The lifecycle CTS is no longer needed once the entry is gone.
-            try { entry.LifecycleCts.Dispose(); }
-            catch { }
+            // The lifecycle CTS is no longer needed once the entry is gone —
+            // except for self-dispose, where the running callback still holds
+            // the token. It will be retired and disposed when the in-flight
+            // count drops to zero (see BeginNewActivation/ExitInFlightLifecycle).
+            if (!isSelfDispose)
+            {
+                try { entry.LifecycleCts.Dispose(); }
+                catch { }
+            }
 
             // Ownership released: notify even if the scope disposal threw (the error
             // was collected above and will be rethrown by RunTransitionAsync).
@@ -410,6 +429,8 @@ public sealed partial class NavigationService
         private readonly object _inFlightLock = new();
         private int _inFlightCount;
         private TaskCompletionSource? _inFlightGate;
+        private List<CancellationTokenSource> _retiredCts = new();
+        private List<(IServiceScope Scope, Action<Exception>? ErrorHandler)> _deferredScopeDisposals = new();
 
         public NavigationEntry(string regionName, INavigationViewModel viewModel, object? parameter, NavigationMode mode, IServiceScope scope)
         {
@@ -434,17 +455,32 @@ public sealed partial class NavigationService
         public CancellationTokenSource LifecycleCts { get; private set; } = new();
 
         /// <summary>
-        /// Starts a new activation cycle for this entry (e.g. GoBack reactivation).
-        /// Replaces the cancelled <see cref="LifecycleCts"/> with a fresh one.
-        /// In-flight callbacks from the previous cycle keep running under their own
-        /// token and remain tracked — they are not forgotten.
+        /// Starts a new activation cycle for this entry (e.g. GoBack reactivation
+        /// or refresh). Cancels the previous cycle's token and replaces
+        /// <see cref="LifecycleCts"/> with a fresh source. The old source is NOT
+        /// disposed here — in-flight callbacks from the previous cycle may still
+        /// hold its token and call <c>Register</c> on it (which would throw
+        /// <see cref="ObjectDisposedException"/> on a disposed source). Retired
+        /// sources are disposed when the in-flight count drops to zero.
         /// </summary>
-        public void ResetLifecycle()
+        public void BeginNewActivation()
         {
-            try { LifecycleCts.Dispose(); }
-            catch { }
-            LifecycleCts = new CancellationTokenSource();
+            CancellationTokenSource oldCts;
+            lock (_inFlightLock)
+            {
+                oldCts = LifecycleCts;
+                try { oldCts.Cancel(); }
+                catch (ObjectDisposedException) { }
+                LifecycleCts = new CancellationTokenSource();
+                _retiredCts.Add(oldCts);
+            }
         }
+
+        /// <summary>
+        /// Legacy alias kept for the GoBack reactivation path; prefer
+        /// <see cref="BeginNewActivation"/>.
+        /// </summary>
+        public void ResetLifecycle() => BeginNewActivation();
 
         /// <summary>
         /// Registers an async lifecycle callback as in-flight. Must be called when the
@@ -466,10 +502,15 @@ public sealed partial class NavigationService
         }
 
         /// <summary>
-        /// Unregisters an async lifecycle callback.
+        /// Unregisters an async lifecycle callback. When the last in-flight
+        /// callback exits, retired cancellation sources are disposed and any
+        /// deferred scope disposals (from reentrant self-destroying navigation)
+        /// are executed.
         /// </summary>
         public void ExitInFlightLifecycle(Task gateTask)
         {
+            List<CancellationTokenSource>? retiredToDispose = null;
+            List<(IServiceScope Scope, Action<Exception>? ErrorHandler)>? scopesToDispose = null;
             lock (_inFlightLock)
             {
                 _inFlightCount--;
@@ -477,6 +518,93 @@ public sealed partial class NavigationService
                 {
                     _inFlightGate.TrySetResult();
                     _inFlightGate = null;
+                }
+                if (_inFlightCount == 0)
+                {
+                    if (_retiredCts.Count > 0)
+                    {
+                        retiredToDispose = _retiredCts;
+                        _retiredCts = new();
+                    }
+                    if (_deferredScopeDisposals.Count > 0)
+                    {
+                        scopesToDispose = _deferredScopeDisposals;
+                        _deferredScopeDisposals = new();
+                    }
+                }
+            }
+
+            // Dispose outside the lock: user code may run during disposal.
+            if (retiredToDispose is not null)
+            {
+                foreach (var cts in retiredToDispose)
+                {
+                    try { cts.Dispose(); }
+                    catch { }
+                }
+            }
+            if (scopesToDispose is not null)
+            {
+                // Deferred disposal from reentrant self-destroying navigation.
+                // Run on the thread pool: the scope may need async disposal and
+                // we must not block the exiting callback. The entry is already
+                // detached from the stack/cache, so no other path will dispose
+                // this scope.
+                foreach (var (scope, errorHandler) in scopesToDispose)
+                {
+                    var capturedScope = scope;
+                    var capturedHandler = errorHandler;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            if (capturedScope is IAsyncDisposable asyncScope)
+                            {
+                                await asyncScope.DisposeAsync().ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                capturedScope.Dispose();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            try { capturedHandler?.Invoke(ex); }
+                            catch { }
+                        }
+                    });
+                }
+            }
+        }
+
+        /// <summary>
+        /// Defers the disposal of the entry's page scope until all in-flight
+        /// lifecycle callbacks have exited. Used when a reentrant navigation
+        /// destroys the entry whose callback is currently running: disposing
+        /// immediately would pull dependencies out from under the running
+        /// callback, while waiting would deadlock (the callback is awaiting
+        /// the navigation). The scope is released when the last callback exits.
+        /// </summary>
+        /// <param name="errorHandler">Reports disposal errors (may be null).</param>
+        public void DeferScopeDisposal(Action<Exception>? errorHandler)
+        {
+            lock (_inFlightLock)
+            {
+                // Only defer if there's actually a callback running; otherwise
+                // the scope would never be released by ExitInFlightLifecycle.
+                if (_inFlightCount > 0)
+                {
+                    _deferredScopeDisposals.Add((Scope, errorHandler));
+                }
+                else
+                {
+                    // No callback in flight: dispose inline (best effort).
+                    try { Scope.Dispose(); }
+                    catch (Exception ex)
+                    {
+                        try { errorHandler?.Invoke(ex); }
+                        catch { }
+                    }
                 }
             }
         }

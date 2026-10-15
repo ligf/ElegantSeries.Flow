@@ -296,7 +296,12 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
             using (_stateLock.EnterScope())
             {
-                targets = TakeCacheEntriesForDisposalLocked(RemoveRegionCacheEntriesLocked(regionName));
+                var removed = RemoveRegionCacheEntriesLocked(regionName);
+                // Signal in-flight callbacks to stop. Sync ClearCache cannot wait
+                // for async callbacks without risking deadlock, but it must cancel
+                // their tokens before the scopes are released below.
+                CancelAndCollectGates(removed.Select(kv => kv.Value));
+                targets = TakeCacheEntriesForDisposalLocked(removed);
             }
         }
         finally
@@ -330,7 +335,9 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
                 return;
             }
 
-            targets = TakeAllCacheEntriesLocked(out var affectedRegions);
+            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries);
+            // Signal in-flight callbacks to stop (sync path cannot wait).
+            CancelAndCollectGates(removedEntries);
             foreach (var region in affectedRegions)
             {
                 var capturedRegion = region;
@@ -359,6 +366,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
         List<ScopeDisposalTarget> targets;
+        List<Task> gates;
 
         // Serialized with navigation transitions: otherwise a concurrent navigation
         // could adopt a cache entry whose scope this call is about to dispose.
@@ -372,12 +380,34 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
 
             using (_stateLock.EnterScope())
             {
-                targets = TakeCacheEntriesForDisposalLocked(RemoveRegionCacheEntriesLocked(regionName));
+                var removed = RemoveRegionCacheEntriesLocked(regionName);
+                gates = CancelAndCollectGates(removed.Select(kv => kv.Value));
+                targets = TakeCacheEntriesForDisposalLocked(removed);
             }
         }
         finally
         {
             _navigationLock.Release();
+        }
+
+        // Wait for in-flight lifecycle callbacks (with timeout) before releasing
+        // their scopes. A ViewModel that ignores cancellation cannot block cache
+        // clearing forever; on timeout the scope is released anyway and the hang
+        // is reported via SubscriberError.
+        if (gates.Count > 0)
+        {
+            var allGates = Task.WhenAll(gates);
+            var completed = await Task.WhenAny(allGates, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
+            if (!ReferenceEquals(completed, allGates))
+            {
+                try
+                {
+                    SubscriberError?.Invoke(new TimeoutException(
+                        $"ClearCacheAsync timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
+                        "cached page async lifecycle to complete. The scopes are being released anyway."));
+                }
+                catch { }
+            }
         }
 
         // Scope disposal runs outside the lock; the entries are already detached above.
@@ -399,6 +429,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         // Serialized with navigation transitions (see ClearCacheAsync).
         await _navigationLock.WaitAsync().ConfigureAwait(false);
         List<ScopeDisposalTarget> targets;
+        List<Task> gates;
         try
         {
             if (_disposed)
@@ -406,7 +437,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
                 return;
             }
 
-            targets = TakeAllCacheEntriesLocked(out var affectedRegions);
+            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries);
+            gates = CancelAndCollectGates(removedEntries);
             foreach (var region in affectedRegions)
             {
                 var capturedRegion = region;
@@ -416,6 +448,23 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
         finally
         {
             _navigationLock.Release();
+        }
+
+        // Wait for in-flight callbacks (with timeout) before releasing scopes.
+        if (gates.Count > 0)
+        {
+            var allGates = Task.WhenAll(gates);
+            var completed = await Task.WhenAny(allGates, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
+            if (!ReferenceEquals(completed, allGates))
+            {
+                try
+                {
+                    SubscriberError?.Invoke(new TimeoutException(
+                        $"ClearAllCacheAsync timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
+                        "cached page async lifecycle to complete. The scopes are being released anyway."));
+                }
+                catch { }
+            }
         }
 
         await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
@@ -448,6 +497,13 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider) 
             }
 
             _disposed = true;
+
+            // Cancel lifecycle tokens BEFORE taking scopes: TakeAllScopesForDisposal
+            // clears the stacks, after which the entries are no longer findable.
+            // Sync Dispose cannot wait for async callbacks (blocking would risk
+            // deadlock on UI threads), but it must signal them to stop before
+            // their scopes are released below.
+            CancelAllLifecycleTokensLocked();
 
             targets = TakeAllScopesForDisposal();
             foreach (var target in targets)

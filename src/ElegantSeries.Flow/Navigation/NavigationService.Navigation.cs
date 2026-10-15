@@ -118,14 +118,15 @@ public sealed partial class NavigationService
                             fastRefresh = refreshIfActive;
                             if (fastRefresh)
                             {
-                                // Refresh: keep the active ViewModel, its stack slot,
-                                // its mode and its page scope; swap the entry so the
-                                // new parameter is persisted.
-                                var popped = fastStack.Pop();
-                                var refreshed = new NavigationEntry(
-                                    popped.RegionName, popped.ViewModel, parameter, popped.Mode, popped.Scope);
-                                fastStack.Push(refreshed);
-                                fastEntry = refreshed;
+                                // Refresh: reuse the active entry — same ViewModel, stack
+                                // slot, mode and page scope. The entry's in-flight
+                                // tracking (counter + gate) and lifecycle state stay
+                                // with the page, so an in-progress activation remains
+                                // tracked and its token is cancelled by the new cycle.
+                                // Only the parameter is updated.
+                                peeked.Parameter = parameter;
+                                peeked.BeginNewActivation();
+                                fastEntry = peeked;
                             }
                         }
                     }
@@ -308,13 +309,14 @@ public sealed partial class NavigationService
                             {
                                 // Refresh: keep the active ViewModel, its stack slot, its
                                 // mode and its page scope; only the activation callbacks
-                                // run again. The entry is swapped so the new parameter is
-                                // persisted — a later GoBack re-activates with the refreshed
-                                // parameter, not the original one (mirrors pop-to-existing).
-                                var current = stack.Pop();
-                                refreshEntry = new NavigationEntry(
-                                    current.RegionName, current.ViewModel, parameter, current.Mode, current.Scope);
-                                stack.Push(refreshEntry);
+                                // run again. The entry is reused (not swapped) so its
+                                // in-flight tracking and lifecycle state stay with the
+                                // page; the parameter is updated in place and a new
+                                // activation cycle cancels the previous one.
+                                var current = stack.Peek();
+                                current.Parameter = parameter;
+                                current.BeginNewActivation();
+                                refreshEntry = current;
                             }
 
                             success = true;
@@ -348,13 +350,14 @@ public sealed partial class NavigationService
                                     firstPopped = false;
                                 }
 
-                                // Swap the entry so the re-activation carries the new
-                                // parameter; the ViewModel instance, page scope and mode
-                                // are preserved.
-                                var popped = stack.Pop();
-                                reactivatedEntry = new NavigationEntry(
-                                    popped.RegionName, popped.ViewModel, parameter, popped.Mode, popped.Scope);
-                                stack.Push(reactivatedEntry);
+                                // Reuse the entry so re-activation carries the new
+                                // parameter; the ViewModel instance, page scope, mode,
+                                // in-flight tracking and lifecycle state are preserved.
+                                // A new activation cycle cancels the previous one.
+                                var target = stack.Peek();
+                                target.Parameter = parameter;
+                                target.BeginNewActivation();
+                                reactivatedEntry = target;
 
                                 success = true;
                             }
