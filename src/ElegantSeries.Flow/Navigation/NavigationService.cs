@@ -137,8 +137,14 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 // Wait for the in-flight callback with the same timeout semantics as
                 // other disposal gates: an unresponsive ViewModel must not block
                 // disposal forever. On timeout, report and release the scope anyway.
-                var completed = await Task.WhenAny(gateTask, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
-                if (!ReferenceEquals(completed, gateTask))
+                using var delayCts = new CancellationTokenSource();
+                var completed = await Task.WhenAny(gateTask, Task.Delay(DisposalGateTimeout, delayCts.Token)).ConfigureAwait(false);
+                if (ReferenceEquals(completed, gateTask))
+                {
+                    // Gate won: cancel the delay to release its timer early.
+                    delayCts.Cancel();
+                }
+                else
                 {
                     try
                     {
