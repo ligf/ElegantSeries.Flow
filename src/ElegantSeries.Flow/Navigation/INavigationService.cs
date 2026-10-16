@@ -343,6 +343,13 @@ public interface INavigationService
     /// navigation lock. Prefer <see cref="ClearAllCacheAsync"/> on UI threads to avoid
     /// stalling the interface.
     /// </para>
+    /// <para>
+    /// Lifecycle contract: only cached pages no longer referenced by the navigation
+    /// stack have their lifecycle tokens cancelled; the token of a still-active page
+    /// is left untouched. This method does NOT wait for in-flight async lifecycle
+    /// callbacks to complete. Use <see cref="ClearAllCacheAsync"/> to wait for
+    /// in-flight callbacks with a timeout.
+    /// </para>
     /// </remarks>
     void ClearAllCache();
 
