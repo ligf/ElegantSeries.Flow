@@ -313,9 +313,19 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             if (_regionStacks.TryGetValue(regionName, out var stack) && stack.Count > 1)
             {
                 currentVmForGuard = stack.Peek().ViewModel;
-                var target = stack.Skip(1).First();
+                // Hand-written loop: avoids LINQ allocation/closure while holding _stateLock.
+                NavigationEntry? target = null;
+                var skipped = 0;
+                foreach (var entry in stack)
+                {
+                    if (skipped++ == 1)
+                    {
+                        target = entry;
+                        break;
+                    }
+                }
                 guardContext = new NavigationGuardContext(
-                    regionName, target.ViewModel.GetType(), mode: null, target.Parameter, isBack: true);
+                    regionName, target!.ViewModel.GetType(), mode: null, target.Parameter, isBack: true);
             }
         }
 

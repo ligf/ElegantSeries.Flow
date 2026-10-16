@@ -653,26 +653,6 @@ public sealed partial class NavigationService
     }
 
     /// <summary>
-    /// Determines whether the given ViewModel instance is present on any region's
-    /// navigation stack. The caller must hold <see cref="_stateLock"/>.
-    /// </summary>
-    private bool IsOnAnyStackLocked(INavigationViewModel viewModel)
-    {
-        foreach (var stack in _regionStacks.Values)
-        {
-            foreach (var entry in stack)
-            {
-                if (ReferenceEquals(entry.ViewModel, viewModel))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// Determines whether the given ViewModel instance is present on another region's
     /// navigation stack (excluding the specified region). The caller must hold
     /// <see cref="_stateLock"/>.
