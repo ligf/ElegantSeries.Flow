@@ -13,6 +13,11 @@ namespace ElegantSeries.Flow.Navigation;
 /// the current page remains active.
 /// </para>
 /// <para>
+/// If the guard throws an exception, the exception propagates to the navigation
+/// caller and the navigation is aborted. Guard implementations should return
+/// <see langword="false"/> for expected vetoes and only throw for programming errors.
+/// </para>
+/// <para>
 /// When the decision depends on where the navigation is going, implement
 /// <see cref="INavigationGuardWithContext"/> instead: it is consulted in place of
 /// this interface and receives a <see cref="NavigationGuardContext"/>.
@@ -48,7 +53,7 @@ public interface INavigationGuard
 /// Like <see cref="INavigationGuard"/>, the guard is invoked <b>outside</b> the navigation
 /// lock to avoid deadlocks, making it safe to display confirmation dialogs or perform
 /// async I/O. Returning <see langword="false"/> cancels the navigation and the current
-/// page remains active.
+/// page remains active. A thrown exception propagates to the navigation caller.
 /// </para>
 /// </remarks>
 public interface INavigationGuardWithContext
