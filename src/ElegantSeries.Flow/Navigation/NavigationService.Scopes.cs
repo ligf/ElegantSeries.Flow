@@ -179,12 +179,23 @@ public sealed partial class NavigationService
     {
         using (_stateLock.EnterScope())
         {
-            affectedRegions = _keepAliveCache.Keys.Select(k => k.Region)
-                .Union(_regionStacks.Keys)
-                .Distinct()
-                .ToList();
+            // Hand-written loops: avoids LINQ allocation/closure while holding _stateLock.
+            var regions = new HashSet<string>();
+            foreach (var key in _keepAliveCache.Keys)
+            {
+                regions.Add(key.Region);
+            }
+            foreach (var region in _regionStacks.Keys)
+            {
+                regions.Add(region);
+            }
+            affectedRegions = new List<string>(regions);
             var removed = RemoveAllCacheEntriesLocked();
-            removedEntries = removed.Select(kv => kv.Value).ToList();
+            removedEntries = new List<NavigationEntry>(removed.Count);
+            foreach (var kv in removed)
+            {
+                removedEntries.Add(kv.Value);
+            }
             // Only unreferenced entries get their lifecycle tokens cancelled:
             // clearing the cache must not cancel an active page.
             unreferencedEntries = FilterUnreferencedEntries(removedEntries);

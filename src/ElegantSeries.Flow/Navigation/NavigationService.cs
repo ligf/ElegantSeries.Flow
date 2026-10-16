@@ -628,8 +628,13 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         if (gates.Count > 0)
         {
             var allGates = Task.WhenAll(gates);
-            var completed = await Task.WhenAny(allGates, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
-            if (!ReferenceEquals(completed, allGates))
+            using var delayCts = new CancellationTokenSource();
+            var completed = await Task.WhenAny(allGates, Task.Delay(DisposalGateTimeout, delayCts.Token)).ConfigureAwait(false);
+            if (ReferenceEquals(completed, allGates))
+            {
+                delayCts.Cancel();
+            }
+            else
             {
                 try
                 {
@@ -693,8 +698,13 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         if (gates.Count > 0)
         {
             var allGates = Task.WhenAll(gates);
-            var completed = await Task.WhenAny(allGates, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
-            if (!ReferenceEquals(completed, allGates))
+            using var delayCts = new CancellationTokenSource();
+            var completed = await Task.WhenAny(allGates, Task.Delay(DisposalGateTimeout, delayCts.Token)).ConfigureAwait(false);
+            if (ReferenceEquals(completed, allGates))
+            {
+                delayCts.Cancel();
+            }
+            else
             {
                 try
                 {
@@ -857,8 +867,13 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         if (gateTasks.Count > 0)
         {
             var allGates = Task.WhenAll(gateTasks);
-            var completed = await Task.WhenAny(allGates, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
-            if (!ReferenceEquals(completed, allGates))
+            using var delayCts = new CancellationTokenSource();
+            var completed = await Task.WhenAny(allGates, Task.Delay(DisposalGateTimeout, delayCts.Token)).ConfigureAwait(false);
+            if (ReferenceEquals(completed, allGates))
+            {
+                delayCts.Cancel();
+            }
+            else
             {
                 try
                 {
