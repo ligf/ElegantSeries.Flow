@@ -257,8 +257,13 @@ public sealed partial class NavigationService
             var gateTask = entry.InFlightGateTask;
             if (gateTask is not null && !gateTask.IsCompleted && !isSelfDispose)
             {
-                var completed = await Task.WhenAny(gateTask, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
-                if (!ReferenceEquals(completed, gateTask))
+                using var delayCts = new CancellationTokenSource();
+                var completed = await Task.WhenAny(gateTask, Task.Delay(DisposalGateTimeout, delayCts.Token)).ConfigureAwait(false);
+                if (ReferenceEquals(completed, gateTask))
+                {
+                    delayCts.Cancel();
+                }
+                else
                 {
                     try
                     {
