@@ -8,3 +8,4 @@ FLOWGEN006 | ElegantSeries.Flow.Generator | Error | Unresolvable ViewModel type 
 FLOWGEN007 | ElegantSeries.Flow.Generator | Warning | Unsupported INavigationService lifetime in AddElegantSeriesFlow
 FLOWGEN008 | ElegantSeries.Flow.Generator | Error | Open generic view for [ViewFor]
 FLOWGEN009 | ElegantSeries.Flow.Generator | Error | Open generic ViewModel for [ViewFor]
+FLOWGEN010 | ElegantSeries.Flow.Generator | Error | ViewModel does not implement INavigationViewModel
