@@ -192,11 +192,6 @@ public sealed partial class NavigationService
         }
     }
 
-    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions, out List<NavigationEntry> removedEntries)
-    {
-        return TakeAllCacheEntriesLocked(out affectedRegions, out removedEntries, out _);
-    }
-
     // ───────────────────── Disposal internals ─────────────────────
 
     /// <summary>
@@ -244,11 +239,6 @@ public sealed partial class NavigationService
     }
 
     /// <summary>
-    /// Takes every page scope owned by the service (region stacks, KeepAlive cache and
-    /// deferred disposals) and clears all of them. Each distinct scope is returned once.
-    /// The caller must not hold <see cref="_stateLock"/>.
-    /// </summary>
-    /// <summary>
     /// Collects every entry from all region stacks and the KeepAlive cache.
     /// The caller must hold <see cref="_navigationLock"/> (and <see cref="_stateLock"/>
     /// is acquired internally for the cache).
@@ -287,6 +277,11 @@ public sealed partial class NavigationService
         return list;
     }
 
+    /// <summary>
+    /// Takes every page scope owned by the service (region stacks, KeepAlive cache and
+    /// deferred disposals) and clears all of them. Each distinct scope is returned once.
+    /// The caller must not hold <see cref="_stateLock"/>.
+    /// </summary>
     private List<ScopeDisposalTarget> TakeAllScopesForDisposal()
     {
         var regionsByScope = new Dictionary<IServiceScope, HashSet<string>>(ReferenceEqualityComparer.Instance);

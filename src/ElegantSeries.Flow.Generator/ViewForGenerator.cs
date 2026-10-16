@@ -318,7 +318,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// True when the mapping already has a diagnostic error (FLOWGEN003-006/008/009).
+    /// True when the mapping already has a diagnostic error (FLOWGEN003-006/008-010).
     /// Such mappings are excluded from the duplicate check to avoid noise diagnostics.
     /// </summary>
     private static bool HasMappingError(ViewMapping mapping) =>
