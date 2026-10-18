@@ -566,35 +566,59 @@ public sealed partial class NavigationService
         /// <see cref="CancelOutsideLocks"/>.
         /// In-flight callbacks from the previous cycle keep running under their own
         /// token and remain tracked. Retired sources are disposed when the
-        /// in-flight count drops to zero.
+        /// in-flight count drops to zero, or on a later activation (when the
+        /// count is zero) once they have been cancelled.
         /// </summary>
         /// <returns>The retired cancellation token source, to be cancelled by the
         /// caller after releasing locks.</returns>
         public CancellationTokenSource BeginNewActivation()
         {
+            List<CancellationTokenSource>? toDispose = null;
+            CancellationTokenSource oldCts;
             lock (_inFlightLock)
             {
-                var oldCts = LifecycleCts;
+                oldCts = LifecycleCts;
                 LifecycleCts = new CancellationTokenSource();
+
+                // When no async callbacks are in flight, dispose previously
+                // retired sources that have already been cancelled. Without
+                // this, entries with only synchronous (or no) lifecycle
+                // callbacks would accumulate retired sources unboundedly,
+                // because ExitInFlightLifecycle is never called for them.
+                // Only sources with IsCancellationRequested == true are
+                // disposed: the owning thread cancels the retired source
+                // outside locks via CancelOutsideLocks, and a concurrent
+                // activation must not dispose a source before its owner has
+                // cancelled it — that would lose the cancel signal via
+                // ObjectDisposedException. A not-yet-cancelled source is left
+                // in the list and picked up by a later activation.
                 if (_inFlightCount == 0 && _retiredCts.Count > 0)
                 {
-                    // No async callbacks in flight: dispose previously retired
-                    // sources now. Otherwise _retiredCts would accumulate for
-                    // ViewModels with only synchronous (or no) lifecycle callbacks,
-                    // since ExitInFlightLifecycle is never called for them.
-                    // Disposal (unlike Cancel) invokes no user code, so it is safe
-                    // inside the lock. The just-retired oldCts is still returned
-                    // for the caller to cancel outside locks; it will be disposed
-                    // on the next activation (or by ExitInFlightLifecycle).
-                    foreach (var cts in _retiredCts)
+                    for (int i = _retiredCts.Count - 1; i >= 0; i--)
                     {
-                        try { cts.Dispose(); } catch { }
+                        if (_retiredCts[i].IsCancellationRequested)
+                        {
+                            toDispose ??= new List<CancellationTokenSource>();
+                            toDispose.Add(_retiredCts[i]);
+                            _retiredCts.RemoveAt(i);
+                        }
                     }
-                    _retiredCts.Clear();
                 }
+
                 _retiredCts.Add(oldCts);
-                return oldCts;
             }
+
+            // Dispose outside the lock, matching ExitInFlightLifecycle.
+            if (toDispose is not null)
+            {
+                foreach (var cts in toDispose)
+                {
+                    try { cts.Dispose(); }
+                    catch { }
+                }
+            }
+
+            return oldCts;
         }
 
         /// <summary>

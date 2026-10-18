@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using ElegantSeries.Flow.Extensions;
 using ElegantSeries.Flow.Navigation;
@@ -3020,6 +3021,160 @@ public class NavigationServiceTests
         {
             Interlocked.Increment(ref DisposeCount);
         }
+    }
+
+    [Fact]
+    public async Task RetiredCts_DoesNotAccumulateForSyncOnlyViewModel()
+    {
+        // For entries with only synchronous (or no) lifecycle callbacks,
+        // ExitInFlightLifecycle is never called. BeginNewActivation must
+        // dispose previously-retired CTSs that have been cancelled, otherwise
+        // _retiredCts grows unboundedly on repeated activations.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncOnlyKeepAliveViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        var result = await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>(
+            mode: NavigationMode.KeepAlive);
+        Assert.True(result);
+
+        // Repeated refreshes each retire the previous CTS.
+        for (int i = 0; i < 10; i++)
+        {
+            var refreshResult = await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>(
+                refreshIfActive: true);
+            Assert.True(refreshResult);
+        }
+
+        int retiredCount = GetRetiredCtsCount(nav, "MainRegion", typeof(SyncOnlyKeepAliveViewModel));
+        Assert.True(retiredCount <= 2,
+            $"_retiredCts should stay bounded, but has {retiredCount} entries after 10 refreshes");
+    }
+
+    [Fact]
+    public async Task BeginNewActivation_DoesNotDisposeUncancelledCts()
+    {
+        // A concurrent activation must not dispose a CTS before its owning
+        // thread has cancelled it — that would lose the cancel signal via
+        // ObjectDisposedException in CancelOutsideLocks.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncOnlyKeepAliveViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        var result = await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>();
+        Assert.True(result);
+
+        var entry = GetNavigationEntry(nav, "MainRegion", typeof(SyncOnlyKeepAliveViewModel));
+        Assert.NotNull(entry);
+
+        var entryType = entry.GetType();
+        var beginMethod = entryType.GetMethod("BeginNewActivation",
+            BindingFlags.Public | BindingFlags.Instance)!;
+
+        // First activation retires the initial CTS (not yet cancelled).
+        var cts1 = (CancellationTokenSource)beginMethod.Invoke(entry, null)!;
+        Assert.False(cts1.IsCancellationRequested);
+        Assert.False(IsCtsDisposed(cts1));
+
+        // Second activation must NOT dispose cts1: it hasn't been cancelled yet.
+        var cts2 = (CancellationTokenSource)beginMethod.Invoke(entry, null)!;
+        Assert.False(IsCtsDisposed(cts1),
+            "BeginNewActivation disposed a CTS before its owner cancelled it");
+
+        // After the owner cancels cts1, the next activation may dispose it.
+        NavigationEntry_CancelOutsideLocks(cts1);
+        Assert.True(cts1.IsCancellationRequested);
+
+        var cts3 = (CancellationTokenSource)beginMethod.Invoke(entry, null)!;
+        Assert.True(IsCtsDisposed(cts1),
+            "BeginNewActivation should dispose a previously-cancelled retired CTS");
+        Assert.False(IsCtsDisposed(cts2));
+
+        // Cleanup.
+        NavigationEntry_CancelOutsideLocks(cts2);
+        NavigationEntry_CancelOutsideLocks(cts3);
+    }
+
+    private static int GetRetiredCtsCount(
+        NavigationService nav, string regionName, Type viewModelType)
+    {
+        var entry = GetNavigationEntry(nav, regionName, viewModelType);
+        Assert.NotNull(entry);
+        var field = entry.GetType().GetField("_retiredCts",
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var list = (System.Collections.IList)field.GetValue(entry)!;
+        return list.Count;
+    }
+
+    private static object? GetNavigationEntry(
+        NavigationService nav, string regionName, Type viewModelType)
+    {
+        var navType = typeof(NavigationService);
+
+        // 1. Check _regionStacks: Dictionary<string, Stack<NavigationEntry>>
+        var stacksField = navType.GetField("_regionStacks",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        if (stacksField?.GetValue(nav) is System.Collections.IDictionary stacksDict &&
+            stacksDict[regionName] is System.Collections.IEnumerable stack)
+        {
+            foreach (var entry in stack)
+            {
+                if (IsEntryForViewModel(entry, viewModelType))
+                    return entry;
+            }
+        }
+
+        // 2. Check _keepAliveCache: Dictionary<(string, Type), NavigationEntry>
+        var cacheField = navType.GetField("_keepAliveCache",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        if (cacheField?.GetValue(nav) is System.Collections.IDictionary cacheDict)
+        {
+            foreach (System.Collections.DictionaryEntry kv in cacheDict)
+            {
+                if (kv.Value is not null && IsEntryForViewModel(kv.Value, viewModelType))
+                    return kv.Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsEntryForViewModel(object entry, Type viewModelType)
+    {
+        var vmProp = entry.GetType().GetProperty("ViewModel");
+        var vm = vmProp?.GetValue(entry);
+        return vm is not null && vm.GetType() == viewModelType;
+    }
+
+    private static bool IsCtsDisposed(CancellationTokenSource cts)
+    {
+        try
+        {
+            _ = cts.Token;
+            return false;
+        }
+        catch (ObjectDisposedException)
+        {
+            return true;
+        }
+    }
+
+    private static void NavigationEntry_CancelOutsideLocks(CancellationTokenSource cts)
+    {
+        var method = typeof(NavigationService).GetNestedType("NavigationEntry",
+            BindingFlags.NonPublic)!.GetMethod("CancelOutsideLocks",
+            BindingFlags.Public | BindingFlags.Static)!;
+        method.Invoke(null, new object[] { cts });
+    }
+
+    private sealed class SyncOnlyKeepAliveViewModel : NavigationViewModelBase, INavigationAware
+    {
+        public void OnNavigatedTo(object? parameter) { }
+        public void OnNavigatedFrom() { }
     }
 
     #endregion
