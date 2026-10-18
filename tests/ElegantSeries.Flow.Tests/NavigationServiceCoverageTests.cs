@@ -393,10 +393,14 @@ public class NavigationServiceCoverageTests
         var method = svc.GetType().GetMethod("TrackDeferredDisposal",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
         Assert.NotNull(method);
+        // Create a minimal ViewModel for the event notification.
+        var vm = new TestHomeViewModel();
         method.Invoke(svc, new object[]
         {
             hangingGate,
             scope,
+            vm,
+            "MainRegion",
             (Action<Exception>)(ex =>
             {
                 try { observedError = ex; errorSeen.TrySetResult(true); }
@@ -508,9 +512,11 @@ public class NavigationServiceCoverageTests
 
         var errors = new List<Exception>();
         // First call disposes
-        await (ValueTask)method.Invoke(svc, new object[] { scope, errors })!;
+        var first = await (ValueTask<bool>)method.Invoke(svc, new object[] { scope, errors })!;
+        Assert.True(first);
         // Second call should be no-op (already in _disposedScopes)
-        await (ValueTask)method.Invoke(svc, new object[] { scope, errors })!;
+        var second = await (ValueTask<bool>)method.Invoke(svc, new object[] { scope, errors })!;
+        Assert.False(second);
 
         Assert.Empty(errors);
     }
@@ -616,9 +622,11 @@ public class NavigationServiceCoverageTests
         var completed = Task.WhenAny(navigateAway, Task.Delay(TimeSpan.FromSeconds(3)))
             .GetAwaiter().GetResult();
         Assert.Same(navigateAway, completed);
+        navigateAway.GetAwaiter().GetResult();
 
         // The scope must NOT have been disposed while the callback was running
-        // (use-after-dispose). It stays alive in the cache.
+        // (use-after-dispose). Sync reentrancy leaves the entry in the cache;
+        // it stays alive until the next ClearCache.
         Assert.NotNull(SyncSelfClearingViewModel.DisposedDuringCallback);
         Assert.False(SyncSelfClearingViewModel.DisposedDuringCallback);
         Assert.False(tracker.Disposed);

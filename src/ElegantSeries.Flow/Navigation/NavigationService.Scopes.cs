@@ -107,9 +107,10 @@ public sealed partial class NavigationService
     /// deferred disposal via <see cref="TrackDeferredDisposal"/>; the caller must invoke
     /// <see cref="TrackDeferredDisposal"/> outside <see cref="_stateLock"/> (it re-acquires
     /// the lock). Non-self entries are returned for the normal disposal path.
-    /// Self entries with no in-flight gate (synchronous callbacks) are restored to the
+    /// Self entries from synchronous callbacks (no in-flight gate) are restored to the
     /// cache: there is no gate to defer on, and immediate disposal would be
-    /// use-after-dispose. The caller must hold <see cref="_stateLock"/>.
+    /// use-after-dispose.
+    /// The caller must hold <see cref="_stateLock"/>.
     /// </summary>
     private List<(NavigationEntry Entry, Task Gate)> PartitionSelfEntriesLocked(
         List<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>> removed,
@@ -145,9 +146,8 @@ public sealed partial class NavigationService
                     continue;
                 }
 
-                // Synchronous callback (no in-flight gate): restore to cache.
-                // There is no gate to defer disposal on; leaving it in the cache
-                // keeps it alive under the normal KeepAlive semantics.
+                // Sync callback (no gate): restore to cache. The entry stays alive;
+                // call ClearCache again after the callback if it must be dropped.
                 _keepAliveCache[kv.Key] = entry;
                 continue;
             }
@@ -276,13 +276,16 @@ public sealed partial class NavigationService
     {
         foreach (var target in targets)
         {
-            DisposeScopeSync(target.Scope, errors);
-
-            foreach (var region in target.Regions)
+            // Only raise ViewModelReleased if the scope was actually disposed
+            // (exactly-once: a racing deferred disposal may have taken it).
+            if (DisposeScopeSync(target.Scope, errors))
             {
-                var capturedRegion = region;
-                var capturedViewModel = target.ViewModel;
-                pendingEvents.Add(() => RaiseViewModelReleased(capturedRegion, capturedViewModel));
+                foreach (var region in target.Regions)
+                {
+                    var capturedRegion = region;
+                    var capturedViewModel = target.ViewModel;
+                    pendingEvents.Add(() => RaiseViewModelReleased(capturedRegion, capturedViewModel));
+                }
             }
         }
     }
@@ -298,13 +301,16 @@ public sealed partial class NavigationService
     {
         foreach (var target in targets)
         {
-            await DisposeScopeAsync(target.Scope, errors).ConfigureAwait(false);
-
-            foreach (var region in target.Regions)
+            // Only raise ViewModelReleased if the scope was actually disposed
+            // (exactly-once: a racing deferred disposal may have taken it).
+            if (await DisposeScopeAsync(target.Scope, errors).ConfigureAwait(false))
             {
-                var capturedRegion = region;
-                var capturedViewModel = target.ViewModel;
-                pendingEvents.Add(() => RaiseViewModelReleased(capturedRegion, capturedViewModel));
+                foreach (var region in target.Regions)
+                {
+                    var capturedRegion = region;
+                    var capturedViewModel = target.ViewModel;
+                    pendingEvents.Add(() => RaiseViewModelReleased(capturedRegion, capturedViewModel));
+                }
             }
         }
     }
@@ -427,7 +433,7 @@ public sealed partial class NavigationService
     /// first throwing disposable (platform behavior, sync and async alike). Across page
     /// scopes the navigation service still attempts every scope.
     /// </remarks>
-    private async ValueTask DisposeScopeAsync(IServiceScope scope, List<Exception> errors)
+    private async ValueTask<bool> DisposeScopeAsync(IServiceScope scope, List<Exception> errors)
     {
         bool shouldDispose;
         using (_stateLock.EnterScope())
@@ -438,7 +444,7 @@ public sealed partial class NavigationService
 
         if (!shouldDispose)
         {
-            return;
+            return false;
         }
 
         try
@@ -456,6 +462,8 @@ public sealed partial class NavigationService
         {
             errors.Add(ex);
         }
+
+        return true;
     }
 
     /// <summary>
@@ -471,7 +479,7 @@ public sealed partial class NavigationService
     /// <c>GoBackAsync</c>, <c>NavigateToAsync</c>); the synchronous APIs only support
     /// synchronously-disposable pages.
     /// </remarks>
-    private void DisposeScopeSync(IServiceScope scope, List<Exception> errors)
+    private bool DisposeScopeSync(IServiceScope scope, List<Exception> errors)
     {
         bool shouldDispose;
         using (_stateLock.EnterScope())
@@ -482,7 +490,7 @@ public sealed partial class NavigationService
 
         if (!shouldDispose)
         {
-            return;
+            return false;
         }
 
         try
@@ -493,6 +501,8 @@ public sealed partial class NavigationService
         {
             errors.Add(ex);
         }
+
+        return true;
     }
 
     /// <summary>
