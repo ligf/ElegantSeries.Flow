@@ -576,22 +576,6 @@ public sealed partial class NavigationService
             {
                 var oldCts = LifecycleCts;
                 LifecycleCts = new CancellationTokenSource();
-                if (_inFlightCount == 0 && _retiredCts.Count > 0)
-                {
-                    // No async callbacks in flight: dispose previously retired
-                    // sources now. Otherwise _retiredCts would accumulate for
-                    // ViewModels with only synchronous (or no) lifecycle callbacks,
-                    // since ExitInFlightLifecycle is never called for them.
-                    // Disposal (unlike Cancel) invokes no user code, so it is safe
-                    // inside the lock. The just-retired oldCts is still returned
-                    // for the caller to cancel outside locks; it will be disposed
-                    // on the next activation (or by ExitInFlightLifecycle).
-                    foreach (var cts in _retiredCts)
-                    {
-                        try { cts.Dispose(); } catch { }
-                    }
-                    _retiredCts.Clear();
-                }
                 _retiredCts.Add(oldCts);
                 return oldCts;
             }
