@@ -369,6 +369,7 @@ public class NavigationServiceCoverageTests
         var services = new ServiceCollection();
         services.AddElegantSeriesFlow(o => o.DisposalGateTimeout = TimeSpan.FromMilliseconds(100));
         services.AddTransient<TestHomeViewModel>();
+        services.AddTransient<TrackedDisposeService>();
         var provider = services.BuildServiceProvider();
         var svc = provider.GetRequiredService<INavigationService>();
 
@@ -380,8 +381,10 @@ public class NavigationServiceCoverageTests
             errorSeen.TrySetResult(true);
         });
 
-        // Create a scope to be disposed via deferred disposal.
+        // Create a scope with a trackable disposable service.
         var scope = provider.CreateScope();
+        var trackable = scope.ServiceProvider.GetRequiredService<TrackedDisposeService>();
+        Assert.False(trackable.Disposed);
 
         // A gate that never completes (simulates a hanging lifecycle callback).
         var hangingGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously).Task;
@@ -406,6 +409,22 @@ public class NavigationServiceCoverageTests
         Assert.NotNull(observedError);
         Assert.IsType<TimeoutException>(observedError);
         Assert.Contains("Deferred disposal gate timed out", observedError.Message);
+
+        // The scope must still be disposed despite the timeout (poll briefly).
+        for (var i = 0; i < 50 && !trackable.Disposed; i++)
+        {
+            await Task.Delay(100);
+        }
+        Assert.True(trackable.Disposed);
+    }
+
+    /// <summary>
+    /// Simple disposable service for tracking scope disposal in tests.
+    /// </summary>
+    private sealed class TrackedDisposeService : IDisposable
+    {
+        public bool Disposed { get; private set; }
+        public void Dispose() => Disposed = true;
     }
 
     /// <summary>
