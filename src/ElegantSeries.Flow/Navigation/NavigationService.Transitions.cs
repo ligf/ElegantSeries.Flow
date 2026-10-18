@@ -572,13 +572,52 @@ public sealed partial class NavigationService
         /// caller after releasing locks.</returns>
         public CancellationTokenSource BeginNewActivation()
         {
+            List<CancellationTokenSource>? toDispose = null;
+            CancellationTokenSource oldCts;
             lock (_inFlightLock)
             {
-                var oldCts = LifecycleCts;
+                oldCts = LifecycleCts;
                 LifecycleCts = new CancellationTokenSource();
+
+                // When no async callbacks are in flight, dispose previously
+                // retired sources that have already been cancelled. Without
+                // this, entries with only synchronous (or no) lifecycle
+                // callbacks would accumulate retired sources unboundedly,
+                // because ExitInFlightLifecycle is never called for them.
+                // Only sources with IsCancellationRequested == true are
+                // disposed: the owning thread cancels the retired source
+                // outside locks via CancelOutsideLocks, and a concurrent
+                // activation must not dispose a source before its owner has
+                // cancelled it — that would lose the cancel signal via
+                // ObjectDisposedException. A not-yet-cancelled source is left
+                // in the list and picked up by a later activation.
+                if (_inFlightCount == 0 && _retiredCts.Count > 0)
+                {
+                    for (int i = _retiredCts.Count - 1; i >= 0; i--)
+                    {
+                        if (_retiredCts[i].IsCancellationRequested)
+                        {
+                            toDispose ??= new List<CancellationTokenSource>();
+                            toDispose.Add(_retiredCts[i]);
+                            _retiredCts.RemoveAt(i);
+                        }
+                    }
+                }
+
                 _retiredCts.Add(oldCts);
-                return oldCts;
             }
+
+            // Dispose outside the lock, matching ExitInFlightLifecycle.
+            if (toDispose is not null)
+            {
+                foreach (var cts in toDispose)
+                {
+                    try { cts.Dispose(); }
+                    catch { }
+                }
+            }
+
+            return oldCts;
         }
 
         /// <summary>
