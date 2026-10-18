@@ -101,6 +101,64 @@ public sealed partial class NavigationService
     }
 
     /// <summary>
+    /// Partitions removed cache entries into those belonging to the currently running
+    /// lifecycle callback (self) versus others. Self entries are moved to
+    /// <see cref="_pendingScopeDisposals"/> and their in-flight gates are returned for
+    /// deferred disposal via <see cref="TrackDeferredDisposal"/>; the caller must invoke
+    /// <see cref="TrackDeferredDisposal"/> outside <see cref="_stateLock"/> (it re-acquires
+    /// the lock). Non-self entries are returned for the normal disposal path.
+    /// Self entries with no in-flight gate (synchronous callbacks) are restored to the
+    /// cache: there is no gate to defer on, and immediate disposal would be
+    /// use-after-dispose. The caller must hold <see cref="_stateLock"/>.
+    /// </summary>
+    private List<(NavigationEntry Entry, Task Gate)> PartitionSelfEntriesLocked(
+        List<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>> removed,
+        out List<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>> others)
+    {
+        var currentEntry = _currentLifecycleEntry.Value;
+        var deferred = new List<(NavigationEntry Entry, Task Gate)>();
+        others = new List<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>>(removed.Count);
+
+        foreach (var kv in removed)
+        {
+            var entry = kv.Value;
+            // Self-dispose: the entry's scope belongs to the lifecycle callback
+            // currently running on this async context. Disposing it now would be
+            // use-after-dispose; waiting for its gate would self-deadlock.
+            if (currentEntry is not null && ReferenceEquals(entry.Scope, currentEntry.Scope))
+            {
+                var gate = entry.InFlightGateTask;
+                if (gate is not null && !gate.IsCompleted)
+                {
+                    // Async callback: defer via the pending + TrackDeferredDisposal path.
+                    var regions = new HashSet<string> { kv.Key.Region };
+                    if (_pendingScopeDisposals.TryGetValue(entry.Scope, out var pending))
+                    {
+                        pending.Regions.UnionWith(regions);
+                    }
+                    else
+                    {
+                        _pendingScopeDisposals.Add(entry.Scope, new PendingDisposal(entry.ViewModel, regions));
+                    }
+
+                    deferred.Add((entry, gate));
+                    continue;
+                }
+
+                // Synchronous callback (no in-flight gate): restore to cache.
+                // There is no gate to defer disposal on; leaving it in the cache
+                // keeps it alive under the normal KeepAlive semantics.
+                _keepAliveCache[kv.Key] = entry;
+                continue;
+            }
+
+            others.Add(kv);
+        }
+
+        return deferred;
+    }
+
+    /// <summary>
     /// Cancels the lifecycle tokens of removed cache entries and collects their
     /// in-flight gate tasks. Must be called while holding the navigation lock
     /// (before the entries are detached). The caller waits for the gates outside
@@ -175,7 +233,7 @@ public sealed partial class NavigationService
     /// can be disposed now versus ones whose disposal must be deferred.
     /// The caller must hold <see cref="_navigationLock"/> (but not <see cref="_stateLock"/>).
     /// </summary>
-    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions, out List<NavigationEntry> removedEntries, out List<NavigationEntry> unreferencedEntries)
+    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions, out List<NavigationEntry> removedEntries, out List<NavigationEntry> unreferencedEntries, out List<(NavigationEntry Entry, Task Gate)> deferredSelfDisposals)
     {
         using (_stateLock.EnterScope())
         {
@@ -191,15 +249,17 @@ public sealed partial class NavigationService
             }
             affectedRegions = new List<string>(regions);
             var removed = RemoveAllCacheEntriesLocked();
-            removedEntries = new List<NavigationEntry>(removed.Count);
-            foreach (var kv in removed)
+            // Self-dispose guard: see PartitionSelfEntriesLocked.
+            deferredSelfDisposals = PartitionSelfEntriesLocked(removed, out var others);
+            removedEntries = new List<NavigationEntry>(others.Count);
+            foreach (var kv in others)
             {
                 removedEntries.Add(kv.Value);
             }
             // Only unreferenced entries get their lifecycle tokens cancelled:
             // clearing the cache must not cancel an active page.
             unreferencedEntries = FilterUnreferencedEntries(removedEntries);
-            return TakeCacheEntriesForDisposalLocked(removed);
+            return TakeCacheEntriesForDisposalLocked(others);
         }
     }
 
