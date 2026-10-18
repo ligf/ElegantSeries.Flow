@@ -534,4 +534,168 @@ public class NavigationServiceCoverageTests
 
         Assert.Empty(errors);
     }
+
+    // ── ClearCache self-dispose guard (P2-2) ───────────────────────
+
+    [Fact]
+    public async Task ClearCacheAsync_FromOwnNavigatedFrom_DoesNotDeadlock()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SelfClearingViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var svc = services.BuildServiceProvider().GetRequiredService<INavigationService>();
+        SelfClearingViewModel.Service = svc;
+        SelfClearingViewModel.ClearCompleted = new TaskCompletionSource<bool>();
+
+        // KeepAlive so the page goes into the cache.
+        await svc.NavigateToAsync<SelfClearingViewModel>(mode: NavigationMode.KeepAlive);
+
+        // Navigate away: triggers OnNavigatedFromAsync which reentrantly calls
+        // ClearCacheAsync. Without the self-dispose guard this would self-deadlock
+        // until the 5s disposal gate timeout.
+        var navigateAway = svc.NavigateToAsync<TestHomeViewModel>();
+        var completed = await Task.WhenAny(navigateAway, Task.Delay(TimeSpan.FromSeconds(3)));
+        Assert.Same(navigateAway, completed);
+        await navigateAway;
+
+        // The reentrant ClearCacheAsync completed (no timeout error reported).
+        Assert.True(SelfClearingViewModel.ClearCompleted.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task ClearCacheAsync_FromOwnNavigatedFrom_DefersScopeDisposal()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SelfClearingDisposableViewModel>();
+        services.AddTransient<TrackedDisposeService>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+        SelfClearingDisposableViewModel.Service = svc;
+        SelfClearingDisposableViewModel.LastTracker = null;
+
+        await svc.NavigateToAsync<SelfClearingDisposableViewModel>(mode: NavigationMode.KeepAlive);
+        var tracker = SelfClearingDisposableViewModel.LastTracker;
+        Assert.NotNull(tracker);
+        Assert.False(tracker.Disposed);
+
+        await svc.NavigateToAsync<TestHomeViewModel>();
+
+        // The scope disposal was deferred until the callback completed; it must
+        // happen automatically without a second ClearCache call.
+        for (var i = 0; i < 100 && !tracker.Disposed; i++)
+        {
+            await Task.Delay(50);
+        }
+        Assert.True(tracker.Disposed);
+    }
+
+    [Fact]
+    public void ClearCache_FromOwnNavigatedFrom_DoesNotDisposeDuringCallback()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncSelfClearingViewModel>();
+        services.AddTransient<TrackedDisposeService>();
+        services.AddTransient<TestHomeViewModel>();
+        var svc = services.BuildServiceProvider().GetRequiredService<INavigationService>();
+        SyncSelfClearingViewModel.Service = svc;
+        SyncSelfClearingViewModel.LastTracker = null;
+        SyncSelfClearingViewModel.DisposedDuringCallback = null;
+
+        svc.NavigateToAsync<SyncSelfClearingViewModel>(mode: NavigationMode.KeepAlive)
+            .GetAwaiter().GetResult();
+        var tracker = SyncSelfClearingViewModel.LastTracker;
+        Assert.NotNull(tracker);
+
+        // Sync ClearCache from within OnNavigatedFrom: must not dispose the scope
+        // while the callback is running, and must not deadlock.
+        var navigateAway = svc.NavigateToAsync<TestHomeViewModel>();
+        var completed = Task.WhenAny(navigateAway, Task.Delay(TimeSpan.FromSeconds(3)))
+            .GetAwaiter().GetResult();
+        Assert.Same(navigateAway, completed);
+
+        // The scope must NOT have been disposed while the callback was running
+        // (use-after-dispose). It stays alive in the cache.
+        Assert.NotNull(SyncSelfClearingViewModel.DisposedDuringCallback);
+        Assert.False(SyncSelfClearingViewModel.DisposedDuringCallback);
+        Assert.False(tracker.Disposed);
+    }
+
+    /// <summary>
+    /// Calls ClearCacheAsync reentrantly from within its own OnNavigatedFromAsync.
+    /// </summary>
+    private sealed class SelfClearingViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public static INavigationService? Service { get; set; }
+        public static TaskCompletionSource<bool> ClearCompleted { get; set; } = new();
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken ct)
+            => Task.CompletedTask;
+
+        public async Task OnNavigatedFromAsync(CancellationToken ct)
+        {
+            if (Service is not null)
+            {
+                await Service.ClearCacheAsync("MainRegion");
+                ClearCompleted.TrySetResult(true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Variant with an injected disposable tracker to verify deferred disposal.
+    /// </summary>
+    private sealed class SelfClearingDisposableViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public static INavigationService? Service { get; set; }
+        public static TrackedDisposeService? LastTracker { get; set; }
+
+        public SelfClearingDisposableViewModel(TrackedDisposeService tracker)
+        {
+            LastTracker = tracker;
+        }
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken ct)
+            => Task.CompletedTask;
+
+        public async Task OnNavigatedFromAsync(CancellationToken ct)
+        {
+            if (Service is not null)
+            {
+                await Service.ClearCacheAsync("MainRegion");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Calls the synchronous ClearCache reentrantly from within OnNavigatedFrom.
+    /// </summary>
+    private sealed class SyncSelfClearingViewModel : NavigationViewModelBase, INavigationAware
+    {
+        public static INavigationService? Service { get; set; }
+        public static TrackedDisposeService? LastTracker { get; set; }
+        public static bool? DisposedDuringCallback { get; set; }
+
+        private readonly TrackedDisposeService _tracker;
+
+        public SyncSelfClearingViewModel(TrackedDisposeService tracker)
+        {
+            _tracker = tracker;
+            LastTracker = tracker;
+        }
+
+        public void OnNavigatedTo(object? parameter) { }
+
+        public void OnNavigatedFrom()
+        {
+            Service?.ClearCache("MainRegion");
+            // Record whether the scope was disposed while this callback was running.
+            // With the self-guard, the entry is restored to the cache, so the scope
+            // must still be alive here.
+            DisposedDuringCallback = _tracker.Disposed;
+        }
+    }
 }

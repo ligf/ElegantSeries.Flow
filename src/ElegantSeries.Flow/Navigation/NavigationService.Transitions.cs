@@ -233,7 +233,19 @@ public sealed partial class NavigationService
             }
             else if (entry.ViewModel is INavigationAware aware)
             {
-                work.NavigatedFromActions.Add(() => aware.OnNavigatedFrom());
+                work.NavigatedFromActions.Add(() =>
+                {
+                    var previousCurrent = _currentLifecycleEntry.Value;
+                    _currentLifecycleEntry.Value = entry;
+                    try
+                    {
+                        aware.OnNavigatedFrom();
+                    }
+                    finally
+                    {
+                        _currentLifecycleEntry.Value = previousCurrent;
+                    }
+                });
             }
         }
 
@@ -369,7 +381,19 @@ public sealed partial class NavigationService
         }
         else if (viewModel is INavigationAware aware)
         {
-            work.NavigatedToActions.Add(() => aware.OnNavigatedTo(parameter));
+            work.NavigatedToActions.Add(() =>
+            {
+                var previousCurrent = _currentLifecycleEntry.Value;
+                _currentLifecycleEntry.Value = entry;
+                try
+                {
+                    aware.OnNavigatedTo(parameter);
+                }
+                finally
+                {
+                    _currentLifecycleEntry.Value = previousCurrent;
+                }
+            });
         }
     }
 

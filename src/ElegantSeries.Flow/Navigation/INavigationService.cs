@@ -320,6 +320,14 @@ public interface INavigationService
     /// navigation lock. Prefer <see cref="ClearCacheAsync"/> on UI threads to avoid
     /// stalling the interface.
     /// </para>
+    /// <para>
+    /// Reentrancy: if called from within a page's own async lifecycle callback (e.g.
+    /// <c>OnNavigatedFromAsync</c>) and that page's cache entry is being cleared,
+    /// the entry is removed from the cache but its scope disposal is deferred until
+    /// the callback completes. The method returns without waiting for the callback.
+    /// If called from within a synchronous lifecycle callback (e.g.
+    /// <c>OnNavigatedFrom</c>), the entry is left in the cache.
+    /// </para>
     /// </remarks>
     void ClearCache(string regionName);
 
@@ -350,6 +358,13 @@ public interface INavigationService
     /// callbacks to complete. Use <see cref="ClearAllCacheAsync"/> to wait for
     /// in-flight callbacks with a timeout.
     /// </para>
+    /// <para>
+    /// Reentrancy: if called from within a page's own async lifecycle callback and
+    /// that page's cache entry is being cleared, the entry is removed from the cache
+    /// but its scope disposal is deferred until the callback completes. The method
+    /// returns without waiting for the callback. If called from within a synchronous
+    /// lifecycle callback, the entry is left in the cache.
+    /// </para>
     /// </remarks>
     void ClearAllCache();
 
@@ -358,11 +373,28 @@ public interface INavigationService
     /// preferring <see cref="IAsyncDisposable.DisposeAsync"/> when available.
     /// </summary>
     /// <param name="regionName">The navigation region to clear.</param>
+    /// <remarks>
+    /// <para>
+    /// Reentrancy: if called from within a page's own lifecycle callback (e.g.
+    /// <c>OnNavigatedFromAsync</c>) and that page's cache entry is being cleared,
+    /// the entry is removed from the cache but its scope disposal is deferred until
+    /// the callback completes. The method returns without waiting for that callback
+    /// (other entries' in-flight callbacks are still awaited with a timeout).
+    /// </para>
+    /// </remarks>
     ValueTask ClearCacheAsync(string regionName);
 
     /// <summary>
     /// Asynchronously clears the KeepAlive cache for all regions,
     /// preferring <see cref="IAsyncDisposable.DisposeAsync"/> when available.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reentrancy: if called from within a page's own lifecycle callback and that
+    /// page's cache entry is being cleared, the entry is removed from the cache but
+    /// its scope disposal is deferred until the callback completes. The method
+    /// returns without waiting for that callback.
+    /// </para>
+    /// </remarks>
     ValueTask ClearAllCacheAsync();
 }
