@@ -326,7 +326,8 @@ public interface INavigationService
     /// the entry is removed from the cache but its scope disposal is deferred until
     /// the callback completes. The method returns without waiting for the callback.
     /// If called from within a synchronous lifecycle callback (e.g.
-    /// <c>OnNavigatedFrom</c>), the entry is left in the cache.
+    /// <c>OnNavigatedFrom</c>), the entry is left in the cache; call again after
+    /// the callback if it must be dropped.
     /// </para>
     /// </remarks>
     void ClearCache(string regionName);
@@ -363,7 +364,8 @@ public interface INavigationService
     /// that page's cache entry is being cleared, the entry is removed from the cache
     /// but its scope disposal is deferred until the callback completes. The method
     /// returns without waiting for the callback. If called from within a synchronous
-    /// lifecycle callback, the entry is left in the cache.
+    /// lifecycle callback, the entry is left in the cache; call again after the
+    /// callback if it must be dropped.
     /// </para>
     /// </remarks>
     void ClearAllCache();

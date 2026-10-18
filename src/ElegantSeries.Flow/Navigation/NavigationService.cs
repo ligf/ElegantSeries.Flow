@@ -128,7 +128,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// the scope on the thread pool. The returned task is tracked so
     /// <see cref="DisposeAsync"/> can wait for all deferred disposals.
     /// </summary>
-    private void TrackDeferredDisposal(Task gateTask, IServiceScope scope, Action<Exception>? errorHandler)
+    private void TrackDeferredDisposal(Task gateTask, IServiceScope scope, INavigationViewModel viewModel, string regionName, Action<Exception>? errorHandler)
     {
         var task = Task.Run(async () =>
         {
@@ -164,13 +164,29 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
 
                 if (shouldDispose)
                 {
-                    if (scope is IAsyncDisposable asyncScope)
+                    try
                     {
-                        await asyncScope.DisposeAsync().ConfigureAwait(false);
+                        if (scope is IAsyncDisposable asyncScope)
+                        {
+                            await asyncScope.DisposeAsync().ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            scope.Dispose();
+                        }
                     }
-                    else
+                    finally
                     {
-                        scope.Dispose();
+                        // Notify subscribers even if disposal threw, matching the
+                        // non-deferred paths. Best-effort: never fail the task.
+                        try
+                        {
+                            RaiseViewModelReleased(regionName, viewModel);
+                        }
+                        catch (Exception ex)
+                        {
+                            try { errorHandler?.Invoke(ex); } catch { }
+                        }
                     }
                 }
             }
@@ -537,7 +553,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         // so it must run outside the critical section above.
         foreach (var (entry, gate) in deferredSelfDisposals)
         {
-            TrackDeferredDisposal(gate, entry.Scope, ex =>
+            TrackDeferredDisposal(gate, entry.Scope, entry.ViewModel, entry.RegionName, ex =>
             {
                 try { SubscriberError?.Invoke(ex); } catch { }
             });
@@ -596,7 +612,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         // Deferred self-disposals (see ClearCache).
         foreach (var (entry, gate) in deferredSelfDisposals)
         {
-            TrackDeferredDisposal(gate, entry.Scope, ex =>
+            TrackDeferredDisposal(gate, entry.Scope, entry.ViewModel, entry.RegionName, ex =>
             {
                 try { SubscriberError?.Invoke(ex); } catch { }
             });
@@ -658,7 +674,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         // Deferred self-disposals (see ClearCache).
         foreach (var (entry, gate) in deferredSelfDisposals)
         {
-            TrackDeferredDisposal(gate, entry.Scope, ex =>
+            TrackDeferredDisposal(gate, entry.Scope, entry.ViewModel, entry.RegionName, ex =>
             {
                 try { SubscriberError?.Invoke(ex); } catch { }
             });
@@ -741,7 +757,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         // Deferred self-disposals (see ClearCache).
         foreach (var (entry, gate) in deferredSelfDisposals)
         {
-            TrackDeferredDisposal(gate, entry.Scope, ex =>
+            TrackDeferredDisposal(gate, entry.Scope, entry.ViewModel, entry.RegionName, ex =>
             {
                 try { SubscriberError?.Invoke(ex); } catch { }
             });

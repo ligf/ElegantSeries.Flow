@@ -297,14 +297,23 @@ public sealed partial class NavigationService
                 var gate = entry.InFlightGateTask;
                 if (gate is not null && !gate.IsCompleted)
                 {
-                    TrackDeferredDisposal(gate, entry.Scope,
+                    TrackDeferredDisposal(gate, entry.Scope, entry.ViewModel, entry.RegionName,
                         ex => { try { SubscriberError?.Invoke(ex); } catch { } });
+                    // The deferred task raises ViewModelReleased after disposal;
+                    // do not enqueue it here (would double-fire).
                 }
                 else
                 {
                     // No callback in flight (shouldn't happen for self-dispose,
                     // but be safe): dispose inline.
-                    await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false);
+                    if (await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false))
+                    {
+                        foreach (var region in plan.RegionsToNotify)
+                        {
+                            var capturedRegion = region;
+                            work.Events.Add(() => RaiseViewModelReleased(capturedRegion, entry.ViewModel));
+                        }
+                    }
                 }
                 // Ownership transfers atomically to the deferred task: TrackDeferredDisposal
                 // removes the scope from _pendingScopeDisposals, so a concurrent Dispose/
@@ -312,7 +321,14 @@ public sealed partial class NavigationService
             }
             else
             {
-                await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false);
+                if (await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false))
+                {
+                    foreach (var region in plan.RegionsToNotify)
+                    {
+                        var capturedRegion = region;
+                        work.Events.Add(() => RaiseViewModelReleased(capturedRegion, entry.ViewModel));
+                    }
+                }
 
                 using (_stateLock.EnterScope())
                     _pendingScopeDisposals.Remove(entry.Scope);
@@ -329,13 +345,8 @@ public sealed partial class NavigationService
                 catch { }
             }
 
-            // Ownership released: notify even if the scope disposal threw (the error
-            // was collected above and will be rethrown by RunTransitionAsync).
-            foreach (var region in plan.RegionsToNotify)
-            {
-                var capturedRegion = region;
-                work.Events.Add(() => RaiseViewModelReleased(capturedRegion, entry.ViewModel));
-            }
+            // Note: ViewModelReleased is enqueued above per-branch (not here),
+            // to avoid double-firing when the deferred task also raises it.
         });
     }
 
@@ -565,6 +576,22 @@ public sealed partial class NavigationService
             {
                 var oldCts = LifecycleCts;
                 LifecycleCts = new CancellationTokenSource();
+                if (_inFlightCount == 0 && _retiredCts.Count > 0)
+                {
+                    // No async callbacks in flight: dispose previously retired
+                    // sources now. Otherwise _retiredCts would accumulate for
+                    // ViewModels with only synchronous (or no) lifecycle callbacks,
+                    // since ExitInFlightLifecycle is never called for them.
+                    // Disposal (unlike Cancel) invokes no user code, so it is safe
+                    // inside the lock. The just-retired oldCts is still returned
+                    // for the caller to cancel outside locks; it will be disposed
+                    // on the next activation (or by ExitInFlightLifecycle).
+                    foreach (var cts in _retiredCts)
+                    {
+                        try { cts.Dispose(); } catch { }
+                    }
+                    _retiredCts.Clear();
+                }
                 _retiredCts.Add(oldCts);
                 return oldCts;
             }
