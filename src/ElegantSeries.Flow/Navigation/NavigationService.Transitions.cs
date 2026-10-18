@@ -566,7 +566,8 @@ public sealed partial class NavigationService
         /// <see cref="CancelOutsideLocks"/>.
         /// In-flight callbacks from the previous cycle keep running under their own
         /// token and remain tracked. Retired sources are disposed when the
-        /// in-flight count drops to zero.
+        /// in-flight count drops to zero, or on a later activation (when the
+        /// count is zero) once they have been cancelled.
         /// </summary>
         /// <returns>The retired cancellation token source, to be cancelled by the
         /// caller after releasing locks.</returns>
