@@ -659,9 +659,9 @@ public sealed partial class NavigationService
 
         /// <summary>
         /// Unregisters an async lifecycle callback. When the last in-flight
-        /// callback exits, retired cancellation sources are disposed and any
-        /// deferred scope disposals (from reentrant self-destroying navigation)
-        /// are executed.
+        /// callback exits, retired cancellation sources that have been
+        /// cancelled are disposed and any deferred scope disposals (from
+        /// reentrant self-destroying navigation) are executed.
         /// </summary>
         public void ExitInFlightLifecycle(Task gateTask)
         {
@@ -676,8 +676,21 @@ public sealed partial class NavigationService
                 }
                 if (_inFlightCount == 0 && _retiredCts.Count > 0)
                 {
-                    retiredToDispose = _retiredCts;
-                    _retiredCts = new();
+                    // Only reclaim sources that have already been cancelled.
+                    // A concurrent BeginNewActivation may have just retired a
+                    // source whose owner has not yet cancelled it outside the
+                    // locks; disposing it here would lose the cancel signal
+                    // via ObjectDisposedException. Leave uncancelled sources
+                    // in the list for a later activation to reclaim.
+                    for (int i = _retiredCts.Count - 1; i >= 0; i--)
+                    {
+                        if (_retiredCts[i].IsCancellationRequested)
+                        {
+                            retiredToDispose ??= new List<CancellationTokenSource>();
+                            retiredToDispose.Add(_retiredCts[i]);
+                            _retiredCts.RemoveAt(i);
+                        }
+                    }
                 }
             }
 

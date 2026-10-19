@@ -3099,6 +3099,54 @@ public class NavigationServiceTests
         NavigationEntry_CancelOutsideLocks(cts3);
     }
 
+    [Fact]
+    public async Task ExitInFlightLifecycle_DoesNotDisposeUncancelledCts()
+    {
+        // ExitInFlightLifecycle must apply the same IsCancellationRequested
+        // gate as BeginNewActivation: when the last in-flight callback exits,
+        // it must not dispose a CTS whose owner has not yet cancelled it.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncOnlyKeepAliveViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        var result = await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>();
+        Assert.True(result);
+
+        var entry = GetNavigationEntry(nav, "MainRegion", typeof(SyncOnlyKeepAliveViewModel));
+        Assert.NotNull(entry);
+
+        var entryType = entry.GetType();
+        var beginMethod = entryType.GetMethod("BeginNewActivation",
+            BindingFlags.Public | BindingFlags.Instance)!;
+        var enterMethod = entryType.GetMethod("EnterInFlightLifecycle",
+            BindingFlags.Public | BindingFlags.Instance)!;
+        var exitMethod = entryType.GetMethod("ExitInFlightLifecycle",
+            BindingFlags.Public | BindingFlags.Instance)!;
+
+        // Simulate one in-flight async callback.
+        var gateTask = (Task)enterMethod.Invoke(entry, null)!;
+
+        // New activation retires a CTS while a callback is in flight.
+        // BeginNewActivation must not clean up (in-flight count > 0).
+        var cts1 = (CancellationTokenSource)beginMethod.Invoke(entry, null)!;
+        Assert.False(cts1.IsCancellationRequested);
+
+        // The callback exits, dropping the count to zero. ExitInFlightLifecycle
+        // must NOT dispose cts1: its owner hasn't cancelled it yet.
+        exitMethod.Invoke(entry, new object[] { gateTask });
+        Assert.False(IsCtsDisposed(cts1),
+            "ExitInFlightLifecycle disposed a CTS before its owner cancelled it");
+
+        // After the owner cancels, a later activation reclaims it.
+        NavigationEntry_CancelOutsideLocks(cts1);
+        var cts2 = (CancellationTokenSource)beginMethod.Invoke(entry, null)!;
+        Assert.True(IsCtsDisposed(cts1));
+
+        NavigationEntry_CancelOutsideLocks(cts2);
+    }
+
     private static int GetRetiredCtsCount(
         NavigationService nav, string regionName, Type viewModelType)
     {
