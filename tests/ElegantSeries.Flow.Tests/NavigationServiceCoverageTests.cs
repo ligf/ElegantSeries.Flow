@@ -570,8 +570,13 @@ public class NavigationServiceCoverageTests
     }
 
     [Fact]
-    public async Task ClearCacheAsync_FromOwnNavigatedFrom_DefersScopeDisposal()
+    public async Task ClearCacheAsync_FromOwnNavigatedFrom_CoveredPageNotDisposed()
     {
+        // P1-1: when OnNavigatedFromAsync reentrantly clears the cache but the
+        // page is only covered (New-mode navigation pushes on top without
+        // popping), the page stays on the stack and its scope must NOT be
+        // disposed. Disposing it would create a zombie page that crashes on
+        // GoBack reactivation.
         var services = new ServiceCollection();
         services.AddElegantSeriesFlow();
         services.AddTransient<SelfClearingDisposableViewModel>();
@@ -587,7 +592,46 @@ public class NavigationServiceCoverageTests
         Assert.NotNull(tracker);
         Assert.False(tracker.Disposed);
 
+        // New-mode navigation covers (does not pop) the page.
         await svc.NavigateToAsync<TestHomeViewModel>();
+
+        // The scope must survive: the page is still on the back stack.
+        // Poll to give any (incorrect) deferred disposal a chance to run.
+        for (var i = 0; i < 20 && !tracker.Disposed; i++)
+        {
+            await Task.Delay(50);
+        }
+        Assert.False(tracker.Disposed);
+
+        // GoBack reactivates the page on its live scope — no zombie.
+        await svc.GoBackAsync();
+        Assert.False(tracker.Disposed);
+        Assert.Equal(typeof(SelfClearingDisposableViewModel), svc.GetCurrentViewModel()?.GetType());
+    }
+
+    [Fact]
+    public async Task ClearCacheAsync_FromOwnNavigatedFrom_PoppedPageDefersScopeDisposal()
+    {
+        // When OnNavigatedFromAsync reentrantly clears the cache and the page
+        // is actually being popped (leaving the stack), deferred disposal via
+        // the gate is correct: the scope is released after the callback.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SelfClearingDisposableViewModel>();
+        services.AddTransient<TrackedDisposeService>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+        SelfClearingDisposableViewModel.Service = svc;
+        SelfClearingDisposableViewModel.LastTracker = null;
+
+        await svc.NavigateToAsync<SelfClearingDisposableViewModel>(mode: NavigationMode.KeepAlive);
+        var tracker = SelfClearingDisposableViewModel.LastTracker;
+        Assert.NotNull(tracker);
+        Assert.False(tracker.Disposed);
+
+        // Replace pops the page: it leaves the stack.
+        await svc.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.Replace);
 
         // The scope disposal was deferred until the callback completed; it must
         // happen automatically without a second ClearCache call.

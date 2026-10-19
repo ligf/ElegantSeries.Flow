@@ -236,7 +236,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         }
     }
 
-    private bool _disposed;
+    private volatile bool _disposed;
 
     // ────────────────────────────── Events ──────────────────────────────
 
@@ -515,6 +515,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         List<ScopeDisposalTarget> targets;
         var ctsToCancel = new List<CancellationTokenSource>();
         List<(NavigationEntry Entry, Task Gate)> deferredSelfDisposals = [];
+        bool cacheHadEntries = false;
 
         // Serialized with navigation transitions: otherwise a concurrent navigation
         // could adopt a cache entry whose scope this call is about to dispose.
@@ -529,6 +530,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             using (_stateLock.EnterScope())
             {
                 var removed = RemoveRegionCacheEntriesLocked(regionName);
+                cacheHadEntries = removed.Count > 0;
                 // Self-dispose guard: if called from within a lifecycle callback whose
                 // entry is being cleared, defer that entry's disposal until the callback
                 // completes (via TrackDeferredDisposal below). Waiting here would
@@ -567,7 +569,12 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
 
         // Scope disposal runs outside the lock; the entries are already detached above.
         DisposeScopesSync(targets, pendingEvents, errors);
-        pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
+        // Only report if the cache actually had entries: firing when the cache
+        // was already empty would be a false positive.
+        if (cacheHadEntries)
+        {
+            pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
+        }
 
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(errors);
@@ -644,6 +651,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         List<Task> gates;
         var ctsToCancel = new List<CancellationTokenSource>();
         List<(NavigationEntry Entry, Task Gate)> deferredSelfDisposals = [];
+        bool cacheHadEntries = false;
 
         // Serialized with navigation transitions: otherwise a concurrent navigation
         // could adopt a cache entry whose scope this call is about to dispose.
@@ -658,6 +666,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             using (_stateLock.EnterScope())
             {
                 var removed = RemoveRegionCacheEntriesLocked(regionName);
+                cacheHadEntries = removed.Count > 0;
                 // Self-dispose guard (see ClearCache): defer the entry belonging to
                 // the currently running lifecycle callback instead of waiting for it.
                 deferredSelfDisposals = PartitionSelfEntriesLocked(removed, out var others);
@@ -713,7 +722,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
 
         // Scope disposal runs outside the lock; the entries are already detached above.
         await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
-        pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
+        if (cacheHadEntries)
+        {
+            pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
+        }
 
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(errors);
@@ -810,6 +822,13 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// Callers must ensure their <c>INavigationAwareAsync</c> callbacks observe
     /// cancellation promptly and stop touching page dependencies once cancelled.
     /// For a guaranteed wait, use <see cref="DisposeAsync"/> instead.
+    /// </para>
+    /// <para>
+    /// Lock timeout: this method waits up to
+    /// <see cref="NavigationOptions.SyncLockTimeout"/> (default 2s) for the
+    /// navigation lock. If a navigation is running a slow lifecycle callback,
+    /// a <see cref="TimeoutException"/> is thrown and the service is NOT
+    /// disposed. Prefer <see cref="DisposeAsync"/> on UI threads.
     /// </para>
     /// </remarks>
     public void Dispose()

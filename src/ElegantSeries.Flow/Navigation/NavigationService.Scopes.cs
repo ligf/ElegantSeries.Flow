@@ -103,13 +103,14 @@ public sealed partial class NavigationService
     /// <summary>
     /// Partitions removed cache entries into those belonging to the currently running
     /// lifecycle callback (self) versus others. Self entries from an async
-    /// "navigated from" callback are moved to <see cref="_pendingScopeDisposals"/>
-    /// and their in-flight gates are returned for deferred disposal via
-    /// <see cref="TrackDeferredDisposal"/>; the caller must invoke
+    /// "navigated from" callback whose scope is no longer on any stack are moved to
+    /// <see cref="_pendingScopeDisposals"/> and their in-flight gates are returned for
+    /// deferred disposal via <see cref="TrackDeferredDisposal"/>; the caller must invoke
     /// <see cref="TrackDeferredDisposal"/> outside <see cref="_stateLock"/> (it re-acquires
-    /// the lock). Self entries from an async "navigated to" callback are moved to
+    /// the lock). Self entries that are still active or still on a stack (async
+    /// "navigated to", or "navigated from" of a covered page) are moved to
     /// <see cref="_pendingScopeDisposals"/> but NOT returned for deferred disposal:
-    /// the page is still active, so disposing its scope would create a zombie page.
+    /// disposing their scope would create a zombie page.
     /// Non-self entries are returned for the normal disposal path.
     /// Self entries from synchronous callbacks (no in-flight gate) are restored to the
     /// cache: there is no gate to defer on, and immediate disposal would be
@@ -147,12 +148,15 @@ public sealed partial class NavigationService
                     }
 
                     // Only schedule gate-deferred disposal if the callback is a
-                    // "navigated from" (the page is leaving). If it's a
-                    // "navigated to" (the page just became active and stays
-                    // active), disposing its scope would create a zombie page.
+                    // "navigated from" (the page is leaving) AND the scope is no
+                    // longer referenced on any stack. A "navigated from" callback
+                    // also runs for covered pages (New-mode navigation pushes on
+                    // top without popping); such pages stay on the stack and must
+                    // not have their scope disposed — doing so creates a zombie
+                    // page that crashes on reactivation via GoBack.
                     // The pending entry above ensures disposal when the page is
-                    // eventually deactivated.
-                    if (_isLeavingLifecycleEntry.Value)
+                    // eventually deactivated and unreferenced.
+                    if (_isLeavingLifecycleEntry.Value && !IsScopeReferencedLocked(entry.Scope))
                     {
                         deferred.Add((entry, gate));
                     }
@@ -251,14 +255,12 @@ public sealed partial class NavigationService
         using (_stateLock.EnterScope())
         {
             // Hand-written loops: avoids LINQ allocation/closure while holding _stateLock.
+            // Only regions that actually had cache entries are reported: firing
+            // RegionCacheCleared for regions with empty caches would be a false positive.
             var regions = new HashSet<string>();
             foreach (var key in _keepAliveCache.Keys)
             {
                 regions.Add(key.Region);
-            }
-            foreach (var region in _regionStacks.Keys)
-            {
-                regions.Add(region);
             }
             affectedRegions = new List<string>(regions);
             var removed = RemoveAllCacheEntriesLocked();
