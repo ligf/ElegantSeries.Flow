@@ -706,4 +706,67 @@ public class NavigationServiceCoverageTests
             DisposedDuringCallback = _tracker.Disposed;
         }
     }
+
+    [Fact]
+    public void ClearCache_FromOwnNavigatedTo_DoesNotDisposeActivePage()
+    {
+        // P1 regression: if OnNavigatedToAsync reentrantly clears its own
+        // region's cache, the page is still active on the stack. Its scope
+        // must NOT be disposed (zombie page); disposal is deferred until the
+        // page is deactivated via the pending mechanism.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<NavigatedToSelfClearingViewModel>();
+        services.AddTransient<TrackedDisposeService>();
+        services.AddTransient<TestHomeViewModel>();
+        var svc = services.BuildServiceProvider().GetRequiredService<INavigationService>();
+        NavigatedToSelfClearingViewModel.Service = svc;
+        NavigatedToSelfClearingViewModel.LastTracker = null;
+
+        svc.NavigateToAsync<NavigatedToSelfClearingViewModel>(mode: NavigationMode.KeepAlive)
+            .GetAwaiter().GetResult();
+        var tracker = NavigatedToSelfClearingViewModel.LastTracker;
+        Assert.NotNull(tracker);
+
+        // The page is still the active page; its scope must survive the
+        // reentrant ClearCacheAsync from within OnNavigatedToAsync.
+        // (No zombie page: disposing the scope of a still-mounted page would
+        // break subsequent lifecycle callbacks.)
+        // Poll to give any (incorrect) deferred disposal a chance to run.
+        for (var i = 0; i < 20 && !tracker.Disposed; i++)
+        {
+            Task.Delay(50).GetAwaiter().GetResult();
+        }
+        Assert.False(tracker.Disposed);
+
+        // The page must still be functional: navigating away works.
+        svc.NavigateToAsync<TestHomeViewModel>().GetAwaiter().GetResult();
+        Assert.Equal(typeof(TestHomeViewModel), svc.GetCurrentViewModel()?.GetType());
+    }
+
+    /// <summary>
+    /// Calls ClearCacheAsync reentrantly from within its own OnNavigatedToAsync,
+    /// while the page is still the active page on the stack.
+    /// </summary>
+    private sealed class NavigatedToSelfClearingViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public static INavigationService? Service { get; set; }
+        public static TrackedDisposeService? LastTracker { get; set; }
+
+        public NavigatedToSelfClearingViewModel(TrackedDisposeService tracker)
+        {
+            LastTracker = tracker;
+        }
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken ct)
+        {
+            if (Service is not null)
+            {
+                await Service.ClearCacheAsync("MainRegion");
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken ct)
+            => Task.CompletedTask;
+    }
 }

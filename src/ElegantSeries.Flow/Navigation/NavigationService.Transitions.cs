@@ -24,6 +24,14 @@ public sealed partial class NavigationService
     private static readonly AsyncLocal<NavigationEntry?> _currentLifecycleEntry = new();
 
     /// <summary>
+    /// True while the current async context is inside an <c>OnNavigatedFrom</c>
+    /// (leaving) lifecycle callback. Used by <c>PartitionSelfEntriesLocked</c> to
+    /// distinguish "page is leaving" (deferred disposal is correct) from
+    /// "page just arrived and stays active" (disposing would create a zombie).
+    /// </summary>
+    private static readonly AsyncLocal<bool> _isLeavingLifecycleEntry = new();
+
+    /// <summary>
     /// Raises <see cref="RegionNavigated"/> subscriber-by-subscriber, so one throwing
     /// subscriber cannot prevent the others from receiving the event.
     /// </summary>
@@ -216,6 +224,8 @@ public sealed partial class NavigationService
                 {
                     var previousCurrent = _currentLifecycleEntry.Value;
                     _currentLifecycleEntry.Value = entry;
+                    var previousLeaving = _isLeavingLifecycleEntry.Value;
+                    _isLeavingLifecycleEntry.Value = true;
                     try
                     {
                         await asyncAware.OnNavigatedFromAsync(token).ConfigureAwait(false);
@@ -227,6 +237,7 @@ public sealed partial class NavigationService
                     finally
                     {
                         _currentLifecycleEntry.Value = previousCurrent;
+                        _isLeavingLifecycleEntry.Value = previousLeaving;
                         entry.ExitInFlightLifecycle(gateTask);
                     }
                 });
@@ -237,6 +248,8 @@ public sealed partial class NavigationService
                 {
                     var previousCurrent = _currentLifecycleEntry.Value;
                     _currentLifecycleEntry.Value = entry;
+                    var previousLeaving = _isLeavingLifecycleEntry.Value;
+                    _isLeavingLifecycleEntry.Value = true;
                     try
                     {
                         aware.OnNavigatedFrom();
@@ -244,6 +257,7 @@ public sealed partial class NavigationService
                     finally
                     {
                         _currentLifecycleEntry.Value = previousCurrent;
+                        _isLeavingLifecycleEntry.Value = previousLeaving;
                     }
                 });
             }
@@ -374,6 +388,8 @@ public sealed partial class NavigationService
                 // that disposes this same entry must not wait for itself.
                 var previousCurrent = _currentLifecycleEntry.Value;
                 _currentLifecycleEntry.Value = entry;
+                var previousLeaving = _isLeavingLifecycleEntry.Value;
+                _isLeavingLifecycleEntry.Value = false;
                 try
                 {
                     await asyncAware.OnNavigatedToAsync(parameter, token).ConfigureAwait(false);
@@ -386,6 +402,7 @@ public sealed partial class NavigationService
                 finally
                 {
                     _currentLifecycleEntry.Value = previousCurrent;
+                    _isLeavingLifecycleEntry.Value = previousLeaving;
                     entry.ExitInFlightLifecycle(gateTask);
                 }
             });
@@ -396,6 +413,8 @@ public sealed partial class NavigationService
             {
                 var previousCurrent = _currentLifecycleEntry.Value;
                 _currentLifecycleEntry.Value = entry;
+                var previousLeaving = _isLeavingLifecycleEntry.Value;
+                _isLeavingLifecycleEntry.Value = false;
                 try
                 {
                     aware.OnNavigatedTo(parameter);
@@ -403,6 +422,7 @@ public sealed partial class NavigationService
                 finally
                 {
                     _currentLifecycleEntry.Value = previousCurrent;
+                    _isLeavingLifecycleEntry.Value = previousLeaving;
                 }
             });
         }

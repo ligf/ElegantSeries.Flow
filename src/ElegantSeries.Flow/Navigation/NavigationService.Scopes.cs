@@ -102,11 +102,15 @@ public sealed partial class NavigationService
 
     /// <summary>
     /// Partitions removed cache entries into those belonging to the currently running
-    /// lifecycle callback (self) versus others. Self entries are moved to
-    /// <see cref="_pendingScopeDisposals"/> and their in-flight gates are returned for
-    /// deferred disposal via <see cref="TrackDeferredDisposal"/>; the caller must invoke
+    /// lifecycle callback (self) versus others. Self entries from an async
+    /// "navigated from" callback are moved to <see cref="_pendingScopeDisposals"/>
+    /// and their in-flight gates are returned for deferred disposal via
+    /// <see cref="TrackDeferredDisposal"/>; the caller must invoke
     /// <see cref="TrackDeferredDisposal"/> outside <see cref="_stateLock"/> (it re-acquires
-    /// the lock). Non-self entries are returned for the normal disposal path.
+    /// the lock). Self entries from an async "navigated to" callback are moved to
+    /// <see cref="_pendingScopeDisposals"/> but NOT returned for deferred disposal:
+    /// the page is still active, so disposing its scope would create a zombie page.
+    /// Non-self entries are returned for the normal disposal path.
     /// Self entries from synchronous callbacks (no in-flight gate) are restored to the
     /// cache: there is no gate to defer on, and immediate disposal would be
     /// use-after-dispose.
@@ -142,7 +146,16 @@ public sealed partial class NavigationService
                         _pendingScopeDisposals.Add(entry.Scope, new PendingDisposal(entry.ViewModel, regions));
                     }
 
-                    deferred.Add((entry, gate));
+                    // Only schedule gate-deferred disposal if the callback is a
+                    // "navigated from" (the page is leaving). If it's a
+                    // "navigated to" (the page just became active and stays
+                    // active), disposing its scope would create a zombie page.
+                    // The pending entry above ensures disposal when the page is
+                    // eventually deactivated.
+                    if (_isLeavingLifecycleEntry.Value)
+                    {
+                        deferred.Add((entry, gate));
+                    }
                     continue;
                 }
 
