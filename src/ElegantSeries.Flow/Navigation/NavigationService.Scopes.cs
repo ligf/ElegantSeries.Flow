@@ -180,14 +180,13 @@ public sealed partial class NavigationService
         using (_stateLock.EnterScope())
         {
             // Hand-written loops: avoids LINQ allocation/closure while holding _stateLock.
+            // Only regions that actually hold cache entries are "affected":
+            // RegionCacheCleared must not fire for a region whose cache was
+            // already empty (e.g. it only has a navigation stack).
             var regions = new HashSet<string>();
             foreach (var key in _keepAliveCache.Keys)
             {
                 regions.Add(key.Region);
-            }
-            foreach (var region in _regionStacks.Keys)
-            {
-                regions.Add(region);
             }
             affectedRegions = new List<string>(regions);
             var removed = RemoveAllCacheEntriesLocked();

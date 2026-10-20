@@ -255,9 +255,28 @@ public sealed partial class NavigationService
             }
         }
 
-        if (!plan.ShouldDispose)
-            return;
+        if (plan.ShouldDispose)
+        {
+            QueueScopeDisposal(entry, plan.RegionsToNotify, work);
+        }
 
+        if (plan.EvictedDisposals is not null)
+        {
+            foreach (var (evictedEntry, evictedRegions) in plan.EvictedDisposals)
+            {
+                QueueScopeDisposal(evictedEntry, evictedRegions, work);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Queues the gated disposal of one entry's page scope: the disposal waits
+    /// for the entry's in-flight lifecycle callbacks (with a timeout), and a
+    /// disposal running inside the entry's own callback is deferred until the
+    /// callback exits.
+    /// </summary>
+    private void QueueScopeDisposal(NavigationEntry entry, string[] regionsToNotify, TransitionWork work)
+    {
         work.DisposeActions.Add(async () =>
         {
             // Disposal gating: do not release the page scope while the entry's async
@@ -314,7 +333,7 @@ public sealed partial class NavigationService
                     // but be safe): dispose inline.
                     if (await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false))
                     {
-                        foreach (var region in plan.RegionsToNotify)
+                        foreach (var region in regionsToNotify)
                         {
                             var capturedRegion = region;
                             work.Events.Add(() => RaiseViewModelReleased(capturedRegion, entry.ViewModel));
@@ -329,7 +348,7 @@ public sealed partial class NavigationService
             {
                 if (await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false))
                 {
-                    foreach (var region in plan.RegionsToNotify)
+                    foreach (var region in regionsToNotify)
                     {
                         var capturedRegion = region;
                         work.Events.Add(() => RaiseViewModelReleased(capturedRegion, entry.ViewModel));
@@ -431,6 +450,7 @@ public sealed partial class NavigationService
     {
         var regionsToNotify = new HashSet<string> { entry.RegionName };
         bool shouldDispose;
+        List<(NavigationEntry Entry, string[] Regions)>? evictedDisposals = null;
 
         using (_stateLock.EnterScope())
         {
@@ -466,7 +486,41 @@ public sealed partial class NavigationService
                 // Mutual exclusion: the entry lives in exactly one place.
                 // Use the static cache key captured at push time so reads and
                 // writes agree even when DI resolves a derived type.
-                _keepAliveCache[(entry.RegionName, entry.CacheKeyType)] = entry;
+                var cacheKey = (entry.RegionName, entry.CacheKeyType);
+                if (_keepAliveCache.TryGetValue(cacheKey, out var evictedEntry)
+                    && !ReferenceEquals(evictedEntry, entry))
+                {
+                    // The cache holds at most one entry per key, so this write
+                    // evicts the previous entry. Its scope must go through the
+                    // standard disposal path instead of being orphaned.
+                    _keepAliveCache.Remove(cacheKey);
+                    var evictedRegions = new HashSet<string> { evictedEntry.RegionName };
+                    if (_pendingScopeDisposals.TryGetValue(evictedEntry.Scope, out var evictedPending))
+                    {
+                        evictedRegions.UnionWith(evictedPending.Regions);
+                    }
+
+                    if (IsScopeReferencedLocked(evictedEntry.Scope))
+                    {
+                        // Another entry still shares the scope: remember the
+                        // destroy intent so the last reference disposes it.
+                        if (_pendingScopeDisposals.TryGetValue(evictedEntry.Scope, out var existingPending))
+                        {
+                            existingPending.Regions.UnionWith(evictedRegions);
+                        }
+                        else
+                        {
+                            _pendingScopeDisposals[evictedEntry.Scope] =
+                                new PendingDisposal(evictedEntry.ViewModel, evictedRegions);
+                        }
+                    }
+                    else
+                    {
+                        evictedDisposals = [(evictedEntry, [.. evictedRegions])];
+                    }
+                }
+
+                _keepAliveCache[cacheKey] = entry;
                 shouldDispose = false;
             }
             else
@@ -475,7 +529,7 @@ public sealed partial class NavigationService
             }
         }
 
-        return new DeactivatePlan(shouldDispose, [.. regionsToNotify]);
+        return new DeactivatePlan(shouldDispose, [.. regionsToNotify], evictedDisposals);
     }
 
     /// <summary>
@@ -548,7 +602,10 @@ public sealed partial class NavigationService
     }
 
     /// <summary>Deactivation plan for one entry: whether to dispose its page scope and which regions to notify.</summary>
-    private readonly record struct DeactivatePlan(bool ShouldDispose, string[] RegionsToNotify);
+    private readonly record struct DeactivatePlan(
+        bool ShouldDispose,
+        string[] RegionsToNotify,
+        List<(NavigationEntry Entry, string[] Regions)>? EvictedDisposals = null);
 
     /// <summary>One page on a region's navigation stack. The scope owns the ViewModel's lifetime.</summary>
     private sealed class NavigationEntry
