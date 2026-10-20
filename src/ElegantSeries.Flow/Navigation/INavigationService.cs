@@ -321,13 +321,9 @@ public interface INavigationService
     /// stalling the interface.
     /// </para>
     /// <para>
-    /// Reentrancy: if called from within a page's own async lifecycle callback (e.g.
-    /// <c>OnNavigatedFromAsync</c>) and that page's cache entry is being cleared,
-    /// the entry is removed from the cache but its scope disposal is deferred until
-    /// the callback completes. The method returns without waiting for the callback.
-    /// If called from within a synchronous lifecycle callback (e.g.
-    /// <c>OnNavigatedFrom</c>), the entry is left in the cache; call again after
-    /// the callback if it must be dropped.
+    /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
+    /// within a page lifecycle callback (e.g. <c>OnNavigatedToAsync</c> or
+    /// <c>OnNavigatedFromAsync</c>). Call it outside the callback instead.
     /// </para>
     /// </remarks>
     void ClearCache(string regionName);
@@ -360,12 +356,8 @@ public interface INavigationService
     /// in-flight callbacks with a timeout.
     /// </para>
     /// <para>
-    /// Reentrancy: if called from within a page's own async lifecycle callback and
-    /// that page's cache entry is being cleared, the entry is removed from the cache
-    /// but its scope disposal is deferred until the callback completes. The method
-    /// returns without waiting for the callback. If called from within a synchronous
-    /// lifecycle callback, the entry is left in the cache; call again after the
-    /// callback if it must be dropped.
+    /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
+    /// within a page lifecycle callback. Call it outside the callback instead.
     /// </para>
     /// </remarks>
     void ClearAllCache();
@@ -377,11 +369,9 @@ public interface INavigationService
     /// <param name="regionName">The navigation region to clear.</param>
     /// <remarks>
     /// <para>
-    /// Reentrancy: if called from within a page's own lifecycle callback (e.g.
-    /// <c>OnNavigatedFromAsync</c>) and that page's cache entry is being cleared,
-    /// the entry is removed from the cache but its scope disposal is deferred until
-    /// the callback completes. The method returns without waiting for that callback
-    /// (other entries' in-flight callbacks are still awaited with a timeout).
+    /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
+    /// within a page lifecycle callback (e.g. <c>OnNavigatedFromAsync</c>).
+    /// Call it outside the callback instead.
     /// </para>
     /// </remarks>
     ValueTask ClearCacheAsync(string regionName);
@@ -392,10 +382,8 @@ public interface INavigationService
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Reentrancy: if called from within a page's own lifecycle callback and that
-    /// page's cache entry is being cleared, the entry is removed from the cache but
-    /// its scope disposal is deferred until the callback completes. The method
-    /// returns without waiting for that callback.
+    /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
+    /// within a page lifecycle callback. Call it outside the callback instead.
     /// </para>
     /// </remarks>
     ValueTask ClearAllCacheAsync();
