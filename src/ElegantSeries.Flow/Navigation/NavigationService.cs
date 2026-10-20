@@ -509,12 +509,15 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
         if (_disposed) return;
+        if (_currentLifecycleEntry.Value is not null)
+            throw new InvalidOperationException(
+                "ClearCache cannot be called from within a page lifecycle callback. " +
+                "Call it outside the callback instead.");
 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
         List<ScopeDisposalTarget> targets;
         var ctsToCancel = new List<CancellationTokenSource>();
-        List<(NavigationEntry Entry, Task Gate)> deferredSelfDisposals = [];
 
         // Serialized with navigation transitions: otherwise a concurrent navigation
         // could adopt a cache entry whose scope this call is about to dispose.
@@ -529,34 +532,23 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             using (_stateLock.EnterScope())
             {
                 var removed = RemoveRegionCacheEntriesLocked(regionName);
-                // Self-dispose guard: if called from within a lifecycle callback whose
-                // entry is being cleared, defer that entry's disposal until the callback
-                // completes (via TrackDeferredDisposal below). Waiting here would
-                // self-deadlock; disposing now would be use-after-dispose.
-                deferredSelfDisposals = PartitionSelfEntriesLocked(removed, out var others);
+                // Mutual exclusion: cache entries are never on a stack, so no
+                // self-dispose guard is needed. A reentrant call from within a
+                // lifecycle callback simply clears entries that do not include
+                // the running page (it lives on the stack, not in the cache).
                 // Signal in-flight callbacks to stop. Sync ClearCache cannot wait
                 // for async callbacks without risking deadlock, but it must cancel
                 // their tokens before the scopes are released below.
                 // CTSs are cancelled after the lock is released (see below).
                 // Only entries no longer referenced by the stack: clearing the cache
                 // must not cancel an active page's lifecycle token.
-                CancelAndCollectGates(FilterUnreferencedEntries(others.Select(kv => kv.Value)), ctsToCancel);
-                targets = TakeCacheEntriesForDisposalLocked(others);
+                CancelAndCollectGates(FilterUnreferencedEntries(removed.Select(kv => kv.Value)), ctsToCancel);
+                targets = TakeCacheEntriesForDisposalLocked(removed);
             }
         }
         finally
         {
             _navigationLock.Release();
-        }
-
-        // Deferred self-disposals: TrackDeferredDisposal re-acquires _stateLock,
-        // so it must run outside the critical section above.
-        foreach (var (entry, gate) in deferredSelfDisposals)
-        {
-            TrackDeferredDisposal(gate, entry.Scope, entry.ViewModel, entry.RegionName, ex =>
-            {
-                try { SubscriberError?.Invoke(ex); } catch { }
-            });
         }
 
         // Cancel outside the lock: Cancel() invokes user callbacks synchronously.
@@ -577,6 +569,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     public void ClearAllCache()
     {
         if (_disposed) return;
+        if (_currentLifecycleEntry.Value is not null)
+            throw new InvalidOperationException(
+                "ClearAllCache cannot be called from within a page lifecycle callback. " +
+                "Call it outside the callback instead.");
 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
@@ -585,7 +581,6 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         WaitNavigationLock("ClearAllCache");
         List<ScopeDisposalTarget> targets;
         var ctsToCancel = new List<CancellationTokenSource>();
-        List<(NavigationEntry Entry, Task Gate)> deferredSelfDisposals = [];
         try
         {
             if (_disposed)
@@ -593,7 +588,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 return;
             }
 
-            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries, out var unreferencedEntries, out deferredSelfDisposals);
+            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries, out var unreferencedEntries);
             // Signal in-flight callbacks to stop (sync path cannot wait).
             // Cancelled after lock release (see below).
             // Only unreferenced entries: must not cancel an active page's token.
@@ -607,15 +602,6 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         finally
         {
             _navigationLock.Release();
-        }
-
-        // Deferred self-disposals (see ClearCache).
-        foreach (var (entry, gate) in deferredSelfDisposals)
-        {
-            TrackDeferredDisposal(gate, entry.Scope, entry.ViewModel, entry.RegionName, ex =>
-            {
-                try { SubscriberError?.Invoke(ex); } catch { }
-            });
         }
 
         // Cancel outside the lock.
@@ -637,13 +623,16 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
         if (_disposed) return;
+        if (_currentLifecycleEntry.Value is not null)
+            throw new InvalidOperationException(
+                "ClearCacheAsync cannot be called from within a page lifecycle callback. " +
+                "Call it outside the callback instead.");
 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
         List<ScopeDisposalTarget> targets;
         List<Task> gates;
         var ctsToCancel = new List<CancellationTokenSource>();
-        List<(NavigationEntry Entry, Task Gate)> deferredSelfDisposals = [];
 
         // Serialized with navigation transitions: otherwise a concurrent navigation
         // could adopt a cache entry whose scope this call is about to dispose.
@@ -658,26 +647,16 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             using (_stateLock.EnterScope())
             {
                 var removed = RemoveRegionCacheEntriesLocked(regionName);
-                // Self-dispose guard (see ClearCache): defer the entry belonging to
-                // the currently running lifecycle callback instead of waiting for it.
-                deferredSelfDisposals = PartitionSelfEntriesLocked(removed, out var others);
+                // Mutual exclusion: cache entries are never on a stack, so no
+                // self-dispose guard is needed (see ClearCache).
                 // Only unreferenced entries: must not cancel an active page's token.
-                gates = CancelAndCollectGates(FilterUnreferencedEntries(others.Select(kv => kv.Value)), ctsToCancel);
-                targets = TakeCacheEntriesForDisposalLocked(others);
+                gates = CancelAndCollectGates(FilterUnreferencedEntries(removed.Select(kv => kv.Value)), ctsToCancel);
+                targets = TakeCacheEntriesForDisposalLocked(removed);
             }
         }
         finally
         {
             _navigationLock.Release();
-        }
-
-        // Deferred self-disposals (see ClearCache).
-        foreach (var (entry, gate) in deferredSelfDisposals)
-        {
-            TrackDeferredDisposal(gate, entry.Scope, entry.ViewModel, entry.RegionName, ex =>
-            {
-                try { SubscriberError?.Invoke(ex); } catch { }
-            });
         }
 
         // Cancel outside the lock: Cancel() invokes user callbacks synchronously.
@@ -723,6 +702,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     public async ValueTask ClearAllCacheAsync()
     {
         if (_disposed) return;
+        if (_currentLifecycleEntry.Value is not null)
+            throw new InvalidOperationException(
+                "ClearAllCacheAsync cannot be called from within a page lifecycle callback. " +
+                "Call it outside the callback instead.");
 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
@@ -732,7 +715,6 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         List<ScopeDisposalTarget> targets;
         List<Task> gates;
         var ctsToCancel = new List<CancellationTokenSource>();
-        List<(NavigationEntry Entry, Task Gate)> deferredSelfDisposals = [];
         try
         {
             if (_disposed)
@@ -740,7 +722,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 return;
             }
 
-            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries, out var unreferencedEntries, out deferredSelfDisposals);
+            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries, out var unreferencedEntries);
             // Only unreferenced entries: must not cancel an active page's token.
             gates = CancelAndCollectGates(unreferencedEntries, ctsToCancel);
             foreach (var region in affectedRegions)
@@ -752,15 +734,6 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         finally
         {
             _navigationLock.Release();
-        }
-
-        // Deferred self-disposals (see ClearCache).
-        foreach (var (entry, gate) in deferredSelfDisposals)
-        {
-            TrackDeferredDisposal(gate, entry.Scope, entry.ViewModel, entry.RegionName, ex =>
-            {
-                try { SubscriberError?.Invoke(ex); } catch { }
-            });
         }
 
         // Cancel outside the lock.

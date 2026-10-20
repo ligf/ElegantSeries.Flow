@@ -24,14 +24,6 @@ public sealed partial class NavigationService
     private static readonly AsyncLocal<NavigationEntry?> _currentLifecycleEntry = new();
 
     /// <summary>
-    /// True while the current async context is inside an <c>OnNavigatedFrom</c>
-    /// (leaving) lifecycle callback. Used by <c>PartitionSelfEntriesLocked</c> to
-    /// distinguish "page is leaving" (deferred disposal is correct) from
-    /// "page just arrived and stays active" (disposing would create a zombie).
-    /// </summary>
-    private static readonly AsyncLocal<bool> _isLeavingLifecycleEntry = new();
-
-    /// <summary>
     /// Raises <see cref="RegionNavigated"/> subscriber-by-subscriber, so one throwing
     /// subscriber cannot prevent the others from receiving the event.
     /// </summary>
@@ -224,8 +216,6 @@ public sealed partial class NavigationService
                 {
                     var previousCurrent = _currentLifecycleEntry.Value;
                     _currentLifecycleEntry.Value = entry;
-                    var previousLeaving = _isLeavingLifecycleEntry.Value;
-                    _isLeavingLifecycleEntry.Value = true;
                     try
                     {
                         await asyncAware.OnNavigatedFromAsync(token).ConfigureAwait(false);
@@ -237,7 +227,6 @@ public sealed partial class NavigationService
                     finally
                     {
                         _currentLifecycleEntry.Value = previousCurrent;
-                        _isLeavingLifecycleEntry.Value = previousLeaving;
                         entry.ExitInFlightLifecycle(gateTask);
                     }
                 });
@@ -248,8 +237,6 @@ public sealed partial class NavigationService
                 {
                     var previousCurrent = _currentLifecycleEntry.Value;
                     _currentLifecycleEntry.Value = entry;
-                    var previousLeaving = _isLeavingLifecycleEntry.Value;
-                    _isLeavingLifecycleEntry.Value = true;
                     try
                     {
                         aware.OnNavigatedFrom();
@@ -257,7 +244,6 @@ public sealed partial class NavigationService
                     finally
                     {
                         _currentLifecycleEntry.Value = previousCurrent;
-                        _isLeavingLifecycleEntry.Value = previousLeaving;
                     }
                 });
             }
@@ -388,8 +374,6 @@ public sealed partial class NavigationService
                 // that disposes this same entry must not wait for itself.
                 var previousCurrent = _currentLifecycleEntry.Value;
                 _currentLifecycleEntry.Value = entry;
-                var previousLeaving = _isLeavingLifecycleEntry.Value;
-                _isLeavingLifecycleEntry.Value = false;
                 try
                 {
                     await asyncAware.OnNavigatedToAsync(parameter, token).ConfigureAwait(false);
@@ -402,7 +386,6 @@ public sealed partial class NavigationService
                 finally
                 {
                     _currentLifecycleEntry.Value = previousCurrent;
-                    _isLeavingLifecycleEntry.Value = previousLeaving;
                     entry.ExitInFlightLifecycle(gateTask);
                 }
             });
@@ -413,8 +396,6 @@ public sealed partial class NavigationService
             {
                 var previousCurrent = _currentLifecycleEntry.Value;
                 _currentLifecycleEntry.Value = entry;
-                var previousLeaving = _isLeavingLifecycleEntry.Value;
-                _isLeavingLifecycleEntry.Value = false;
                 try
                 {
                     aware.OnNavigatedTo(parameter);
@@ -422,7 +403,6 @@ public sealed partial class NavigationService
                 finally
                 {
                     _currentLifecycleEntry.Value = previousCurrent;
-                    _isLeavingLifecycleEntry.Value = previousLeaving;
                 }
             });
         }
@@ -431,6 +411,8 @@ public sealed partial class NavigationService
     /// <summary>
     /// Builds the deactivation plan for an entry that is leaving the active slot:
     /// whether its page scope should be disposed and which regions to notify.
+    /// Mutual exclusion: a KeepAlive entry popped from the stack is moved to the
+    /// cache here; an entry still on a stack (covered, not popped) is left alone.
     /// Acquires <see cref="_stateLock"/> internally.
     /// </summary>
     private DeactivatePlan BuildDeactivatePlan(NavigationEntry entry, bool destroy)
@@ -448,6 +430,8 @@ public sealed partial class NavigationService
             if (IsScopeReferencedLocked(entry.Scope))
             {
                 // Still needed by another stack entry or the cache: defer disposal.
+                // (With mutual exclusion, "in cache" here means another entry object
+                // shares this scope — e.g. a Singleton ViewModel — not this entry.)
                 shouldDispose = false;
                 if (destroy)
                 {
@@ -464,9 +448,18 @@ public sealed partial class NavigationService
                     }
                 }
             }
+            else if (!destroy && !_pendingScopeDisposals.ContainsKey(entry.Scope))
+            {
+                // Popped from the stack and KeepAlive: move to the cache.
+                // Mutual exclusion: the entry lives in exactly one place.
+                // Use the static cache key captured at push time so reads and
+                // writes agree even when DI resolves a derived type.
+                _keepAliveCache[(entry.RegionName, entry.CacheKeyType)] = entry;
+                shouldDispose = false;
+            }
             else
             {
-                shouldDispose = destroy || _pendingScopeDisposals.ContainsKey(entry.Scope);
+                shouldDispose = true;
             }
         }
 
@@ -553,13 +546,19 @@ public sealed partial class NavigationService
         private TaskCompletionSource? _inFlightGate;
         private List<CancellationTokenSource> _retiredCts = new();
 
-        public NavigationEntry(string regionName, INavigationViewModel viewModel, object? parameter, NavigationMode mode, IServiceScope scope)
+        public NavigationEntry(string regionName, INavigationViewModel viewModel, object? parameter, NavigationMode mode, IServiceScope scope, Type? cacheKeyType = null)
         {
             RegionName = regionName;
             ViewModel = viewModel;
             Parameter = parameter;
             Mode = mode;
             Scope = scope;
+            // The static ViewModel type used as the KeepAlive cache key.
+            // Defaults to the runtime type; callers that know the static
+            // TViewModel (e.g. NavigateToAsync) pass it explicitly so cache
+            // reads and writes use a consistent key even when DI resolves a
+            // derived type.
+            CacheKeyType = cacheKeyType ?? viewModel.GetType();
         }
 
         public string RegionName { get; }
@@ -567,6 +566,11 @@ public sealed partial class NavigationService
         public object? Parameter { get; set; }
         public NavigationMode Mode { get; }
         public IServiceScope Scope { get; }
+
+        /// <summary>
+        /// The ViewModel type used as the KeepAlive cache key.
+        /// </summary>
+        public Type CacheKeyType { get; }
 
         /// <summary>
         /// Cancelled when the entry leaves the active position (covered, popped,

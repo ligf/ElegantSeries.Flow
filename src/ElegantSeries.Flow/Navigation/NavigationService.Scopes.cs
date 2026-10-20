@@ -101,77 +101,6 @@ public sealed partial class NavigationService
     }
 
     /// <summary>
-    /// Partitions removed cache entries into those belonging to the currently running
-    /// lifecycle callback (self) versus others. Self entries from an async
-    /// "navigated from" callback are moved to <see cref="_pendingScopeDisposals"/>
-    /// and their in-flight gates are returned for deferred disposal via
-    /// <see cref="TrackDeferredDisposal"/>; the caller must invoke
-    /// <see cref="TrackDeferredDisposal"/> outside <see cref="_stateLock"/> (it re-acquires
-    /// the lock). Self entries from an async "navigated to" callback are moved to
-    /// <see cref="_pendingScopeDisposals"/> but NOT returned for deferred disposal:
-    /// the page is still active, so disposing its scope would create a zombie page.
-    /// Non-self entries are returned for the normal disposal path.
-    /// Self entries from synchronous callbacks (no in-flight gate) are restored to the
-    /// cache: there is no gate to defer on, and immediate disposal would be
-    /// use-after-dispose.
-    /// The caller must hold <see cref="_stateLock"/>.
-    /// </summary>
-    private List<(NavigationEntry Entry, Task Gate)> PartitionSelfEntriesLocked(
-        List<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>> removed,
-        out List<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>> others)
-    {
-        var currentEntry = _currentLifecycleEntry.Value;
-        var deferred = new List<(NavigationEntry Entry, Task Gate)>();
-        others = new List<KeyValuePair<(string Region, Type ViewModelType), NavigationEntry>>(removed.Count);
-
-        foreach (var kv in removed)
-        {
-            var entry = kv.Value;
-            // Self-dispose: the entry's scope belongs to the lifecycle callback
-            // currently running on this async context. Disposing it now would be
-            // use-after-dispose; waiting for its gate would self-deadlock.
-            if (currentEntry is not null && ReferenceEquals(entry.Scope, currentEntry.Scope))
-            {
-                var gate = entry.InFlightGateTask;
-                if (gate is not null && !gate.IsCompleted)
-                {
-                    // Async callback: defer via the pending + TrackDeferredDisposal path.
-                    var regions = new HashSet<string> { kv.Key.Region };
-                    if (_pendingScopeDisposals.TryGetValue(entry.Scope, out var pending))
-                    {
-                        pending.Regions.UnionWith(regions);
-                    }
-                    else
-                    {
-                        _pendingScopeDisposals.Add(entry.Scope, new PendingDisposal(entry.ViewModel, regions));
-                    }
-
-                    // Only schedule gate-deferred disposal if the callback is a
-                    // "navigated from" (the page is leaving). If it's a
-                    // "navigated to" (the page just became active and stays
-                    // active), disposing its scope would create a zombie page.
-                    // The pending entry above ensures disposal when the page is
-                    // eventually deactivated.
-                    if (_isLeavingLifecycleEntry.Value)
-                    {
-                        deferred.Add((entry, gate));
-                    }
-                    continue;
-                }
-
-                // Sync callback (no gate): restore to cache. The entry stays alive;
-                // call ClearCache again after the callback if it must be dropped.
-                _keepAliveCache[kv.Key] = entry;
-                continue;
-            }
-
-            others.Add(kv);
-        }
-
-        return deferred;
-    }
-
-    /// <summary>
     /// Cancels the lifecycle tokens of removed cache entries and collects their
     /// in-flight gate tasks. Must be called while holding the navigation lock
     /// (before the entries are detached). The caller waits for the gates outside
@@ -246,7 +175,7 @@ public sealed partial class NavigationService
     /// can be disposed now versus ones whose disposal must be deferred.
     /// The caller must hold <see cref="_navigationLock"/> (but not <see cref="_stateLock"/>).
     /// </summary>
-    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions, out List<NavigationEntry> removedEntries, out List<NavigationEntry> unreferencedEntries, out List<(NavigationEntry Entry, Task Gate)> deferredSelfDisposals)
+    private List<ScopeDisposalTarget> TakeAllCacheEntriesLocked(out List<string> affectedRegions, out List<NavigationEntry> removedEntries, out List<NavigationEntry> unreferencedEntries)
     {
         using (_stateLock.EnterScope())
         {
@@ -262,17 +191,18 @@ public sealed partial class NavigationService
             }
             affectedRegions = new List<string>(regions);
             var removed = RemoveAllCacheEntriesLocked();
-            // Self-dispose guard: see PartitionSelfEntriesLocked.
-            deferredSelfDisposals = PartitionSelfEntriesLocked(removed, out var others);
-            removedEntries = new List<NavigationEntry>(others.Count);
-            foreach (var kv in others)
+            // Mutual exclusion: cache entries are never on a stack, so no
+            // self-dispose guard is needed. All removed entries go through
+            // the normal disposal path.
+            removedEntries = new List<NavigationEntry>(removed.Count);
+            foreach (var kv in removed)
             {
                 removedEntries.Add(kv.Value);
             }
             // Only unreferenced entries get their lifecycle tokens cancelled:
             // clearing the cache must not cancel an active page.
             unreferencedEntries = FilterUnreferencedEntries(removedEntries);
-            return TakeCacheEntriesForDisposalLocked(others);
+            return TakeCacheEntriesForDisposalLocked(removed);
         }
     }
 

@@ -163,6 +163,17 @@ public class KeepAliveViewModel : NavigationViewModelBase, IDisposable
     }
 }
 
+public abstract class BaseKeepAliveViewModel : NavigationViewModelBase
+{
+}
+
+public sealed class DerivedKeepAliveViewModel : BaseKeepAliveViewModel, IDisposable
+{
+    public bool Disposed { get; private set; }
+
+    public void Dispose() => Disposed = true;
+}
+
 public sealed class ParamAwareKeepAliveViewModel : NavigationViewModelBase, INavigationAware, IDisposable
 {
     public object? LastParameter { get; private set; }
@@ -401,13 +412,18 @@ public class NavigationServiceTests
 
         Assert.Same(firstInstance, secondInstance);
 
-        // 清理缓存后应销毁
+        // Mutual exclusion: the active KeepAlive page lives on the stack, not in
+        // the cache, so ClearCacheAsync does not touch it.
         await _navigationService.ClearCacheAsync("MainRegion");
         Assert.False(((KeepAliveViewModel)firstInstance).Disposed);
 
+        // ClearStack pops the KeepAlive page; with mutual exclusion it moves to
+        // the cache (not disposed). Navigating back reuses the same instance.
         await _navigationService.NavigateToAsync<TestHomeViewModel>("MainRegion", NavigationMode.ClearStack);
-        Assert.True(((KeepAliveViewModel)firstInstance).Disposed);
-        Assert.Equal(1, ((KeepAliveViewModel)firstInstance).DisposeCallCount);
+        Assert.False(((KeepAliveViewModel)firstInstance).Disposed);
+
+        await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        Assert.Same(firstInstance, _navigationService.GetCurrentViewModel());
     }
 
     [Fact]
@@ -433,13 +449,15 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task ClearCache_WhenKeepAliveIsInHistory_ShouldDisposeAfterLastStackReferenceIsRemoved()
+    public async Task ClearCache_WhenKeepAliveIsInHistory_ShouldNotAffectStackedPage()
     {
         await _navigationService.NavigateToAsync<TestHomeViewModel>();
         await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
         var keepAlive = (KeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
         await _navigationService.NavigateToAsync<TestHomeViewModel>();
 
+        // Mutual exclusion: the KeepAlive page is covered on the stack, not in
+        // the cache. ClearCacheAsync does not touch it.
         await _navigationService.ClearCacheAsync("MainRegion");
         Assert.False(keepAlive.Disposed);
 
@@ -447,9 +465,13 @@ public class NavigationServiceTests
         Assert.Same(keepAlive, _navigationService.GetCurrentViewModel());
         Assert.False(keepAlive.Disposed);
 
+        // ClearStack pops the KeepAlive page; it moves to the cache (not disposed).
         await _navigationService.NavigateToAsync<TestHomeViewModel>("MainRegion", NavigationMode.ClearStack);
-        Assert.True(keepAlive.Disposed);
-        Assert.Equal(1, keepAlive.DisposeCallCount);
+        Assert.False(keepAlive.Disposed);
+
+        // Navigating back to it reuses the cached instance.
+        await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        Assert.Same(keepAlive, _navigationService.GetCurrentViewModel());
     }
 
     [Fact]
@@ -576,24 +598,74 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task ClearCacheAsync_ThenGoBack_ShouldFireDeferredDisposalOfPoppedKeepAliveViewModel()
+    public async Task ClearCacheAsync_ThenGoBack_KeepAliveMovesToCache()
     {
         await _navigationService.NavigateToAsync<TestHomeViewModel>();
         await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
         var keepAlive = (KeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
 
+        // Mutual exclusion: the active KeepAlive page is on the stack, not in
+        // the cache. ClearCacheAsync does not touch it.
         await _navigationService.ClearCacheAsync("MainRegion");
-
-        // Still referenced by the navigation stack: disposal is deferred, not executed.
         Assert.False(keepAlive.Disposed);
         Assert.True(_navigationService.IsActive<KeepAliveViewModel>());
 
         Assert.True(await _navigationService.GoBackAsync());
 
-        // Popping the last reference fires the deferred disposal exactly once.
-        Assert.True(keepAlive.Disposed);
-        Assert.Equal(1, keepAlive.DisposeCallCount);
+        // Popping moves the KeepAlive page to the cache (not disposed).
+        Assert.False(keepAlive.Disposed);
         Assert.True(_navigationService.IsActive<TestHomeViewModel>());
+
+        // Navigating back reuses the cached instance.
+        await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        Assert.Same(keepAlive, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task KeepAlive_NavigatedViaBaseType_ShouldReuseInstanceAfterPop()
+    {
+        // Regression: the cache key must be the static type used at navigation
+        // time, not the runtime type. DI resolves DerivedKeepAliveViewModel for
+        // BaseKeepAliveViewModel; pop writes the cache under the static key and
+        // the next base-type navigation must find it.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddTransient<BaseKeepAliveViewModel, DerivedKeepAliveViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        await nav.NavigateToAsync<BaseKeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        var first = nav.GetCurrentViewModel();
+        Assert.IsType<DerivedKeepAliveViewModel>(first);
+
+        await nav.GoBackAsync();
+        await nav.NavigateToAsync<BaseKeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+
+        Assert.Same(first, nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task ReplaceMode_ShouldNotEvictDistinctKeepAlivePageDeeperInStack()
+    {
+        // Regression: Replace's duplicate removal must match by instance only.
+        // A different-instance KeepAlive page of the same type deeper in the
+        // stack is a distinct page and must survive a Replace on top.
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        var keepAlive = (KeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        await _navigationService.NavigateToAsync<TestDetailViewModel>();
+
+        // Replace the top page with a fresh KeepAlive instance.
+        await _navigationService.NavigateToAsync<KeepAliveViewModel>("MainRegion", NavigationMode.Replace);
+        Assert.True(_navigationService.IsActive<KeepAliveViewModel>());
+        Assert.NotSame(keepAlive, _navigationService.GetCurrentViewModel());
+
+        // The deeper KeepAlive page is still on the stack.
+        Assert.True(await _navigationService.GoBackAsync());
+        Assert.Same(keepAlive, _navigationService.GetCurrentViewModel());
+        Assert.False(keepAlive.Disposed);
     }
 
     [Fact]
@@ -667,17 +739,17 @@ public class NavigationServiceTests
         _navigationService.RegionCacheCleared += r => clearedRegion = r;
         _navigationService.ViewModelReleased += (_, vm) => disposedVm = vm;
 
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
         await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        // Mutual exclusion: GoBack pops the page so it moves to the cache,
+        // then the synchronous ClearCache will dispose it.
+        await _navigationService.GoBackAsync();
         _navigationService.ClearCache("MainRegion");
 
         Assert.Equal("MainRegion", clearedRegion);
-        var keepAlive = (KeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
-        Assert.Null(disposedVm);
-        Assert.False(keepAlive.Disposed);
-
-        await _navigationService.NavigateToAsync<TestHomeViewModel>("MainRegion", NavigationMode.ClearStack);
-        Assert.Same(keepAlive, disposedVm);
-        Assert.True(keepAlive.Disposed);
+        Assert.NotNull(disposedVm);
+        Assert.IsType<KeepAliveViewModel>(disposedVm);
+        Assert.True(((KeepAliveViewModel)disposedVm).Disposed);
     }
 
     [Fact]
@@ -689,17 +761,18 @@ public class NavigationServiceTests
         _navigationService.RegionCacheCleared += r => clearedRegions.Add(r);
         _navigationService.ViewModelReleased += (_, _) => disposedCount++;
 
+        await _navigationService.NavigateToAsync<TestHomeViewModel>("Region1");
         await _navigationService.NavigateToAsync<KeepAliveViewModel>("Region1", NavigationMode.KeepAlive);
+        await _navigationService.NavigateToAsync<TestHomeViewModel>("Region2");
         await _navigationService.NavigateToAsync<KeepAliveViewModel>("Region2", NavigationMode.KeepAlive);
+        // Mutual exclusion: GoBack pops the pages so they move to the cache.
+        await _navigationService.GoBackAsync("Region1");
+        await _navigationService.GoBackAsync("Region2");
 
         await _navigationService.ClearAllCacheAsync();
 
         Assert.Contains("Region1", clearedRegions);
         Assert.Contains("Region2", clearedRegions);
-        Assert.Equal(0, disposedCount);
-
-        await _navigationService.NavigateToAsync<TestHomeViewModel>("Region1", NavigationMode.ClearStack);
-        await _navigationService.NavigateToAsync<TestHomeViewModel>("Region2", NavigationMode.ClearStack);
         Assert.Equal(2, disposedCount);
     }
 
@@ -900,17 +973,17 @@ public class NavigationServiceTests
         _navigationService.RegionCacheCleared += r => clearedRegion = r;
         _navigationService.ViewModelReleased += (_, vm) => disposedVm = vm;
 
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
         await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        // Mutual exclusion: GoBack pops the page so it moves to the cache,
+        // then ClearCacheAsync will dispose it.
+        await _navigationService.GoBackAsync();
         await _navigationService.ClearCacheAsync("MainRegion");
 
         Assert.Equal("MainRegion", clearedRegion);
-        var keepAlive = (KeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
-        Assert.Null(disposedVm);
-        Assert.False(keepAlive.Disposed);
-
-        await _navigationService.NavigateToAsync<TestHomeViewModel>("MainRegion", NavigationMode.ClearStack);
-        Assert.Same(keepAlive, disposedVm);
-        Assert.True(keepAlive.Disposed);
+        Assert.NotNull(disposedVm);
+        Assert.IsType<KeepAliveViewModel>(disposedVm);
+        Assert.True(((KeepAliveViewModel)disposedVm).Disposed);
     }
 
     [Fact]
@@ -2721,8 +2794,10 @@ public class NavigationServiceTests
     [Fact]
     public async Task ClearCache_DoesNotCancelActiveKeepAlivePageToken()
     {
-        // P1-1: clearing the cache must not cancel the lifecycle token of a page
-        // that is still active (on the navigation stack).
+        // Clearing the cache must not cancel the lifecycle token of a page
+        // that is still active (on the navigation stack). Mutual exclusion:
+        // the active page is not in the cache at all, so ClearCache cannot
+        // reach it.
         var services = new ServiceCollection();
         services.AddElegantSeriesFlow();
         services.AddTransient<ReentrantCancelViewModel>();
@@ -2732,7 +2807,7 @@ public class NavigationServiceTests
         await nav.NavigateToAsync<ReentrantCancelViewModel>(mode: NavigationMode.KeepAlive);
         var vm = Assert.IsType<ReentrantCancelViewModel>(nav.GetCurrentViewModel());
         vm.EnableReentrantCancel(nav);
-        var cts = GetKeepAliveEntryCts(nav, "MainRegion", typeof(ReentrantCancelViewModel));
+        var cts = GetActiveEntryCts(nav, "MainRegion");
         Assert.NotNull(cts);
         vm.RegisterReentrantCallback(cts.Token);
 

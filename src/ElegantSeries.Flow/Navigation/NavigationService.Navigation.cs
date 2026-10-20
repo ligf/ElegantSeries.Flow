@@ -401,7 +401,11 @@ public sealed partial class NavigationService
                                 if (cachedEntry is not null)
                                 {
                                     // KeepAlive reuse: share the cached entry's page scope.
-                                    pushedEntry = new NavigationEntry(regionName, cachedEntry.ViewModel, parameter, entryMode, cachedEntry.Scope);
+                                    // Mutual exclusion: the entry moves from cache to stack.
+                                    // Propagate the cache key so a later pop writes it back
+                                    // under the same key.
+                                    _keepAliveCache.Remove(cacheKey);
+                                    pushedEntry = new NavigationEntry(regionName, cachedEntry.ViewModel, parameter, entryMode, cachedEntry.Scope, cachedEntry.CacheKeyType);
                                 }
                                 else
                                 {
@@ -421,19 +425,17 @@ public sealed partial class NavigationService
                                     {
                                         scopeToRelease = ownedScope;
                                         ownedScope = null;
-                                        pushedEntry = new NavigationEntry(regionName, winner.ViewModel, parameter, entryMode, winner.Scope);
+                                        // Mutual exclusion: winner moves from cache to stack.
+                                        _keepAliveCache.Remove(cacheKey);
+                                        pushedEntry = new NavigationEntry(regionName, winner.ViewModel, parameter, entryMode, winner.Scope, winner.CacheKeyType);
                                     }
                                     else
                                     {
-                                        pushedEntry = new NavigationEntry(regionName, targetVm, parameter, entryMode, ownedScope!);
+                                        pushedEntry = new NavigationEntry(regionName, targetVm, parameter, entryMode, ownedScope!, typeof(TViewModel));
                                         ownedScope = null;
-                                        if (useKeepAlive)
-                                        {
-                                            // No winner exists, and none can appear here: every cache
-                                            // mutation requires _navigationLock, held continuously
-                                            // since the validation above.
-                                            _keepAliveCache[cacheKey] = pushedEntry;
-                                        }
+                                        // Mutual exclusion: a fresh KeepAlive entry lives on the
+                                        // stack only; it enters the cache when popped (see
+                                        // BuildDeactivatePlan). No cache write here.
                                     }
                                 }
 
@@ -456,7 +458,9 @@ public sealed partial class NavigationService
                                         // Remove any deeper duplicate of the target instance first
                                         // (e.g. a Singleton already on this stack): it was inactive,
                                         // so no lifecycle notification, just disposal bookkeeping.
-                                        var duplicate = FindEntryOnStackLocked(stack, targetVm);
+                                        // Instance match only: a different instance of the same
+                                        // type deeper on the stack is a distinct page, not a duplicate.
+                                        var duplicate = FindEntryOnStackLocked(stack, targetVm, allowTypeMatch: false);
                                         if (duplicate is not null && !ReferenceEquals(stack.Peek(), duplicate))
                                         {
                                             RemoveEntryLocked(stack, duplicate, deactivations);
@@ -684,11 +688,25 @@ public sealed partial class NavigationService
     /// The caller must hold <see cref="_stateLock"/>.
     /// </summary>
     private static NavigationEntry? FindEntryOnStackLocked(
-        Stack<NavigationEntry> stack, INavigationViewModel viewModel)
+        Stack<NavigationEntry> stack, INavigationViewModel viewModel, bool allowTypeMatch = true)
     {
+        // Match by instance (Singleton / cache-hit) first. If allowTypeMatch,
+        // fall back to a type match only for KeepAlive entries: with mutual
+        // exclusion a covered KeepAlive page lives on the stack but not in the
+        // cache, so the resolved viewModel may be a fresh instance of the same
+        // type. Non-KeepAlive entries of the same type are distinct pages and
+        // must not be treated as pop-to-existing targets.
+        var targetType = viewModel.GetType();
         foreach (var entry in stack)
         {
             if (ReferenceEquals(entry.ViewModel, viewModel))
+            {
+                return entry;
+            }
+
+            if (allowTypeMatch
+                && entry.Mode == NavigationMode.KeepAlive
+                && entry.ViewModel.GetType() == targetType)
             {
                 return entry;
             }
