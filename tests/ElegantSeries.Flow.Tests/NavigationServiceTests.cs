@@ -174,6 +174,13 @@ public sealed class DerivedKeepAliveViewModel : BaseKeepAliveViewModel, IDisposa
     public void Dispose() => Disposed = true;
 }
 
+public sealed class SecondDerivedKeepAliveViewModel : BaseKeepAliveViewModel, IDisposable
+{
+    public bool Disposed { get; private set; }
+
+    public void Dispose() => Disposed = true;
+}
+
 public sealed class ParamAwareKeepAliveViewModel : NavigationViewModelBase, INavigationAware, IDisposable
 {
     public object? LastParameter { get; private set; }
@@ -644,6 +651,74 @@ public class NavigationServiceTests
         await nav.NavigateToAsync<BaseKeepAliveViewModel>(mode: NavigationMode.KeepAlive);
 
         Assert.Same(first, nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task KeepAliveCacheEviction_WhenSecondSameKeyInstancePops_ShouldDisposeEvictedEntry()
+    {
+        // Regression: the cache holds one entry per (region, static type) key.
+        // A DI factory returning different runtime types for the same static
+        // type puts two same-key KeepAlive instances on the stack; when both
+        // pop, the second cache write evicts the first entry. The evicted
+        // entry's scope must be disposed, not orphaned.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<TestHomeViewModel>();
+        int counter = 0;
+        services.AddTransient<BaseKeepAliveViewModel>(_ =>
+            (counter++ % 2 == 0) ? new DerivedKeepAliveViewModel() : new SecondDerivedKeepAliveViewModel());
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        await nav.NavigateToAsync<BaseKeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        var first = Assert.IsType<DerivedKeepAliveViewModel>(nav.GetCurrentViewModel());
+        await nav.NavigateToAsync<BaseKeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        var second = Assert.IsType<SecondDerivedKeepAliveViewModel>(nav.GetCurrentViewModel());
+
+        // Pop the second instance: it moves to the cache.
+        Assert.True(await nav.GoBackAsync());
+        Assert.False(second.Disposed);
+
+        // Pop the first instance: its cache write evicts the second entry.
+        Assert.True(await nav.GoBackAsync());
+        Assert.True(second.Disposed);
+        Assert.False(first.Disposed);
+
+        // The surviving cache entry is the first instance and is reused.
+        await nav.NavigateToAsync<BaseKeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        Assert.Same(first, nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task ClearCacheAsync_WhenCacheIsEmpty_ShouldNotRaiseRegionCacheCleared()
+    {
+        string? clearedRegion = null;
+        _navigationService.RegionCacheCleared += r => clearedRegion = r;
+
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await _navigationService.ClearCacheAsync("MainRegion");
+        Assert.Null(clearedRegion);
+
+        // With an actual cached entry, the event does fire.
+        await _navigationService.NavigateToAsync<KeepAliveViewModel>(mode: NavigationMode.KeepAlive);
+        await _navigationService.GoBackAsync();
+        await _navigationService.ClearCacheAsync("MainRegion");
+        Assert.Equal("MainRegion", clearedRegion);
+    }
+
+    [Fact]
+    public async Task ClearAllCacheAsync_WhenCachesAreEmpty_ShouldNotRaiseRegionCacheCleared()
+    {
+        var clearedRegions = new List<string>();
+        _navigationService.RegionCacheCleared += r => clearedRegions.Add(r);
+
+        // Regions exist (stacks) but hold no cached entries.
+        await _navigationService.NavigateToAsync<TestHomeViewModel>("Region1");
+        await _navigationService.NavigateToAsync<TestHomeViewModel>("Region2");
+        await _navigationService.ClearAllCacheAsync();
+
+        Assert.Empty(clearedRegions);
     }
 
     [Fact]

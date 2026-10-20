@@ -518,6 +518,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         var errors = new List<Exception>();
         List<ScopeDisposalTarget> targets;
         var ctsToCancel = new List<CancellationTokenSource>();
+        bool cacheHadEntries = false;
 
         // Serialized with navigation transitions: otherwise a concurrent navigation
         // could adopt a cache entry whose scope this call is about to dispose.
@@ -532,6 +533,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             using (_stateLock.EnterScope())
             {
                 var removed = RemoveRegionCacheEntriesLocked(regionName);
+                cacheHadEntries = removed.Count > 0;
                 // Mutual exclusion: cache entries are never on a stack, so no
                 // self-dispose guard is needed. A reentrant call from within a
                 // lifecycle callback simply clears entries that do not include
@@ -559,7 +561,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
 
         // Scope disposal runs outside the lock; the entries are already detached above.
         DisposeScopesSync(targets, pendingEvents, errors);
-        pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
+        if (cacheHadEntries)
+        {
+            pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
+        }
 
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(errors);
@@ -633,6 +638,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         List<ScopeDisposalTarget> targets;
         List<Task> gates;
         var ctsToCancel = new List<CancellationTokenSource>();
+        bool cacheHadEntries = false;
 
         // Serialized with navigation transitions: otherwise a concurrent navigation
         // could adopt a cache entry whose scope this call is about to dispose.
@@ -647,6 +653,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             using (_stateLock.EnterScope())
             {
                 var removed = RemoveRegionCacheEntriesLocked(regionName);
+                cacheHadEntries = removed.Count > 0;
                 // Mutual exclusion: cache entries are never on a stack, so no
                 // self-dispose guard is needed (see ClearCache).
                 // Only unreferenced entries: must not cancel an active page's token.
@@ -692,7 +699,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
 
         // Scope disposal runs outside the lock; the entries are already detached above.
         await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
-        pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
+        if (cacheHadEntries)
+        {
+            pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
+        }
 
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(errors);

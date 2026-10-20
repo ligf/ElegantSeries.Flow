@@ -214,7 +214,10 @@ public class NavigationServiceCoverageTests
         var cleared = new List<string>();
         using var sub = svc.SubscribeRegionCacheCleared(r => cleared.Add(r));
 
+        await svc.NavigateToAsync<TestDetailViewModel>();
         await svc.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.KeepAlive);
+        // Mutual exclusion: the page enters the cache only when popped.
+        await svc.GoBackAsync();
         svc.ClearCache("MainRegion");
 
         Assert.Contains("MainRegion", cleared);
@@ -300,7 +303,10 @@ public class NavigationServiceCoverageTests
 
         svc.RegionCacheCleared += r => throw new InvalidOperationException("Clear boom.");
 
+        await svc.NavigateToAsync<TestDetailViewModel>();
         await svc.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.KeepAlive);
+        // Mutual exclusion: the page enters the cache only when popped.
+        await svc.GoBackAsync();
         svc.ClearCache("MainRegion");
 
         await reportedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
