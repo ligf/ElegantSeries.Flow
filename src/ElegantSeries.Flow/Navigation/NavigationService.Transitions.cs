@@ -233,6 +233,11 @@ public sealed partial class NavigationService
             }
             else if (entry.ViewModel is INavigationAware aware)
             {
+                // Register in-flight at queue time, like the async variant: a
+                // reentrant self-destroying navigation started from inside this
+                // synchronous callback must find a live gate and defer the scope
+                // disposal until the callback exits.
+                var syncGateTask = entry.EnterInFlightLifecycle();
                 work.NavigatedFromActions.Add(() =>
                 {
                     var previousCurrent = _currentLifecycleEntry.Value;
@@ -244,6 +249,7 @@ public sealed partial class NavigationService
                     finally
                     {
                         _currentLifecycleEntry.Value = previousCurrent;
+                        entry.ExitInFlightLifecycle(syncGateTask);
                     }
                 });
             }
@@ -392,6 +398,11 @@ public sealed partial class NavigationService
         }
         else if (viewModel is INavigationAware aware)
         {
+            // Register in-flight at queue time, like the async variant: a
+            // reentrant self-destroying navigation started from inside this
+            // synchronous callback must find a live gate and defer the scope
+            // disposal until the callback exits.
+            var syncGateTask = entry.EnterInFlightLifecycle();
             work.NavigatedToActions.Add(() =>
             {
                 var previousCurrent = _currentLifecycleEntry.Value;
@@ -403,6 +414,7 @@ public sealed partial class NavigationService
                 finally
                 {
                     _currentLifecycleEntry.Value = previousCurrent;
+                    entry.ExitInFlightLifecycle(syncGateTask);
                 }
             });
         }
@@ -604,10 +616,10 @@ public sealed partial class NavigationService
                 oldCts = LifecycleCts;
                 LifecycleCts = new CancellationTokenSource();
 
-                // When no async callbacks are in flight, dispose previously
+                // When no callbacks are in flight, dispose previously
                 // retired sources that have already been cancelled. Without
-                // this, entries with only synchronous (or no) lifecycle
-                // callbacks would accumulate retired sources unboundedly,
+                // this, entries whose ViewModel has no lifecycle callbacks
+                // at all would accumulate retired sources unboundedly,
                 // because ExitInFlightLifecycle is never called for them.
                 // Only sources with IsCancellationRequested == true are
                 // disposed: the owning thread cancels the retired source
@@ -663,7 +675,7 @@ public sealed partial class NavigationService
         }
 
         /// <summary>
-        /// Registers an async lifecycle callback as in-flight. Must be called when the
+        /// Registers a lifecycle callback as in-flight. Must be called when the
         /// callback is QUEUED (while holding the navigation lock), not when it starts
         /// executing — otherwise a concurrent disposal could miss it.
         /// </summary>
@@ -682,7 +694,7 @@ public sealed partial class NavigationService
         }
 
         /// <summary>
-        /// Unregisters an async lifecycle callback. When the last in-flight
+        /// Unregisters a lifecycle callback. When the last in-flight
         /// callback exits, retired cancellation sources that have been
         /// cancelled are disposed and any deferred scope disposals (from
         /// reentrant self-destroying navigation) are executed.

@@ -2007,6 +2007,25 @@ public class NavigationServiceTests
         public void Dispose() => _disposed = true;
     }
 
+    private sealed class SyncSelfReplacingAndContinuingViewModel(DisposableTracker tracker) : NavigationViewModelBase, INavigationAware
+    {
+        public void OnNavigatedTo(object? parameter)
+        {
+            if (Navigation is not null)
+            {
+                // Reentrant self-destroying navigation, blocked on synchronously
+                // because this callback cannot await...
+                Navigation.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.Replace).GetAwaiter().GetResult();
+                // ...then continue using scope services. Throws if scope was disposed.
+                tracker.MarkUsed();
+            }
+        }
+
+        public void OnNavigatedFrom()
+        {
+        }
+    }
+
     private sealed class SelfReplacingAndContinuingViewModel(DisposableTracker tracker) : NavigationViewModelBase, INavigationAwareAsync
     {
         public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
@@ -2729,6 +2748,26 @@ public class NavigationServiceTests
         // If the scope were disposed immediately on Replace, MarkUsed would throw
         // ObjectDisposedException inside the callback, failing the navigation.
         var result = await nav.NavigateToAsync<SelfReplacingAndContinuingViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(result);
+        Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task SyncReentrantReplace_DefersScopeDisposalUntilCallbackExits()
+    {
+        // Sync counterpart of ReentrantReplace_DefersScopeDisposalUntilCallbackExits:
+        // a synchronous OnNavigatedTo that blocks on a self-destroying navigation
+        // and then continues using scope services must see the same deferral.
+        // Sync callbacks are tracked in-flight exactly like async ones.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncSelfReplacingAndContinuingViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddScoped<DisposableTracker>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var result = await nav.NavigateToAsync<SyncSelfReplacingAndContinuingViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(result);
         Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
     }
