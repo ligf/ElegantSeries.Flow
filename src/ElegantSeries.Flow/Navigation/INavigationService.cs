@@ -119,7 +119,11 @@ public interface INavigationService
     event Action<string, INavigationViewModel>? ViewModelReleased;
 
     /// <summary>
-    /// Raised when a region's KeepAlive cache is cleared.
+    /// Raised when a region's KeepAlive cache is cleared and at least one cached
+    /// entry was actually removed. Clearing a cache that holds no entries for the
+    /// region does not raise this event. When the service itself is disposed,
+    /// the event is also raised for every region that still held stack, cache
+    /// or pending entries at shutdown.
     /// </summary>
     /// <remarks>Parameter: region name.</remarks>
     event Action<string>? RegionCacheCleared;

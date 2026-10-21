@@ -236,7 +236,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         }
     }
 
-    private bool _disposed;
+    private volatile bool _disposed;
 
     // ────────────────────────────── Events ──────────────────────────────
 
@@ -793,6 +793,13 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// Callers must ensure their <c>INavigationAwareAsync</c> callbacks observe
     /// cancellation promptly and stop touching page dependencies once cancelled.
     /// For a guaranteed wait, use <see cref="DisposeAsync"/> instead.
+    /// </para>
+    /// <para>
+    /// Lock timeout: this method waits up to
+    /// <see cref="NavigationOptions.SyncLockTimeout"/> (default 2 seconds) for the
+    /// navigation lock. If a navigation is running a slow lifecycle callback, a
+    /// <see cref="TimeoutException"/> is thrown and the service is NOT disposed.
+    /// Prefer <see cref="DisposeAsync"/> on UI threads.
     /// </para>
     /// </remarks>
     public void Dispose()
