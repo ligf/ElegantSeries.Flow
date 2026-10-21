@@ -442,6 +442,11 @@ public sealed partial class NavigationService
     /// <summary>
     /// Builds the deactivation plan for an entry that is leaving the active slot:
     /// whether its page scope should be disposed and which regions to notify.
+    /// When the move into the cache evicts a previous entry under the same cache
+    /// key and that entry's page scope is no longer referenced anywhere else,
+    /// the plan also carries that evicted entry so the caller can dispose its
+    /// page scope through the standard disposal path. If the scope is still
+    /// referenced, the disposal is recorded as pending instead.
     /// Mutual exclusion: a KeepAlive entry popped from the stack is moved to the
     /// cache here; an entry still on a stack (covered, not popped) is left alone.
     /// Acquires <see cref="_stateLock"/> internally.
@@ -601,7 +606,12 @@ public sealed partial class NavigationService
         }
     }
 
-    /// <summary>Deactivation plan for one entry: whether to dispose its page scope and which regions to notify.</summary>
+    /// <summary>
+    /// Deactivation plan for one entry: whether to dispose its page scope and
+    /// which regions to notify. <c>EvictedDisposals</c> lists cache entries
+    /// evicted by this entry's move into the cache, with the regions to notify
+    /// when their page scopes are disposed.
+    /// </summary>
     private readonly record struct DeactivatePlan(
         bool ShouldDispose,
         string[] RegionsToNotify,
