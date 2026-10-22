@@ -578,6 +578,8 @@ public sealed partial class NavigationService
                         window.Phase = _regionStacks.TryGetValue(regionName, out var stack) && stack.Count > 0
                             ? WindowPhase.Open
                             : WindowPhase.None;
+                        window.ChainDepartures = 0;
+                        window.ChainTrace.Clear();
                     }
                 }
             }
@@ -1119,16 +1121,13 @@ public sealed partial class NavigationService
     /// Runs one departure of the region's current page for the given initial
     /// candidate intent: chain-limit check, leave guard, From callbacks, final
     /// sampling of the intent slot, and execution of the winning intent.
-    /// </summary>
-    /// <returns>False when the pump should exit (disposed).</returns>
-    /// <summary>
-    /// Runs one departure and afterwards guarantees the surfacing invariant:
-    /// if the departure was refused (or its hop failed and the departing page
-    /// was revived) and the region's current page has never been surfaced
-    /// since it landed — the case for departures chained straight from the
-    /// entering step, where the landing raise was deferred — the page is
-    /// surfaced now that it comes to rest. Without this, hosts would keep
-    /// showing the previous page while the refused page is already current.
+    /// Afterwards it guarantees the surfacing invariant: if the departure was
+    /// refused (or its hop failed and the departing page was revived) and the
+    /// region's current page has never been surfaced since it landed — the
+    /// case for departures chained straight from the entering step, where the
+    /// landing raise was deferred — the page is surfaced now that it comes to
+    /// rest. Without this, hosts would keep showing the previous page while
+    /// the refused page is already current.
     /// </summary>
     /// <returns>False when the pump should exit (disposed).</returns>
     private async Task<bool> RunDepartureAsync(RegionWindow window, string regionName, NavigationIntent candidate)
