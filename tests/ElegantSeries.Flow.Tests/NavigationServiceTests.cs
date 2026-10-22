@@ -3041,6 +3041,11 @@ public class NavigationServiceTests
 
         await _navigationService.NavigateToAsync<ReentrantNavigatedToViewModel>();
 
+        // The redirect registered in OnNavigatedTo executes right after
+        // the initiating call completes; RegionNavigated for the final
+        // page fires when it comes to rest — wait for both before
+        // asserting the final state.
+        await WaitUntilAsync(() => events.Contains(nameof(TestHomeViewModel)));
         Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
         Assert.DoesNotContain(nameof(ReentrantNavigatedToViewModel), events);
         Assert.Equal(new[] { nameof(TestHomeViewModel) }, events);
@@ -3256,6 +3261,11 @@ public class NavigationServiceTests
         var result = await nav.NavigateToAsync<ReentrantAsyncViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.True(result);
+        // The initiating call completes when the reentrant page's window
+        // closes; the redirect its callback registered executes right
+        // afterwards on the pump — wait for the chain to settle before
+        // asserting the final page.
+        await WaitUntilAsync(() => nav.GetCurrentViewModel() is TestHomeViewModel);
         Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
     }
 
@@ -3319,12 +3329,30 @@ public class NavigationServiceTests
         var provider = services.BuildServiceProvider();
         var nav = provider.GetRequiredService<INavigationService>();
 
+        // The self-wait, if it recurs, happens in the Replace hop's
+        // disposal of the replaced page — which runs AFTER the hop's stack
+        // commit flips the current page. The observable that brackets it
+        // is the page's release (its scope disposal), not the flip.
+        var replacedReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        nav.ViewModelReleased += (_, vm) =>
+        {
+            if (vm is SelfReplacingViewModel)
+            {
+                replacedReleased.TrySetResult();
+            }
+        };
+
         var startTime = DateTime.UtcNow;
         var result = await nav.NavigateToAsync<SelfReplacingViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
-        var elapsed = DateTime.UtcNow - startTime;
 
         Assert.True(result);
+        // As in the reentrant-navigation test: the Replace the callback
+        // registered executes right after the initiating call completes.
+        await WaitUntilAsync(() => nav.GetCurrentViewModel() is TestHomeViewModel);
         Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
+
+        await replacedReleased.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var elapsed = DateTime.UtcNow - startTime;
         Assert.True(elapsed < TimeSpan.FromSeconds(4), $"Took {elapsed}, self-wait would take ~5s");
     }
 
@@ -3421,6 +3449,9 @@ public class NavigationServiceTests
         // ObjectDisposedException inside the callback, failing the navigation.
         var result = await nav.NavigateToAsync<SelfReplacingAndContinuingViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(result);
+        // The Replace the callback registered executes right after the
+        // initiating call completes — wait for the chain to settle.
+        await WaitUntilAsync(() => nav.GetCurrentViewModel() is TestHomeViewModel);
         Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
     }
 
@@ -3441,6 +3472,8 @@ public class NavigationServiceTests
 
         var result = await nav.NavigateToAsync<SyncSelfReplacingAndContinuingViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(result);
+        // Same settle wait as the async counterpart.
+        await WaitUntilAsync(() => nav.GetCurrentViewModel() is TestHomeViewModel);
         Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
     }
 

@@ -332,11 +332,46 @@ public sealed partial class NavigationService
             WithdrawIntent(intent);
             // When the intent was already executing, withdrawal no longer
             // applies and the pump still completes its fate afterwards —
-            // possibly faulted — with nobody left awaiting it. Observe the
-            // eventual fault so it cannot surface as an
-            // UnobservedTaskException when the task is finalized.
+            // possibly faulted — with nobody left awaiting it. The eventual
+            // fault is REPORTED, not merely observed: FaultOrReport diverts
+            // to SubscriberError when it sees the intent already withdrawn,
+            // but a fault that was delivered into the fate just before the
+            // cancellation landed (the check and the fault are not atomic)
+            // would otherwise sit in this abandoned fate and be silently
+            // dropped. Reporting it here closes that gap — and it cannot
+            // double-report, because when FaultOrReport does take the
+            // report branch the fate is never faulted, so this continuation
+            // never runs.
             _ = intent.Fate!.Task.ContinueWith(
-                static completed => { _ = completed.Exception; },
+                completed =>
+                {
+                    if (completed.Exception is not { } exception)
+                    {
+                        return;
+                    }
+
+                    // Mirror the fateless delivery in CompleteExecutedIntent:
+                    // a fate faulted with several collected errors reports
+                    // each one, not just the first. Cancellation artifacts
+                    // among them are outcomes, not errors, and are skipped —
+                    // a fate that faulted purely with an
+                    // OperationCanceledException reports nothing.
+                    if (exception.InnerExceptions.Count > 1)
+                    {
+                        foreach (var inner in exception.InnerExceptions)
+                        {
+                            if (inner is not OperationCanceledException)
+                            {
+                                ReportSubscriberError(inner);
+                            }
+                        }
+                    }
+                    else if (exception.InnerException is { } single
+                        && single is not OperationCanceledException)
+                    {
+                        ReportSubscriberError(single);
+                    }
+                },
                 CancellationToken.None,
                 TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
@@ -382,15 +417,21 @@ public sealed partial class NavigationService
 
     /// <summary>
     /// Delivers an internal failure to the intent that hit it: faulted into
-    /// its fate when a caller is awaiting it, otherwise — for
-    /// callback-registered intents, which have no fate — reported via
-    /// <see cref="SubscriberError"/>. Failure paths must never drop an
-    /// exception silently just because the request that hit it was
-    /// registered from a lifecycle callback.
+    /// its fate when a caller is awaiting it, otherwise reported via
+    /// <see cref="SubscriberError"/>. The "otherwise" covers two cases:
+    /// callback-registered intents, which have no fate; and outside intents
+    /// whose caller has already withdrawn (its token is cancelled — it
+    /// observed OperationCanceledException from its own token and is no
+    /// longer awaiting the fate). Faulting a withdrawn intent's fate would
+    /// drop the exception silently: nobody awaits it. (The caller's
+    /// post-withdrawal observer in AwaitIntentFateAsync is the backstop
+    /// for the mirror race — a fault delivered into the fate just before
+    /// the cancellation landed — and reports any fault it finds there.)
+    /// Failure paths must never drop an exception silently.
     /// </summary>
     private void FaultOrReport(NavigationIntent intent, Exception error)
     {
-        if (intent.Fate is not null)
+        if (intent.Fate is not null && !intent.IsWithdrawn)
         {
             FaultIntent(intent, error);
         }

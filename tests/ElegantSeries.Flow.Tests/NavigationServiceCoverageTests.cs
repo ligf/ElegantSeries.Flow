@@ -498,6 +498,73 @@ public class NavigationServiceCoverageTests
         Assert.IsType<InvalidOperationException>(observedError);
     }
 
+    /// <summary>
+    /// Guard that blocks on the caller's own cancellation token and faults
+    /// with <see cref="InvalidOperationException"/> the moment the caller
+    /// cancels. Used to verify the report path when the guard's fault —
+    /// not the cancellation — is what the pump's guard race surfaces after
+    /// the caller has already withdrawn: the fault must still reach
+    /// SubscriberError, not the withdrawn caller's abandoned fate.
+    /// </summary>
+    private sealed class TokenFaultingGuardViewModel : NavigationViewModelBase, INavigationGuard
+    {
+        public TaskCompletionSource<bool> GuardEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
+        {
+            GuardEntered.TrySetResult(true);
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw new InvalidOperationException("Guard failed after cancellation.");
+            }
+
+            return true;
+        }
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenGuardFaultsAsCallerCancels_FaultIsObserved()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<TokenFaultingGuardViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        var errorSeen = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        svc.SubscribeSubscriberError(ex =>
+        {
+            observedError = ex;
+            errorSeen.TrySetResult(true);
+        });
+
+        await svc.NavigateToAsync<TokenFaultingGuardViewModel>();
+
+        using var cts = new CancellationTokenSource();
+        var navTask = svc.NavigateToAsync<TestHomeViewModel>(cancellationToken: cts.Token);
+
+        var vm = Assert.IsType<TokenFaultingGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+        await vm.GuardEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Cancelling the caller makes the guard fault at the same moment
+        // the guard race is abandoned. Whichever completion the race
+        // surfaces, the caller has withdrawn by the time the fault is
+        // delivered — it must be reported, not faulted into the abandoned
+        // fate where nobody observes it.
+        cts.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => navTask);
+
+        await errorSeen.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.NotNull(observedError);
+        Assert.IsType<InvalidOperationException>(observedError);
+    }
+
     // ── ClearCacheAsync / ClearAllCacheAsync gate timeout ────────
     // Note: Gate timeout paths for ClearCacheAsync/ClearAllCacheAsync are
     // difficult to test reliably without hanging the test suite (the hanging
