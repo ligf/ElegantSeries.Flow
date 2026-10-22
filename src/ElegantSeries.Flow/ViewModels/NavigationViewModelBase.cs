@@ -115,7 +115,10 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     /// <see langword="true"/> if it was executed; <see langword="false"/> if it
     /// was superseded, vetoed by the leave guard, or discarded on disposal —
     /// or when this ViewModel is not attached to a navigation service.
-    /// Cancelling <paramref name="cancellationToken"/> does not return
+    /// When called from within a lifecycle callback, the task is already
+    /// completed with <see langword="true"/> (the request was registered) and
+    /// does not report the request's later fate. Cancelling
+    /// <paramref name="cancellationToken"/> does not return
     /// <see langword="false"/>: the returned task completes as cancelled.
     /// </returns>
     protected Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
@@ -145,7 +148,10 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     /// <see langword="true"/> if it was executed; <see langword="false"/> if it
     /// was superseded, vetoed by the leave guard, or discarded on disposal —
     /// or when this ViewModel is not attached to a navigation service.
-    /// Cancelling <paramref name="cancellationToken"/> does not return
+    /// When called from within a lifecycle callback, the task is already
+    /// completed with <see langword="true"/> (the request was registered) and
+    /// does not report the request's later fate. Cancelling
+    /// <paramref name="cancellationToken"/> does not return
     /// <see langword="false"/>: the returned task completes as cancelled.
     /// </returns>
     protected Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
@@ -168,8 +174,10 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     /// <see langword="true"/> if it was executed; <see langword="false"/> if it
     /// was superseded, vetoed by the leave guard, the stack has one or fewer
     /// pages, or the service was disposed — or when this ViewModel is not
-    /// attached to a navigation service. Cancelling
-    /// <paramref name="cancellationToken"/> does not return
+    /// attached to a navigation service. When called from within a lifecycle
+    /// callback, the task is already completed with <see langword="true"/>
+    /// (the request was registered) and does not report the request's later
+    /// fate. Cancelling <paramref name="cancellationToken"/> does not return
     /// <see langword="false"/>: the returned task completes as cancelled.
     /// </returns>
     protected Task<bool> GoBackAsync(string regionName = DefaultRegionName, CancellationToken cancellationToken = default)
