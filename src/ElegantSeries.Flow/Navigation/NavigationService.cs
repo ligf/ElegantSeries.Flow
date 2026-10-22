@@ -35,10 +35,13 @@ namespace ElegantSeries.Flow.Navigation;
 /// a ViewModel has a single navigation reference and cannot be active in two regions at once.
 /// </para>
 /// <para>
-/// Thread safety: every public member is safe to call from any thread. Navigation
-/// transitions are serialized with an async lock, and all shared state is guarded
-/// by a dedicated state lock. Lifecycle callbacks and disposal always run outside
-/// both locks.
+/// Thread safety: every public member is safe to call from any thread. Within
+/// each region, transitions are serialized by a per-region pump that executes
+/// registered requests one hop at a time; regions proceed independently of
+/// one another. All shared state is guarded by a dedicated state lock, and the
+/// synchronous cache-clearing and disposal members additionally take a
+/// navigation lock bounded by <see cref="NavigationOptions.SyncLockTimeout"/>.
+/// Lifecycle callbacks and disposal always run outside every lock.
 /// </para>
 /// <para>
 /// Disposal is best-effort <i>across</i> pages: when several page scopes are disposed together
