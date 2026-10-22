@@ -488,9 +488,12 @@ public class NavigationServiceCoverageTests
         // The navigation should be cancelled
         await Assert.ThrowsAsync<OperationCanceledException>(() => navTask);
 
-        // Release the guard so it throws; the fault should be observed via SubscriberError
+        // Release the guard so it throws; the fault should be observed via SubscriberError.
+        // This wait asserts eventual observation, not latency: delivery rides
+        // thread-pool scheduling, which a fully parallel suite on a small CI
+        // runner can delay well past a few seconds.
         vm.GuardRelease.TrySetResult(true);
-        await errorSeen.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await errorSeen.Task.WaitAsync(TimeSpan.FromSeconds(30));
         Assert.NotNull(observedError);
         Assert.IsType<InvalidOperationException>(observedError);
     }

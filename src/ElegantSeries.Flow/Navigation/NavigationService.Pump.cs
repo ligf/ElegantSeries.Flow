@@ -1631,18 +1631,51 @@ public sealed partial class NavigationService
         Task disposalSignal)
     {
         var guardTask = InvokeFromGuardAsync(viewModel, context, cancellationToken);
+        // The fault-observation continuation is attached NOW, not after the
+        // race: if the race is lost (caller cancellation or Dispose), the
+        // abandoned guard's eventual fault must be reported, and attaching
+        // late would make the report depend on this flow being rescheduled
+        // first — under thread-pool load that delay is unbounded. The
+        // continuation reports only when the abandon branch has marked the
+        // guard abandoned; the abandon branch itself reports directly when
+        // the guard has already faulted by then. The Interlocked exchange
+        // keeps the report exactly-once across the two.
+        var abandoned = 0;
+        var reported = 0;
+        void ReportGuardFault()
+        {
+            if (Interlocked.Exchange(ref reported, 1) == 0)
+            {
+                var exception = guardTask.Exception!;
+                ReportSubscriberError(exception.InnerException ?? exception);
+            }
+        }
+
+        _ = guardTask.ContinueWith(
+            _ =>
+            {
+                if (Volatile.Read(ref abandoned) == 1)
+                {
+                    ReportGuardFault();
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
         // The wait also ends when the service is disposed: a guard that never
         // completes must not hang the departing caller (or the pump) past
         // Dispose. The abandoned guard task's eventual fault is observed by
-        // the continuation below, as with token cancellation.
+        // the continuation above, as with token cancellation.
         var completed = await Task.WhenAny(guardTask, Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken), disposalSignal).ConfigureAwait(false);
         if (!ReferenceEquals(completed, guardTask))
         {
-            _ = guardTask.ContinueWith(
-                t => ReportSubscriberError(t.Exception!.InnerException ?? t.Exception!),
-                CancellationToken.None,
-                TaskContinuationOptions.OnlyOnFaulted,
-                TaskScheduler.Default);
+            Volatile.Write(ref abandoned, 1);
+            if (guardTask.IsFaulted)
+            {
+                ReportGuardFault();
+            }
+
             return GuardOutcome.Cancelled;
         }
 
