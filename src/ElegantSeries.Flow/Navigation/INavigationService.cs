@@ -146,11 +146,15 @@ public interface INavigationService
 
     /// <summary>
     /// Raised when a navigation event subscriber (<see cref="RegionNavigated"/>,
-    /// <see cref="ViewModelReleased"/>, <see cref="RegionCacheCleared"/>) throws.
-    /// The exception is swallowed to protect navigation state; subscribe to this
-    /// event for diagnostics.
+    /// <see cref="ViewModelReleased"/>, <see cref="RegionCacheCleared"/>) throws,
+    /// and for navigation failures that have no awaiting caller to throw to:
+    /// a leave guard that faults after its caller has withdrawn, a disposal-gate
+    /// timeout, or a callback chain stopped by
+    /// <see cref="NavigationOptions.MaxNavigationChainLength"/>. The exception
+    /// is swallowed to protect navigation state; subscribe to this event for
+    /// diagnostics.
     /// </summary>
-    /// <remarks>Parameter: the subscriber exception.</remarks>
+    /// <remarks>Parameter: the reported exception.</remarks>
     event Action<Exception>? SubscriberError;
 
     /// <summary>
@@ -239,12 +243,16 @@ public interface INavigationService
     /// the service was disposed.
     /// </returns>
     /// <exception cref="OperationCanceledException">
-    /// Thrown when <paramref name="cancellationToken"/> is cancelled while this
-    /// request is still pending.
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
+    /// call completes; cancellation while the request is still pending also
+    /// withdraws the request.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// Thrown when the resolved ViewModel instance already lives on another
     /// region's stack.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">
+    /// Thrown when the service has been disposed.
     /// </exception>
     /// <remarks>
     /// <para>
@@ -261,10 +269,12 @@ public interface INavigationService
     /// page's departure immediately.
     /// </para>
     /// <para>
-    /// Calls made from within a lifecycle callback return immediately with
-    /// <see langword="true"/> (the request was registered); their outcome is
-    /// observable through <see cref="RegionNavigated"/>. Calls made from anywhere
-    /// else complete with the request's own fate as described above.
+    /// Calls made from within a lifecycle callback return immediately: with
+    /// <see langword="true"/> when the request was registered, or with
+    /// <see langword="false"/> when the service has already been disposed and
+    /// the request was discarded. Their outcome is observable through
+    /// <see cref="RegionNavigated"/>. Calls made from anywhere else complete
+    /// with the request's own fate as described above.
     /// </para>
     /// <para>
     /// Keep ViewModel constructors lightweight: a page is constructed only when its
@@ -318,12 +328,16 @@ public interface INavigationService
     /// the service was disposed.
     /// </returns>
     /// <exception cref="OperationCanceledException">
-    /// Thrown when <paramref name="cancellationToken"/> is cancelled while this
-    /// request is still pending.
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
+    /// call completes; cancellation while the request is still pending also
+    /// withdraws the request.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// Thrown when the resolved ViewModel instance already lives on another
     /// region's stack.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">
+    /// Thrown when the service has been disposed.
     /// </exception>
     /// <remarks>
     /// See the window-model remarks on
@@ -359,8 +373,12 @@ public interface INavigationService
     /// fewer pages, or the service was disposed.
     /// </returns>
     /// <exception cref="OperationCanceledException">
-    /// Thrown when <paramref name="cancellationToken"/> is cancelled while this
-    /// request is still pending.
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
+    /// call completes; cancellation while the request is still pending also
+    /// withdraws the request.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">
+    /// Thrown when the service has been disposed.
     /// </exception>
     /// <remarks>
     /// A back request participates in the same window model as
@@ -377,6 +395,10 @@ public interface INavigationService
     /// Synchronously clears the KeepAlive cache for the specified region.
     /// </summary>
     /// <param name="regionName">The navigation region to clear.</param>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the navigation lock cannot be acquired within
+    /// <see cref="NavigationOptions.SyncLockTimeout"/> (default 2 seconds).
+    /// </exception>
     /// <remarks>
     /// <para>
     /// Page scopes still referenced by a navigation stack are deferred for disposal
@@ -399,7 +421,8 @@ public interface INavigationService
     /// </para>
     /// <para>
     /// This method blocks until any in-flight navigation transition releases the
-    /// navigation lock. Prefer <see cref="ClearCacheAsync"/> on UI threads to avoid
+    /// navigation lock, for at most <see cref="NavigationOptions.SyncLockTimeout"/>.
+    /// Prefer <see cref="ClearCacheAsync"/> on UI threads to avoid
     /// stalling the interface.
     /// </para>
     /// <para>
@@ -413,6 +436,10 @@ public interface INavigationService
     /// <summary>
     /// Synchronously clears the KeepAlive cache for all regions.
     /// </summary>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the navigation lock cannot be acquired within
+    /// <see cref="NavigationOptions.SyncLockTimeout"/> (default 2 seconds).
+    /// </exception>
     /// <remarks>
     /// <para>
     /// Page scopes still referenced by navigation stacks are deferred for disposal
@@ -427,7 +454,8 @@ public interface INavigationService
     /// </para>
     /// <para>
     /// This method blocks until any in-flight navigation transition releases the
-    /// navigation lock. Prefer <see cref="ClearAllCacheAsync"/> on UI threads to avoid
+    /// navigation lock, for at most <see cref="NavigationOptions.SyncLockTimeout"/>.
+    /// Prefer <see cref="ClearAllCacheAsync"/> on UI threads to avoid
     /// stalling the interface.
     /// </para>
     /// <para>

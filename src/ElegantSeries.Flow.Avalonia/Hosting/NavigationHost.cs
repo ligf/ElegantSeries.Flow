@@ -129,20 +129,30 @@ public class NavigationHost : ContentControl, IDisposable
     /// immediately re-displays the new region's current page (or clears the host
     /// when the region is empty), so it can be data-bound.
     /// </summary>
+    /// <exception cref="ObjectDisposedException">The host has been disposed.</exception>
     public string RegionName
     {
         get => GetValue(RegionNameProperty);
-        set => SetValue(RegionNameProperty, value ?? throw new ArgumentNullException(nameof(value)));
+        set
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            SetValue(RegionNameProperty, value ?? throw new ArgumentNullException(nameof(value)));
+        }
     }
 
     /// <summary>
     /// Gets or sets the navigation service to observe. Changing the value
     /// unsubscribes the previous service and subscribes the new one.
     /// </summary>
+    /// <exception cref="ObjectDisposedException">The host has been disposed.</exception>
     public INavigationService? NavigationService
     {
         get => GetValue(NavigationServiceProperty);
-        set => SetValue(NavigationServiceProperty, value);
+        set
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            SetValue(NavigationServiceProperty, value);
+        }
     }
 
     /// <summary>
@@ -155,15 +165,23 @@ public class NavigationHost : ContentControl, IDisposable
     /// the navigation service isolates event subscribers and swallows their
     /// exceptions by design, so the hook is the observable channel).
     /// </remarks>
+    /// <exception cref="ObjectDisposedException">The host has been disposed.</exception>
     public IViewLocator? ViewLocator
     {
         get => GetValue(ViewLocatorProperty);
-        set => SetValue(ViewLocatorProperty, value);
+        set
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            SetValue(ViewLocatorProperty, value);
+        }
     }
 
     /// <summary>
     /// Releases the event subscription held on the navigation service.
-    /// After disposal the host ignores further navigation events.
+    /// After disposal the host ignores further navigation events. Safe to
+    /// call multiple times, from any thread: it never touches the property
+    /// system, and property values are left as they are. Setting any host
+    /// property after disposal throws <see cref="ObjectDisposedException"/>.
     /// </summary>
     public void Dispose()
     {

@@ -74,10 +74,19 @@ public abstract partial class BaseViewModel : ObservableObject, INavigationViewM
     /// When <see langword="true"/> and the target type is already the active page, re-invokes
     /// its activation callbacks with the new parameter instead of being a silent no-op.
     /// </param>
-    /// <param name="cancellationToken">Cooperative cancellation, honored until the region stack is updated.</param>
+    /// <param name="cancellationToken">Cooperative cancellation, passed through to the navigation service.</param>
     /// <returns>
-    /// <see langword="true"/> if navigation succeeded;
-    /// <see langword="false"/> if it was cancelled or the ViewModel is not active.
+    /// The fate of the request as defined by the navigation service:
+    /// <see langword="true"/> if it was executed; <see langword="false"/> if it
+    /// was superseded, vetoed by the leave guard, or discarded on disposal —
+    /// or when this ViewModel is not attached to a navigation service.
+    /// When called from within a lifecycle callback, the task is already
+    /// completed — with <see langword="true"/> when the request was
+    /// registered, or with <see langword="false"/> when the service has
+    /// already been disposed and nothing was registered — and it does not
+    /// report the request's later fate. Cancelling
+    /// <paramref name="cancellationToken"/> does not return
+    /// <see langword="false"/>: the returned task completes as cancelled.
     /// </returns>
     protected Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
         string regionName = DefaultRegionName,
@@ -100,10 +109,19 @@ public abstract partial class BaseViewModel : ObservableObject, INavigationViewM
     /// When <see langword="true"/> and the target type is already the active page, re-invokes
     /// its activation callbacks with the new parameter instead of being a silent no-op.
     /// </param>
-    /// <param name="cancellationToken">Cooperative cancellation, honored until the region stack is updated.</param>
+    /// <param name="cancellationToken">Cooperative cancellation, passed through to the navigation service.</param>
     /// <returns>
-    /// <see langword="true"/> if navigation succeeded;
-    /// <see langword="false"/> if it was cancelled or the ViewModel is not active.
+    /// The fate of the request as defined by the navigation service:
+    /// <see langword="true"/> if it was executed; <see langword="false"/> if it
+    /// was superseded, vetoed by the leave guard, or discarded on disposal —
+    /// or when this ViewModel is not attached to a navigation service.
+    /// When called from within a lifecycle callback, the task is already
+    /// completed — with <see langword="true"/> when the request was
+    /// registered, or with <see langword="false"/> when the service has
+    /// already been disposed and nothing was registered — and it does not
+    /// report the request's later fate. Cancelling
+    /// <paramref name="cancellationToken"/> does not return
+    /// <see langword="false"/>: the returned task completes as cancelled.
     /// </returns>
     protected Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
         TParam parameter,
@@ -119,10 +137,18 @@ public abstract partial class BaseViewModel : ObservableObject, INavigationViewM
     /// Navigates back to the previous page in the specified region.
     /// </summary>
     /// <param name="regionName">The target navigation region. Defaults to <c>"MainRegion"</c>.</param>
-    /// <param name="cancellationToken">Cooperative cancellation, honored until the region stack is updated.</param>
+    /// <param name="cancellationToken">Cooperative cancellation, passed through to the navigation service.</param>
     /// <returns>
-    /// <see langword="true"/> if back navigation succeeded;
-    /// <see langword="false"/> if the stack is empty, the guard cancelled, or the ViewModel is not active.
+    /// The fate of the request as defined by the navigation service:
+    /// <see langword="true"/> if it was executed; <see langword="false"/> if it
+    /// was superseded, vetoed by the leave guard, the stack has one or fewer
+    /// pages, or the service was disposed — or when this ViewModel is not
+    /// attached to a navigation service. When called from within a lifecycle
+    /// callback, the task is already completed — with <see langword="true"/>
+    /// when the request was registered, or with <see langword="false"/> when
+    /// the service has already been disposed and nothing was registered —
+    /// and it does not report the request's later fate. Cancelling <paramref name="cancellationToken"/> does not return
+    /// <see langword="false"/>: the returned task completes as cancelled.
     /// </returns>
     protected Task<bool> GoBackAsync(string regionName = DefaultRegionName, CancellationToken cancellationToken = default)
         => Navigation?.GoBackAsync(regionName, cancellationToken) ?? Task.FromResult(false);

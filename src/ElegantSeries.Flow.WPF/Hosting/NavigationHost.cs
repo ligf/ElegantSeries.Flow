@@ -123,10 +123,15 @@ public class NavigationHost : ContentControl, IDisposable
     /// Changing the value immediately re-displays the new region's current page
     /// (or clears the host when the region is empty), so it can be data-bound.
     /// </summary>
+    /// <exception cref="ObjectDisposedException">The host has been disposed.</exception>
     public string RegionName
     {
         get => (string?)GetValue(RegionNameProperty) ?? DefaultRegionName;
-        set => SetValue(RegionNameProperty, value ?? throw new ArgumentNullException(nameof(value)));
+        set
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            SetValue(RegionNameProperty, value ?? throw new ArgumentNullException(nameof(value)));
+        }
     }
 
     /// <summary>
@@ -157,10 +162,15 @@ public class NavigationHost : ContentControl, IDisposable
     /// subscribers and swallows their exceptions by design, so the hook is the
     /// observable channel.)
     /// </remarks>
+    /// <exception cref="ObjectDisposedException">The host has been disposed.</exception>
     public IViewLocator? ViewLocator
     {
         get => (IViewLocator?)GetValue(ViewLocatorProperty);
-        set => SetValue(ViewLocatorProperty, value);
+        set
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            SetValue(ViewLocatorProperty, value);
+        }
     }
 
     /// <summary>
@@ -183,7 +193,10 @@ public class NavigationHost : ContentControl, IDisposable
     }
 
     /// <summary>
-    /// Unsubscribes from the navigation service. Safe to call multiple times.
+    /// Unsubscribes from the navigation service. Safe to call multiple times,
+    /// from any thread: it never touches the dependency-property system, and
+    /// property values are left as they are. Setting any host property after
+    /// disposal throws <see cref="ObjectDisposedException"/>.
     /// </summary>
     public void Dispose()
     {
@@ -194,9 +207,6 @@ public class NavigationHost : ContentControl, IDisposable
 
         _disposed = true;
         _controller.Detach();
-        // Bypass the CLR setter (which throws once disposed): the guarded
-        // callback ignores post-dispose changes, so this only drops the reference.
-        SetValue(NavigationServiceProperty, null);
     }
 
     private FrameworkElement CreateView(INavigationViewModel viewModel)
@@ -222,9 +232,9 @@ public class NavigationHost : ContentControl, IDisposable
     private static void OnNavigationServiceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         // Runs on the UI thread (dependency properties have thread affinity).
-        // Post-dispose changes (e.g. a stale binding update, or Dispose itself
-        // clearing the property) are ignored; explicit code-behind sets after
-        // dispose still fail fast via the CLR setter's ObjectDisposedException.
+        // Post-dispose changes (e.g. a stale binding update) are ignored;
+        // explicit code-behind sets after dispose still fail fast via the
+        // CLR setter's ObjectDisposedException.
         var host = (NavigationHost)d;
         if (host._disposed)
         {

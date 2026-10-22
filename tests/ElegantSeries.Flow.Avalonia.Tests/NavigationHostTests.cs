@@ -283,6 +283,75 @@ public sealed class NavigationHostTests
     }
 
     [Fact]
+    public void Dispose_PropertySettersThrowAfterDispose()
+    {
+        var dispatcher = new FakeDispatcher();
+        var service = new FakeNavigationService();
+        var host = CreateHost(dispatcher, service, CreateLocator());
+
+        host.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => host.RegionName = "SidePanel");
+        Assert.Throws<ObjectDisposedException>(() => host.NavigationService = new FakeNavigationService());
+        Assert.Throws<ObjectDisposedException>(() => host.ViewLocator = CreateLocator());
+    }
+
+    [Fact]
+    public void Dispose_IsIdempotent()
+    {
+        var dispatcher = new FakeDispatcher();
+        var service = new FakeNavigationService();
+        var host = CreateHost(dispatcher, service, CreateLocator());
+
+        host.Dispose();
+        host.Dispose(); // Must not throw.
+    }
+
+    [Fact]
+    public void Dispose_FromBackgroundThread_DoesNotThrow()
+    {
+        var dispatcher = new FakeDispatcher();
+        var service = new FakeNavigationService();
+        var host = CreateHost(dispatcher, service, CreateLocator());
+
+        // Dispose only touches plain fields, never the property system, so
+        // any thread can call it.
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                host.Dispose();
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+            }
+        });
+        thread.Start();
+        thread.Join();
+
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void SetValueDirectlyAfterDispose_DoesNotResurrectSubscription()
+    {
+        var dispatcher = new FakeDispatcher();
+        var service = new FakeNavigationService();
+        var host = CreateHost(dispatcher, service, CreateLocator());
+        host.Dispose();
+        var second = new FakeNavigationService();
+
+        // A stale binding writes through the property system, bypassing the
+        // CLR setter: the subscription update must ignore it.
+        host.SetValue(NavigationHost.NavigationServiceProperty, second);
+        second.RaiseRegionNavigated("MainRegion", new TestViewModel());
+
+        Assert.Null(host.Content);
+    }
+
+    [Fact]
     public void ChangingNavigationService_UnsubscribesOldAndSubscribesNew()
     {
         var dispatcher = new FakeDispatcher();

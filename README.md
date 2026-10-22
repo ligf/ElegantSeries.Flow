@@ -289,7 +289,8 @@ region, and a later registration replaces an earlier one: when the window closes
 only the **last** registered request executes.
 
 - A request issued from inside a callback returns an already-completed task
-  (`true` = registered); it is never awaited against the transition it belongs to.
+  (`true` = registered; `false` if the service has already been disposed and
+  the request was discarded); it is never awaited against the transition it belongs to.
 - A superseded request has no effect at all: its ViewModel is never constructed
   and no lifecycle callbacks run for it. An outside caller awaiting a superseded
   request receives `false`.

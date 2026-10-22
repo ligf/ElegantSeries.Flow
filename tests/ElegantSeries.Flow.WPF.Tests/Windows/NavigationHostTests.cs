@@ -216,15 +216,65 @@ public sealed class NavigationHostTests
     }
 
     [Fact]
-    public void Dispose_ClearsNavigationServiceReference()
+    public void Dispose_LeavesPropertyValuesUntouched()
+    {
+        StaHelper.Run(() =>
+        {
+            var (host, _, service) = CreateHost();
+
+            host.Dispose();
+
+            // Disposal never writes the property system: reads keep returning
+            // the last values (the Avalonia host behaves the same way).
+            Assert.Same(service, host.NavigationService);
+        });
+    }
+
+    [Fact]
+    public void Dispose_FromBackgroundThread_DoesNotThrow()
     {
         StaHelper.Run(() =>
         {
             var (host, _, _) = CreateHost();
 
-            host.Dispose();
+            // Dispose only touches plain fields, so a thread that does not own
+            // the host can call it. (Clearing the property via SetValue here
+            // would throw InvalidOperationException: the host is owned by the
+            // STA thread.)
+            Exception? error = null;
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    host.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    error = ex;
+                }
+            });
+            thread.Start();
+            thread.Join();
 
-            Assert.Null(host.NavigationService);
+            Assert.Null(error);
+        });
+    }
+
+    [Fact]
+    public void SetValueDirectlyAfterDispose_DoesNotResurrectSubscription()
+    {
+        StaHelper.Run(() =>
+        {
+            var (host, _, _) = CreateHost();
+            host.Dispose();
+            var service = new FakeNavigationService();
+
+            // A stale binding writes through the property system, bypassing the
+            // CLR setter: the change callback must ignore it.
+            host.SetValue(NavigationHost.NavigationServiceProperty, service);
+            service.RaiseNavigated("MainRegion", new StubViewModel());
+
+            Assert.Null(host.Content);
         });
     }
 
@@ -268,6 +318,30 @@ public sealed class NavigationHostTests
             host.Dispose();
 
             Assert.Throws<ObjectDisposedException>(() => host.NavigationService = new FakeNavigationService());
+        });
+    }
+
+    [Fact]
+    public void RegionName_SetAfterDispose_ThrowsObjectDisposedException()
+    {
+        StaHelper.Run(() =>
+        {
+            var (host, _, _) = CreateHost();
+            host.Dispose();
+
+            Assert.Throws<ObjectDisposedException>(() => host.RegionName = "SidePanel");
+        });
+    }
+
+    [Fact]
+    public void ViewLocator_SetAfterDispose_ThrowsObjectDisposedException()
+    {
+        StaHelper.Run(() =>
+        {
+            var (host, _, _) = CreateHost();
+            host.Dispose();
+
+            Assert.Throws<ObjectDisposedException>(() => host.ViewLocator = new ViewLocator());
         });
     }
 
