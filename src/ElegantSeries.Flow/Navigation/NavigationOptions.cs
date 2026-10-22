@@ -56,4 +56,35 @@ public sealed class NavigationOptions
             : throw new ArgumentOutOfRangeException(nameof(SyncLockTimeout), "SyncLockTimeout must be positive.");
     }
     private TimeSpan _syncLockTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Maximum number of departures executed within one navigation chain before the
+    /// chain is stopped as a probable redirect loop.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A chain is a run of consecutive hops (departures and in-place refreshes) driven by navigation requests
+    /// registered from within lifecycle callbacks or leave guards — the requests
+    /// that can perpetuate themselves with no external actor in the loop. A
+    /// departure driven by a request from outside code restarts the accounting,
+    /// as does the region coming to rest. When the limit is reached, the hop that
+    /// would exceed it never starts and the stop is reported through
+    /// <see cref="INavigationService.SubscriberError"/> as an
+    /// <see cref="InvalidOperationException"/> (callback-registered requests have
+    /// no awaiting caller to throw to); the current page stays active and intact,
+    /// and the service remains usable.
+    /// </para>
+    /// <para>
+    /// Default is 10. Legitimate redirect chains (parameter checks, auth gates) are
+    /// short; raise this only for deep wizard-style flows.
+    /// </para>
+    /// </remarks>
+    public int MaxNavigationChainLength
+    {
+        get => _maxNavigationChainLength;
+        set => _maxNavigationChainLength = value > 0
+            ? value
+            : throw new ArgumentOutOfRangeException(nameof(MaxNavigationChainLength), "MaxNavigationChainLength must be positive.");
+    }
+    private int _maxNavigationChainLength = 10;
 }

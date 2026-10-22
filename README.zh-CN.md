@@ -22,7 +22,7 @@ ElegantSeries.Flow 提供基于 region 的导航栈、可选的 KeepAlive ViewMo
   需要 `await` 时用异步版 `INavigationAwareAsync`
 - **导航守卫**——`INavigationGuard.CanNavigateFromAsync()` 可取消导航，
   需要上下文时用 `INavigationGuardWithContext`
-- **取消支持**——导航调用接受 `CancellationToken`，栈更新前均可取消
+- **取消支持**——导航调用接受 `CancellationToken`，请求执行前可取消撤回
 - **刷新**——用新参数重新触发当前页面的回调（`refreshIfActive`）
 - **AOT / 裁剪安全**——`DynamicallyAccessedMembers` 注解，无运行时反射
 - **线程安全**——过渡串行化，所有共享状态都有锁保护
@@ -264,13 +264,46 @@ UI 层应在 `RegionNavigated` 里换 view；`OnNavigatedTo` 执行时 view 还�
 
 回调里抛异常不会中断过渡：异常会被收集起来在事后重抛（单个原样抛出，
 多个包成 `AggregateException`）。传给 `INavigationAwareAsync` 回调的 token
-永远是 `CancellationToken.None`——栈一旦更新，过渡就会跑完。
+会在页面离开活动位置（被覆盖、弹出、替换或清空）时取消——即使回调仍在
+运行。应响应该 token：一旦它触发，就不要再触碰页面的依赖。因该生命周期
+取消引发的 `OperationCanceledException` 视为正常控制流，不是错误。
+
+### 从回调里发起导航
+
+一个页面的*窗口*从其 `OnNavigatedTo` 开始、到 `OnNavigatedFrom` 结束。
+在窗口打开期间发起的导航调用——无论来自生命周期回调、离开守卫，还是过渡
+运行期间执行的代码——都不会立即执行。每次调用只是为该 region 登记一个
+待定请求，后登记的覆盖先登记的：窗口关闭时，只有**最后一个**登记的请求
+会被执行。
+
+- 从回调内部发起的调用返回一个已完成的 Task（`true` = 已登记），不会与
+  它所属的过渡互相等待。
+- 被覆盖的请求不产生任何效果：其 ViewModel 从不构造、生命周期回调从不
+  运行；外部调用方 await 它会得到 `false`。
+- 被执行的请求在当前页面的 `OnNavigatedFrom` 完成**之后**才构造目标
+  ViewModel，随后成为当前页并开启自己的窗口。因此重定向链（页面在
+  `OnNavigatedTo` 里继续向外跳）是逐跳推进的，每个中间页都走完整的
+  `OnNavigatedTo` → `OnNavigatedFrom` 周期。
+- `RegionNavigated` 只在一个页面落定为 region 的当前页时触发；重定向链
+  的中间页不触发。
+- 离开守卫每笔离场只运行一次，上下文是发起该笔离场的请求；之后登记的
+  请求不会重跑守卫。
+- 由回调登记的请求驱动的连续跳数受
+  `NavigationOptions.MaxNavigationChainLength`（默认 10）限制。达到上限
+  时，链会被停下，并经 `SubscriberError` 以 `InvalidOperationException`
+  上报——这类请求没有等待方，因此上限永远不会让某个调用方的 Task 失败——
+  当前页面保持活动且完好，服务可继续使用。
 
 ### 取消
 
-`NavigateToAsync` / `GoBackAsync` 接受 `CancellationToken`，在 **region 栈更新
-之前**都有效：取消会释放已创建的页面作用域（如果有）并抛
-`OperationCanceledException`。栈更新之后过渡会跑完，token 被忽略。
+`NavigateToAsync` / `GoBackAsync` 接受 `CancellationToken`，在请求仍处于
+待定状态时有效：取消会撤回该请求——它不会被执行——等待的调用方抛
+`OperationCanceledException`。一旦执行该请求的离场已经开始运行当前页面的
+`OnNavigatedFrom`，离场本身不再被打断：回调会运行到底。此后到达的取消，
+在执行步骤仍检查令牌的位置（目标解析期间、提交前一刻）仍会被受理；
+在那里撤回会让离开页面被重新激活——其 `OnNavigatedTo` 再运行一次——
+而不是把离场执行到底。（这些检查点只存在于 `NavigateToAsync` 的跳；
+`GoBackAsync` 没有，因此其 `OnNavigatedFrom` 开始后令牌不再撤回请求。）
 
 ### 刷新活动页面
 
@@ -337,8 +370,8 @@ navigation.ClearAllCache();            // 或 await navigation.ClearAllCacheAsyn
 
 ## 线程安全
 
-所有公开成员都可以在任意线程调用。导航过渡和释放用异步锁串行化，共享状态由
-专用锁保护。
+所有公开成员都可以在任意线程调用。同一 region 内的导航请求由该 region 的
+导航泵逐个执行，共享状态由专用锁保护。
 
 ## Native AOT / 裁剪
 
@@ -363,6 +396,7 @@ Avalonia 示例的 csproj 里开了 `PublishAot=true`，作为框架 AOT 能力�
 | `ClearAllCache()` / `ClearAllCacheAsync()` | 清空所有 KeepAlive 缓存 |
 | `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` | 事件 |
 | `AddElegantSeriesFlow()` / `AddElegantSeriesFlow(ServiceLifetime.Scoped)` | DI 注册 |
+| `NavigationOptions.MaxNavigationChainLength` | 回调驱动的连续跳数上限（默认 10） |
 
 ## 参与贡献
 

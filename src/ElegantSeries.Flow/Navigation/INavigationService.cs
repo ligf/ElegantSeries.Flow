@@ -45,12 +45,20 @@ namespace ElegantSeries.Flow.Navigation;
 /// </para>
 /// <para>
 /// <b>Cancellation:</b> <c>NavigateToAsync</c> / <c>GoBackAsync</c> accept a
-/// <see cref="CancellationToken"/> that is honored until the region stack is updated.
-/// Cancellation before that point releases the created page scope (if any) and throws
-/// <see cref="OperationCanceledException"/>. The from-guard runs before the page scope
-/// is created, so cancellation during the guard never leaves a scope behind; every
-/// cancellation point after scope creation releases it. Once the stack has been updated
-/// the transition runs to completion and the token is ignored.
+/// <see cref="CancellationToken"/> that is honored while the request is still
+/// pending: cancellation withdraws the request — it never executes — and the
+/// awaiting caller throws <see cref="OperationCanceledException"/>. Cancellation
+/// during the leave guard still counts as pending (the guard is raced against the
+/// token). Once the departing page's <c>OnNavigatedFrom</c> has started, the
+/// departure is no longer interrupted: the callback runs to completion. A
+/// cancellation that arrives afterwards is still honored where the executing
+/// step checks the token (while the target is being resolved and just before
+/// the commit); withdrawing there re-activates the departing page — its
+/// <c>OnNavigatedTo</c> runs again — instead of completing the departure.
+/// (Those checkpoints exist on the <c>NavigateToAsync</c> hop only;
+/// <c>GoBackAsync</c> has none — see its parameter documentation.)
+/// A target page is constructed only when its request is executed, so a withdrawn
+/// request never leaves a page scope behind.
 /// </para>
 /// <para>
 /// <b>Transition order</b> (fixed): <c>OnNavigatedFrom</c> →
@@ -78,10 +86,18 @@ public interface INavigationService
     // ────────────────────────────── Events ──────────────────────────────
 
     /// <summary>
-    /// Raised when a region successfully navigates to a new active ViewModel.
+    /// Raised when a region's active ViewModel comes to rest as the region's
+    /// current page.
     /// </summary>
     /// <remarks>
     /// <para>Parameters: region name, activated ViewModel.</para>
+    /// <para>
+    /// The event is raised when the page's activation callbacks have completed and
+    /// no further navigation request is pending for the region. A page that is
+    /// passed through by a redirect chain — its activation immediately produces
+    /// another request — does <i>not</i> raise this event: hosts therefore never
+    /// build views for intermediate pages of a chain.
+    /// </para>
     /// <para>
     /// This is also raised for a <i>refresh</i> navigation (same type already active with
     /// <c>refreshIfActive</c>): the page is not pushed again, but subscribers are notified
@@ -208,25 +224,59 @@ public interface INavigationService
     /// flag has no effect. Defaults to <see langword="false"/>.
     /// </param>
     /// <param name="cancellationToken">
-    /// Cooperative cancellation, honored until the region stack is updated: cancellation
-    /// before that point releases the created page scope (if any) and throws
-    /// <see cref="OperationCanceledException"/>. Once the stack has been updated the
-    /// transition runs to completion and the token is ignored.
+    /// Cooperative cancellation: while this request is still pending, cancellation
+    /// withdraws it and throws <see cref="OperationCanceledException"/>. Once the
+    /// departing page's <c>OnNavigatedFrom</c> has started, the callback runs to
+    /// completion and the departure is no longer interrupted; a cancellation that
+    /// arrives afterwards is honored only where the executing step still checks
+    /// the token (target resolution, just before the commit), and withdrawing
+    /// there re-activates the departing page instead of completing the departure.
     /// </param>
     /// <returns>
-    /// <see langword="true"/> if navigation succeeded;
-    /// <see langword="false"/> if cancelled by a guard.
+    /// The fate of this request: <see langword="true"/> if it was executed;
+    /// <see langword="false"/> if it was superseded by a later request in the same
+    /// page window, vetoed by the current page's leave guard, or discarded because
+    /// the service was disposed.
     /// </returns>
     /// <exception cref="OperationCanceledException">
-    /// Thrown when <paramref name="cancellationToken"/> is cancelled before the region
-    /// stack is updated.
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled while this
+    /// request is still pending.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the resolved ViewModel instance already lives on another
+    /// region's stack.
     /// </exception>
     /// <remarks>
     /// <para>
-    /// Keep ViewModel constructors lightweight and side-effect free: the navigation
-    /// service may resolve a ViewModel speculatively and discard it (releasing its
-    /// scope) if the region state changed concurrently. Put initialization work in
+    /// <b>Window model.</b> A navigation call registers a <i>request</i>; it does not
+    /// execute immediately. A page's lifecycle window runs from its activation until
+    /// its <c>OnNavigatedFrom</c> callback completes. Requests registered while a
+    /// window is open — from the page's own <c>OnNavigatedTo</c>/<c>OnNavigatedFrom</c>
+    /// callbacks, from page code such as button handlers, or from anywhere else —
+    /// supersede one another: only the last request registered before the window
+    /// closes is executed, and superseded requests never construct a ViewModel.
+    /// The executed request's target page is always constructed and runs its full
+    /// lifecycle, so callback redirect chains advance one constructed page at a
+    /// time. A request registered while the region rests on a page starts that
+    /// page's departure immediately.
+    /// </para>
+    /// <para>
+    /// Calls made from within a lifecycle callback return immediately with
+    /// <see langword="true"/> (the request was registered); their outcome is
+    /// observable through <see cref="RegionNavigated"/>. Calls made from anywhere
+    /// else complete with the request's own fate as described above.
+    /// </para>
+    /// <para>
+    /// Keep ViewModel constructors lightweight: a page is constructed only when its
+    /// request is actually executed. Put initialization work in
     /// <c>OnNavigatedToAsync</c> instead, where the page is guaranteed to be active.
+    /// </para>
+    /// <para>
+    /// Consecutive hops driven by callback-registered requests are bounded by
+    /// <see cref="NavigationOptions.MaxNavigationChainLength"/>: a chain that
+    /// exceeds it is stopped (the current page stays active) and the stop is
+    /// reported through <see cref="SubscriberError"/>, since the requests that
+    /// drive such a chain have no awaiting caller to throw to.
     /// </para>
     /// </remarks>
     Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
@@ -253,19 +303,32 @@ public interface INavigationService
     /// flag has no effect. Defaults to <see langword="false"/>.
     /// </param>
     /// <param name="cancellationToken">
-    /// Cooperative cancellation, honored until the region stack is updated: cancellation
-    /// before that point releases the created page scope (if any) and throws
-    /// <see cref="OperationCanceledException"/>. Once the stack has been updated the
-    /// transition runs to completion and the token is ignored.
+    /// Cooperative cancellation: while this request is still pending, cancellation
+    /// withdraws it and throws <see cref="OperationCanceledException"/>. Once the
+    /// departing page's <c>OnNavigatedFrom</c> has started, the callback runs to
+    /// completion and the departure is no longer interrupted; a cancellation that
+    /// arrives afterwards is honored only where the executing step still checks
+    /// the token (target resolution, just before the commit), and withdrawing
+    /// there re-activates the departing page instead of completing the departure.
     /// </param>
     /// <returns>
-    /// <see langword="true"/> if navigation succeeded;
-    /// <see langword="false"/> if cancelled by a guard.
+    /// The fate of this request: <see langword="true"/> if it was executed;
+    /// <see langword="false"/> if it was superseded by a later request in the same
+    /// page window, vetoed by the current page's leave guard, or discarded because
+    /// the service was disposed.
     /// </returns>
     /// <exception cref="OperationCanceledException">
-    /// Thrown when <paramref name="cancellationToken"/> is cancelled before the region
-    /// stack is updated.
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled while this
+    /// request is still pending.
     /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the resolved ViewModel instance already lives on another
+    /// region's stack.
+    /// </exception>
+    /// <remarks>
+    /// See the window-model remarks on
+    /// <see cref="NavigateToAsync{TViewModel}(string, NavigationMode, bool, CancellationToken)"/>.
+    /// </remarks>
     Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
         TParam parameter,
         string regionName = DefaultRegionName,
@@ -279,18 +342,33 @@ public interface INavigationService
     /// </summary>
     /// <param name="regionName">The target region. Defaults to <c>"MainRegion"</c>.</param>
     /// <param name="cancellationToken">
-    /// Cooperative cancellation, honored until the region stack is updated: cancellation
-    /// before that point throws <see cref="OperationCanceledException"/>. Once the stack
-    /// has been updated the transition runs to completion and the token is ignored.
+    /// Cooperative cancellation: while this request is still pending, cancellation
+    /// withdraws it and throws <see cref="OperationCanceledException"/>. Once the
+    /// departing page's <c>OnNavigatedFrom</c> has started, the token no longer
+    /// withdraws the request: a back navigation has no resolution or pre-commit
+    /// checkpoint, so the callback runs to completion and the back navigation is
+    /// carried out (the awaiting caller still observes
+    /// <see cref="OperationCanceledException"/> from its own token). This is
+    /// narrower than <c>NavigateToAsync</c>, whose executing hop keeps honoring
+    /// the token until it commits.
     /// </param>
     /// <returns>
-    /// <see langword="true"/> if back navigation succeeded;
-    /// <see langword="false"/> if cancelled or the stack has one or fewer pages.
+    /// The fate of this request: <see langword="true"/> if it was executed;
+    /// <see langword="false"/> if it was superseded by a later request in the same
+    /// page window, vetoed by the current page's leave guard, the stack has one or
+    /// fewer pages, or the service was disposed.
     /// </returns>
     /// <exception cref="OperationCanceledException">
-    /// Thrown when <paramref name="cancellationToken"/> is cancelled before the region
-    /// stack is updated.
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled while this
+    /// request is still pending.
     /// </exception>
+    /// <remarks>
+    /// A back request participates in the same window model as
+    /// <see cref="NavigateToAsync{TViewModel}(string, NavigationMode, bool, CancellationToken)"/>:
+    /// a <c>NavigateToAsync</c> request registered later in the same page window
+    /// supersedes it, and a back request registered during the current page's
+    /// <c>OnNavigatedFrom</c> supersedes the request that started the departure.
+    /// </remarks>
     Task<bool> GoBackAsync(string regionName = DefaultRegionName, CancellationToken cancellationToken = default);
 
     // ──────────────── Cache Management (Sync then Async) ────────────────

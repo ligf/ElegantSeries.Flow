@@ -3,8 +3,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace ElegantSeries.Flow.Navigation;
 
 /// <summary>
-/// <see cref="NavigationService"/> — transition runner: lifecycle callbacks
-/// (sync and async), queued page-scope disposal, events and error propagation.
+/// <see cref="NavigationService"/> — lifecycle callback runners (invoked directly by
+/// the per-region window pump), queued page-scope disposal, events and error propagation.
 /// </summary>
 public sealed partial class NavigationService
 {
@@ -16,16 +16,90 @@ public sealed partial class NavigationService
     private TimeSpan DisposalGateTimeout => _options.DisposalGateTimeout;
 
     /// <summary>
-    /// Tracks the entry whose async lifecycle callback is running on the current
-    /// async flow. Used by disposal gating to avoid self-wait: a reentrant
-    /// navigation issued from inside a callback must not wait for that same
-    /// callback to finish.
+    /// Tracks the entry whose lifecycle processing is running on the current
+    /// async flow: its To/From callbacks, and its leave guard (which runs as
+    /// part of the entry's departure). Used by disposal gating to avoid
+    /// self-wait: a disposal issued from inside the entry's own processing must
+    /// not wait for that same processing to finish. Also identifies navigation
+    /// calls made from within that processing: they register an intent into the
+    /// window's slot and return immediately, instead of awaiting a fate the
+    /// pump can only complete after the processing returns.
     /// </summary>
     private static readonly AsyncLocal<NavigationEntry?> _currentLifecycleEntry = new();
 
     /// <summary>
+    /// The lifecycle entry whose processing is running on this flow, when it
+    /// belongs to THIS service instance; null otherwise. Calls into another
+    /// instance from this instance's callback are outside calls for that
+    /// instance and must not be classified as in-callback there.
+    /// </summary>
+    private NavigationEntry? CurrentOwnLifecycleEntry =>
+        _currentLifecycleEntry.Value is { } entry && ReferenceEquals(entry.OwnerService, this)
+            ? entry
+            : null;
+
+    /// <summary>
+    /// Fires a ViewModel's Navigation PropertyChanged notification with the
+    /// lifecycle-entry marker cleared, as in <see cref="RaiseRegionNavigated"/>:
+    /// notification subscribers are not lifecycle callbacks and must not be
+    /// classified as such, whatever flow raises the notification.
+    /// </summary>
+    private static void RaiseNavigationChangedNotification(INavigationViewModel viewModel)
+    {
+        var previousCurrent = _currentLifecycleEntry.Value;
+        _currentLifecycleEntry.Value = null;
+        try
+        {
+            viewModel.RaiseNavigationChanged();
+        }
+        finally
+        {
+            _currentLifecycleEntry.Value = previousCurrent;
+        }
+    }
+
+    /// <summary>
+    /// Reports an error to <see cref="SubscriberError"/> subscribers with the
+    /// lifecycle-entry marker cleared, as in <see cref="RaiseRegionNavigated"/>:
+    /// an error handler is not a lifecycle callback (one that routes to an
+    /// error page must be treated as an outside caller, and a
+    /// <c>ClearCache</c> call from it must not trip the in-callback guard).
+    /// The report itself never throws.
+    /// </summary>
+    private void ReportSubscriberError(Exception error)
+    {
+        var handlers = SubscriberError;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        var previousCurrent = _currentLifecycleEntry.Value;
+        _currentLifecycleEntry.Value = null;
+        try
+        {
+            handlers.Invoke(error);
+        }
+        catch
+        {
+            // A faulty error handler must never break navigation.
+        }
+        finally
+        {
+            _currentLifecycleEntry.Value = previousCurrent;
+        }
+    }
+
+    /// <summary>
     /// Raises <see cref="RegionNavigated"/> subscriber-by-subscriber, so one throwing
-    /// subscriber cannot prevent the others from receiving the event.
+    /// subscriber cannot prevent the others from receiving the event. Subscribers
+    /// are invoked with the lifecycle-entry marker cleared: an event handler is
+    /// not a lifecycle callback, and when the raising flow happens to carry a
+    /// marker (a pump started from inside a callback inherits that callback's
+    /// entry as its baseline), a navigation issued by the handler would
+    /// otherwise be misclassified as issued from within that long-finished
+    /// callback — completed immediately instead of awaited, and counted toward
+    /// the chain limit.
     /// </summary>
     private void RaiseRegionNavigated(string regionName, INavigationViewModel viewModel)
     {
@@ -35,17 +109,26 @@ public sealed partial class NavigationService
             return;
         }
 
-        foreach (var handler in handlers.GetInvocationList())
+        var previousCurrent = _currentLifecycleEntry.Value;
+        _currentLifecycleEntry.Value = null;
+        try
         {
-            try
+            foreach (var handler in handlers.GetInvocationList())
             {
-                ((Action<string, INavigationViewModel>)handler)(regionName, viewModel);
+                try
+                {
+                    ((Action<string, INavigationViewModel>)handler)(regionName, viewModel);
+                }
+                catch (Exception ex)
+                {
+                    try { SubscriberError?.Invoke(ex); }
+                    catch { }
+                }
             }
-            catch (Exception ex)
-            {
-                try { SubscriberError?.Invoke(ex); }
-                catch { }
-            }
+        }
+        finally
+        {
+            _currentLifecycleEntry.Value = previousCurrent;
         }
     }
 
@@ -60,17 +143,27 @@ public sealed partial class NavigationService
             return;
         }
 
-        foreach (var handler in handlers.GetInvocationList())
+        // Marker cleared for subscribers, as in RaiseRegionNavigated.
+        var previousCurrent = _currentLifecycleEntry.Value;
+        _currentLifecycleEntry.Value = null;
+        try
         {
-            try
+            foreach (var handler in handlers.GetInvocationList())
             {
-                ((Action<string, INavigationViewModel>)handler)(regionName, viewModel);
+                try
+                {
+                    ((Action<string, INavigationViewModel>)handler)(regionName, viewModel);
+                }
+                catch (Exception ex)
+                {
+                    try { SubscriberError?.Invoke(ex); }
+                    catch { }
+                }
             }
-            catch (Exception ex)
-            {
-                try { SubscriberError?.Invoke(ex); }
-                catch { }
-            }
+        }
+        finally
+        {
+            _currentLifecycleEntry.Value = previousCurrent;
         }
     }
 
@@ -85,17 +178,27 @@ public sealed partial class NavigationService
             return;
         }
 
-        foreach (var handler in handlers.GetInvocationList())
+        // Marker cleared for subscribers, as in RaiseRegionNavigated.
+        var previousCurrent = _currentLifecycleEntry.Value;
+        _currentLifecycleEntry.Value = null;
+        try
         {
-            try
+            foreach (var handler in handlers.GetInvocationList())
             {
-                ((Action<string>)handler)(regionName);
+                try
+                {
+                    ((Action<string>)handler)(regionName);
+                }
+                catch (Exception ex)
+                {
+                    try { SubscriberError?.Invoke(ex); }
+                    catch { }
+                }
             }
-            catch (Exception ex)
-            {
-                try { SubscriberError?.Invoke(ex); }
-                catch { }
-            }
+        }
+        finally
+        {
+            _currentLifecycleEntry.Value = previousCurrent;
         }
     }
 
@@ -123,137 +226,163 @@ public sealed partial class NavigationService
         }
     }
 
+    // ────────────────────── Lifecycle callback runners ──────────────────────
+
     /// <summary>
-    /// Executes the work items collected under the navigation lock: lifecycle callbacks
-    /// (sync, then async), page-scope disposals and activation, then queued events.
-    /// Lifecycle/disposal exceptions are collected and rethrown afterwards so one failing
-    /// page never aborts the rest.
+    /// Appends a lifecycle callback exception to a shared error list. The list
+    /// itself is the lock object: after a disposal-gate timeout the pump reads
+    /// (snapshots) the list while the abandoned runner may still be appending.
     /// </summary>
-    private async Task RunTransitionAsync(TransitionWork work)
+    private static void CollectError(List<Exception> errors, Exception ex)
     {
-        foreach (var action in work.NavigatedFromActions)
-            SafeLifecycle(action, work.Errors);
-
-        foreach (var action in work.NavigatedFromAsyncActions)
+        lock (errors)
         {
-            try { await action().ConfigureAwait(false); }
-            catch (Exception ex) { work.Errors.Add(ex); }
+            errors.Add(ex);
         }
-
-        foreach (var dispose in work.DisposeActions)
-        {
-            try { await dispose().ConfigureAwait(false); }
-            catch (Exception ex) { work.Errors.Add(ex); }
-        }
-
-        foreach (var action in work.NavigatedToActions)
-            SafeLifecycle(action, work.Errors);
-
-        foreach (var action in work.NavigatedToAsyncActions)
-        {
-            try { await action().ConfigureAwait(false); }
-            catch (Exception ex) { work.Errors.Add(ex); }
-        }
-
-        // Navigation property notifications: PropertyChanged handlers are user code
-        // and run outside the navigation lock (a handler that reenters the service
-        // would deadlock if run under the lock).
-        foreach (var vm in work.NavigationChangedNotifications)
-        {
-            try { vm.RaiseNavigationChanged(); }
-            catch (Exception ex) { work.Errors.Add(ex); }
-        }
-
-        RaiseEvents(work.Events, ex => SubscriberError?.Invoke(ex));
-        ThrowCollectedErrors(work.Errors);
     }
 
     /// <summary>
-    /// Runs a lifecycle callback and collects any exception instead of propagating it.
+    /// Runs the entry's <c>OnNavigatedFrom</c> callback (the async variant when
+    /// implemented, otherwise the synchronous one) and collects any exception into
+    /// <paramref name="errors"/> instead of propagating it. The entry's lifecycle
+    /// token has already been cancelled by the caller. The caller registered
+    /// the callback as in-flight under the navigation lock before invoking
+    /// this runner and passes that registration as <paramref name="gateTask"/>;
+    /// it is exited here when the callback finishes, so a concurrent disposal
+    /// always observes the running callback. Called by the region's pump
+    /// while holding no locks.
     /// </summary>
-    private static void SafeLifecycle(Action action, List<Exception> errors)
+    private async Task RunFromCallbacksAsync(NavigationEntry entry, Task gateTask, List<Exception> errors)
     {
-        try { action(); }
-        catch (Exception ex) { errors.Add(ex); }
+        if (entry.ViewModel is INavigationAwareAsync asyncAware)
+        {
+            var token = entry.LifecycleCts.Token;
+            var previousCurrent = _currentLifecycleEntry.Value;
+            _currentLifecycleEntry.Value = entry;
+            try
+            {
+                await asyncAware.OnNavigatedFromAsync(token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                // Expected: the token is already cancelled (the page is leaving).
+            }
+            catch (Exception ex)
+            {
+                CollectError(errors, ex);
+            }
+            finally
+            {
+                _currentLifecycleEntry.Value = previousCurrent;
+                entry.ExitInFlightLifecycle(gateTask);
+            }
+        }
+        else if (entry.ViewModel is INavigationAware aware)
+        {
+            var previousCurrent = _currentLifecycleEntry.Value;
+            _currentLifecycleEntry.Value = entry;
+            try
+            {
+                aware.OnNavigatedFrom();
+            }
+            catch (Exception ex)
+            {
+                CollectError(errors, ex);
+            }
+            finally
+            {
+                _currentLifecycleEntry.Value = previousCurrent;
+                entry.ExitInFlightLifecycle(gateTask);
+            }
+        }
+        else
+        {
+            // No lifecycle callback: release the in-flight registration made
+            // by the caller so the entry's gate is not held open.
+            entry.ExitInFlightLifecycle(gateTask);
+        }
     }
 
     /// <summary>
-    /// Queues the deactivation work (OnNavigatedFrom callback plus page-scope disposal
-    /// when needed) for one entry. Must be called while holding
-    /// <see cref="_navigationLock"/> but not <see cref="_stateLock"/>.
+    /// Runs the entry's <c>OnNavigatedTo</c> callback (the async variant when
+    /// implemented, otherwise the synchronous one) and collects any exception into
+    /// <paramref name="errors"/> instead of propagating it. The caller registered
+    /// the callback as in-flight when the hop was committed (under the navigation
+    /// lock) and passes that registration as <paramref name="gateTask"/>; it is
+    /// exited here when the callback finishes. Called by the region's pump while
+    /// holding no locks.
+    /// </summary>
+    private async Task RunToCallbacksAsync(NavigationEntry entry, object? parameter, Task gateTask, List<Exception> errors)
+    {
+        var viewModel = entry.ViewModel;
+        if (viewModel is INavigationAwareAsync asyncAware)
+        {
+            var token = entry.LifecycleCts.Token;
+            var previousCurrent = _currentLifecycleEntry.Value;
+            _currentLifecycleEntry.Value = entry;
+            try
+            {
+                await asyncAware.OnNavigatedToAsync(parameter, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                // Expected: the page left the active position while its init was
+                // still running. Not an error — the navigation itself succeeded.
+            }
+            catch (Exception ex)
+            {
+                CollectError(errors, ex);
+            }
+            finally
+            {
+                _currentLifecycleEntry.Value = previousCurrent;
+                entry.ExitInFlightLifecycle(gateTask);
+            }
+        }
+        else if (viewModel is INavigationAware aware)
+        {
+            var previousCurrent = _currentLifecycleEntry.Value;
+            _currentLifecycleEntry.Value = entry;
+            try
+            {
+                aware.OnNavigatedTo(parameter);
+            }
+            catch (Exception ex)
+            {
+                CollectError(errors, ex);
+            }
+            finally
+            {
+                _currentLifecycleEntry.Value = previousCurrent;
+                entry.ExitInFlightLifecycle(gateTask);
+            }
+        }
+        else
+        {
+            // No lifecycle callback: release the in-flight registration made at
+            // commit time so the entry's gate is not held open.
+            entry.ExitInFlightLifecycle(gateTask);
+        }
+    }
+
+    /// <summary>
+    /// Queues the disposal side of an entry's deactivation: detach the navigation
+    /// reference, compute the deactivation plan and queue the page-scope disposal
+    /// (plus any cache eviction the plan carries). The entry's
+    /// <c>OnNavigatedFrom</c> callback is NOT run here — under the window model it
+    /// already ran during the leaving phase, before the final intent was known.
+    /// Must be called while holding <see cref="_navigationLock"/> but not
+    /// <see cref="_stateLock"/> (the plan builder acquires the state lock itself).
     /// </summary>
     /// <param name="entry">The stack entry being deactivated.</param>
-    /// <param name="destroy">True when the entry's page scope should be disposed.</param>
-    /// <param name="notifyLifecycle">
-    /// True when the entry was the active page: its <c>OnNavigatedFrom</c> callback runs.
-    /// False for entries that were already inactive (covered) — they are disposed without
-    /// a second lifecycle notification.
-    /// </param>
-    /// <param name="work">The transition work list to append to.</param>
-    private void QueueDeactivation(NavigationEntry entry, bool destroy, bool notifyLifecycle, TransitionWork work)
+    /// <param name="destroy">True when the entry's page scope should be disposed
+    /// (subject to the plan's cache write for a popped KeepAlive entry).</param>
+    /// <param name="work">The hop work list to append the disposal to.</param>
+    private void QueueOutgoingDisposal(NavigationEntry entry, bool destroy, TransitionWork work)
     {
         DetachNavigation(entry.ViewModel, work);
 
-        // The entry is leaving the active position: its token must be cancelled.
-        // Deferred until after the navigation lock is released: Cancel() invokes
-        // user callbacks synchronously which may reenter the service (deadlock
-        // if called while holding the lock). Idempotent — a covered entry
-        // cancelled here stays cancelled if later disposed.
-        work.CtsToCancel.Add(entry.LifecycleCts);
-
         var plan = BuildDeactivatePlan(entry, destroy);
-
-        if (notifyLifecycle)
-        {
-            // A ViewModel implementing INavigationAwareAsync gets the async callbacks
-            // instead of the synchronous ones. The token is already cancelled (above);
-            // a well-behaved ViewModel returns promptly.
-            if (entry.ViewModel is INavigationAwareAsync asyncAware)
-            {
-                var token = entry.LifecycleCts.Token;
-                var gateTask = entry.EnterInFlightLifecycle();
-                work.NavigatedFromAsyncActions.Add(async () =>
-                {
-                    var previousCurrent = _currentLifecycleEntry.Value;
-                    _currentLifecycleEntry.Value = entry;
-                    try
-                    {
-                        await asyncAware.OnNavigatedFromAsync(token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) when (token.IsCancellationRequested)
-                    {
-                        // Expected: the token is already cancelled (the page is leaving).
-                    }
-                    finally
-                    {
-                        _currentLifecycleEntry.Value = previousCurrent;
-                        entry.ExitInFlightLifecycle(gateTask);
-                    }
-                });
-            }
-            else if (entry.ViewModel is INavigationAware aware)
-            {
-                // Register in-flight at queue time, like the async variant: a
-                // reentrant self-destroying navigation started from inside this
-                // synchronous callback must find a live gate and defer the scope
-                // disposal until the callback exits.
-                var syncGateTask = entry.EnterInFlightLifecycle();
-                work.NavigatedFromActions.Add(() =>
-                {
-                    var previousCurrent = _currentLifecycleEntry.Value;
-                    _currentLifecycleEntry.Value = entry;
-                    try
-                    {
-                        aware.OnNavigatedFrom();
-                    }
-                    finally
-                    {
-                        _currentLifecycleEntry.Value = previousCurrent;
-                        entry.ExitInFlightLifecycle(syncGateTask);
-                    }
-                });
-            }
-        }
 
         if (plan.ShouldDispose)
         {
@@ -267,6 +396,79 @@ public sealed partial class NavigationService
                 QueueScopeDisposal(evictedEntry, evictedRegions, work);
             }
         }
+    }
+
+    /// <summary>
+    /// Salvages the disposal bookkeeping of an entry whose deactivation
+    /// queueing threw — <see cref="QueueOutgoingDisposal"/> starts with the
+    /// entry's detach, and a custom ViewModel's detach setter is user code
+    /// that can throw. Without a plan or a pending record, a popped entry's
+    /// page scope would be orphaned and never disposed. The salvage mirrors
+    /// <see cref="BuildDeactivatePlan"/>'s outcomes for the same inputs:
+    /// a still-referenced scope records the destroy intent as pending (only
+    /// when <paramref name="destroy"/> is set — a merely covered entry, or
+    /// a KeepAlive pop of a shared scope, records nothing and stays alive);
+    /// an unreferenced scope is queued for gated disposal directly, with
+    /// the regions of any pre-existing pending record unioned into the
+    /// notification set. The one deliberate divergence: where the plan
+    /// would move an unreferenced KeepAlive entry into the cache, the
+    /// salvage disposes its scope instead — a page whose detach throws is
+    /// not kept alive.
+    /// </summary>
+    private void SalvageOutgoingDisposal(NavigationEntry entry, bool destroy, TransitionWork work)
+    {
+        string[] regionsToNotify;
+        bool dispose;
+        using (_stateLock.EnterScope())
+        {
+            var regions = new HashSet<string> { entry.RegionName };
+            _pendingScopeDisposals.TryGetValue(entry.Scope, out var pending);
+            if (pending is not null)
+            {
+                regions.UnionWith(pending.Regions);
+            }
+
+            if (IsScopeReferencedLocked(entry.Scope))
+            {
+                dispose = false;
+                if (destroy)
+                {
+                    if (pending is not null)
+                    {
+                        pending.Regions.UnionWith(regions);
+                    }
+                    else
+                    {
+                        _pendingScopeDisposals[entry.Scope] =
+                            new PendingDisposal(entry.ViewModel, regions);
+                    }
+                }
+            }
+            else
+            {
+                dispose = true;
+            }
+
+            regionsToNotify = [.. regions];
+        }
+
+        if (dispose)
+        {
+            QueueScopeDisposal(entry, regionsToNotify, work);
+        }
+    }
+
+    /// <summary>
+    /// Reports a disposal-gate timeout for an entry whose async lifecycle
+    /// ignored its cancellation token. The navigation proceeds anyway; the
+    /// entry's gate is marked abandoned so it is reported exactly once.
+    /// </summary>
+    private void ReportGateTimeout(NavigationEntry entry)
+    {
+        ReportSubscriberError(new TimeoutException(
+            $"Disposal gate timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
+            $"'{entry.ViewModel.GetType().FullName}' async lifecycle to complete. " +
+            "The page scope is being released anyway; the ViewModel ignored its cancellation token."));
     }
 
     /// <summary>
@@ -292,7 +494,10 @@ public sealed partial class NavigationService
             // Defer the disposal until the callback exits.
             bool isSelfDispose = ReferenceEquals(_currentLifecycleEntry.Value, entry);
             var gateTask = entry.InFlightGateTask;
-            if (gateTask is not null && !gateTask.IsCompleted && !isSelfDispose)
+            // A gate the pump already timed out on (and reported) is not waited
+            // on again: the scope is released exactly as after a timeout here.
+            bool gateAbandoned = gateTask is not null && ReferenceEquals(entry.AbandonedGateTask, gateTask);
+            if (gateTask is not null && !gateTask.IsCompleted && !isSelfDispose && !gateAbandoned)
             {
                 using var delayCts = new CancellationTokenSource();
                 var completed = await Task.WhenAny(gateTask, Task.Delay(DisposalGateTimeout, delayCts.Token)).ConfigureAwait(false);
@@ -302,14 +507,8 @@ public sealed partial class NavigationService
                 }
                 else
                 {
-                    try
-                    {
-                        SubscriberError?.Invoke(new TimeoutException(
-                            $"Disposal gate timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
-                            $"'{entry.ViewModel.GetType().FullName}' async lifecycle to complete. " +
-                            "The page scope is being released anyway; the ViewModel ignored its cancellation token."));
-                    }
-                    catch { }
+                    entry.AbandonedGateTask = gateTask;
+                    ReportGateTimeout(entry);
                 }
             }
 
@@ -323,7 +522,7 @@ public sealed partial class NavigationService
                 if (gate is not null && !gate.IsCompleted)
                 {
                     TrackDeferredDisposal(gate, entry.Scope, entry.ViewModel, entry.RegionName,
-                        ex => { try { SubscriberError?.Invoke(ex); } catch { } });
+                        ReportSubscriberError);
                     // The deferred task raises ViewModelReleased after disposal;
                     // do not enqueue it here (would double-fire).
                 }
@@ -373,70 +572,6 @@ public sealed partial class NavigationService
             // Note: ViewModelReleased is enqueued above per-branch (not here),
             // to avoid double-firing when the deferred task also raises it.
         });
-    }
-
-    /// <summary>
-    /// Queues the activation work (OnNavigatedTo callback) for one entry.
-    /// A ViewModel implementing <see cref="INavigationAwareAsync"/> gets the async
-    /// callback instead of the synchronous one. The async callback receives the
-    /// entry's lifecycle token and is tracked as in-flight for disposal gating.
-    /// Must be called while holding <see cref="_navigationLock"/>: the in-flight
-    /// registration happens synchronously at queue time so a concurrent disposal
-    /// cannot miss it.
-    /// </summary>
-    private void QueueActivate(NavigationEntry entry, object? parameter, TransitionWork work)
-    {
-        var viewModel = entry.ViewModel;
-        if (viewModel is INavigationAwareAsync asyncAware)
-        {
-            // Register in-flight SYNCHRONOUSLY at queue time (we hold _navigationLock):
-            // a concurrent disposal starting after this point must observe it.
-            var gateTask = entry.EnterInFlightLifecycle();
-            var token = entry.LifecycleCts.Token;
-            work.NavigatedToAsyncActions.Add(async () =>
-            {
-                // Mark the entry whose callback is running: a reentrant navigation
-                // that disposes this same entry must not wait for itself.
-                var previousCurrent = _currentLifecycleEntry.Value;
-                _currentLifecycleEntry.Value = entry;
-                try
-                {
-                    await asyncAware.OnNavigatedToAsync(parameter, token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (token.IsCancellationRequested)
-                {
-                    // Expected: the page left the active position while its init was
-                    // still running. Not an error — the navigation itself succeeded.
-                }
-                finally
-                {
-                    _currentLifecycleEntry.Value = previousCurrent;
-                    entry.ExitInFlightLifecycle(gateTask);
-                }
-            });
-        }
-        else if (viewModel is INavigationAware aware)
-        {
-            // Register in-flight at queue time, like the async variant: a
-            // reentrant self-destroying navigation started from inside this
-            // synchronous callback must find a live gate and defer the scope
-            // disposal until the callback exits.
-            var syncGateTask = entry.EnterInFlightLifecycle();
-            work.NavigatedToActions.Add(() =>
-            {
-                var previousCurrent = _currentLifecycleEntry.Value;
-                _currentLifecycleEntry.Value = entry;
-                try
-                {
-                    aware.OnNavigatedTo(parameter);
-                }
-                finally
-                {
-                    _currentLifecycleEntry.Value = previousCurrent;
-                    entry.ExitInFlightLifecycle(syncGateTask);
-                }
-            });
-        }
     }
 
     /// <summary>
@@ -542,10 +677,9 @@ public sealed partial class NavigationService
     /// </summary>
     private static void DetachNavigation(INavigationViewModel viewModel, TransitionWork work)
     {
-        // Set silently under the lock; PropertyChanged handlers are user code and
-        // must not run while holding the navigation lock (deadlock risk if a
-        // handler reenters the service). The notification is queued for after
-        // the lock is released.
+        // Set silently; PropertyChanged handlers are user code and must not run
+        // while the silent set is applied by the pump's commit section. The
+        // notification is collected and raised after the hop's callbacks.
         viewModel.SetNavigationSilent(null);
         work.NavigationChangedNotifications.Add(viewModel);
     }
@@ -561,49 +695,23 @@ public sealed partial class NavigationService
 
     // ────────────────────── Nested types ──────────────────────
 
-    /// <summary>Work items collected under the navigation lock and executed outside of it.</summary>
+    /// <summary>Work items collected under the navigation lock during one hop's
+    /// commit and executed by the pump outside of it.</summary>
     private sealed class TransitionWork
     {
-        public List<Action> NavigatedFromActions { get; } = [];
-
-        public List<Func<Task>> NavigatedFromAsyncActions { get; } = [];
-
         // Func<Task> is used for dispose actions to avoid subtle ValueTask conversion issues.
         public List<Func<Task>> DisposeActions { get; } = [];
-
-        public List<Action> NavigatedToActions { get; } = [];
-
-        public List<Func<Task>> NavigatedToAsyncActions { get; } = [];
 
         public List<Action> Events { get; } = [];
 
         public List<Exception> Errors { get; } = [];
 
         /// <summary>
-        /// Cancellation token sources to cancel after the navigation lock is
-        /// released. Cancel() invokes user callbacks synchronously and must not
-        /// run while holding locks (deadlock risk).
-        /// </summary>
-        public List<CancellationTokenSource> CtsToCancel { get; } = [];
-
-        /// <summary>
         /// ViewModels whose Navigation property changed under the lock.
-        /// PropertyChanged handlers are user code and must run outside the lock.
+        /// PropertyChanged handlers are user code and run after the hop's
+        /// lifecycle callbacks.
         /// </summary>
         public List<INavigationViewModel> NavigationChangedNotifications { get; } = [];
-
-        /// <summary>
-        /// Cancels all queued CTSs outside of locks. Exceptions from user
-        /// callbacks are swallowed; the navigation state was already committed.
-        /// </summary>
-        public void CancelQueuedCts()
-        {
-            foreach (var cts in CtsToCancel)
-            {
-                NavigationEntry.CancelOutsideLocks(cts);
-            }
-            CtsToCancel.Clear();
-        }
     }
 
     /// <summary>
@@ -642,9 +750,26 @@ public sealed partial class NavigationService
 
         public string RegionName { get; }
         public INavigationViewModel ViewModel { get; }
+
+        /// <summary>
+        /// The service instance that created this entry. The lifecycle-entry
+        /// marker is a single static AsyncLocal shared by every service
+        /// instance in the process; ownership is how a service tells whether
+        /// a marked entry is one of its own (in-callback classification and
+        /// the lifecycle-callback guards) or merely another instance's
+        /// callback running on the same flow.
+        /// </summary>
+        public NavigationService? OwnerService { get; set; }
         public object? Parameter { get; set; }
         public NavigationMode Mode { get; }
         public IServiceScope Scope { get; }
+
+        /// <summary>
+        /// The in-flight gate a gate waiter already timed out on (and reported
+        /// via SubscriberError). Later waiters on the same gate do not wait or
+        /// report again — the scope is released as after any gate timeout.
+        /// </summary>
+        public volatile Task? AbandonedGateTask;
 
         /// <summary>
         /// The ViewModel type used as the KeepAlive cache key.

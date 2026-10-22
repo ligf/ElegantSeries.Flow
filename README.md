@@ -279,12 +279,49 @@ rethrown afterwards (single as-is, several as `AggregateException`). The token p
 the token: stop touching the page's dependencies once it fires. An `OperationCanceledException`
 caused by this lifecycle cancellation is treated as normal control flow, not an error.
 
+### Navigation requests issued from callbacks
+
+A page's *window* spans from the start of its `OnNavigatedTo` to the end of its
+`OnNavigatedFrom`. Navigation calls made while a window is open — from lifecycle
+callbacks, from the leave guard, or from code that runs while a transition is in
+flight — do not execute immediately. Each call registers a pending request for the
+region, and a later registration replaces an earlier one: when the window closes,
+only the **last** registered request executes.
+
+- A request issued from inside a callback returns an already-completed task
+  (`true` = registered); it is never awaited against the transition it belongs to.
+- A superseded request has no effect at all: its ViewModel is never constructed
+  and no lifecycle callbacks run for it. An outside caller awaiting a superseded
+  request receives `false`.
+- The executed request constructs its ViewModel *after* the current page's
+  `OnNavigatedFrom` has completed, becomes the current page, and opens its own
+  window. Redirect chains — a page whose `OnNavigatedTo` navigates onward —
+  therefore proceed hop by hop, and each intermediate page runs a complete
+  `OnNavigatedTo` → `OnNavigatedFrom` cycle.
+- `RegionNavigated` is raised only when a page comes to rest as the region's
+  current page; intermediate pages of a redirect chain do not raise it.
+- The leave guard runs once per departure, with the request that started the
+  departure as its context; a request registered later does not re-run it.
+- Consecutive hops driven by callback-registered requests are bounded by
+  `NavigationOptions.MaxNavigationChainLength` (default 10). When the limit is
+  hit, the chain is stopped and the stop is reported via `SubscriberError` as
+  an `InvalidOperationException` — such requests have no awaiting caller, so
+  the limit never faults a caller's task — the current page stays active and
+  intact, and the service remains usable.
+
 ### Cancellation
 
-`NavigateToAsync` / `GoBackAsync` accept a `CancellationToken` that is honored **until the
-region stack is updated**: cancellation before that point releases the created page scope
-(if any) and throws `OperationCanceledException`. Afterwards the transition runs to
-completion and the token is ignored.
+`NavigateToAsync` / `GoBackAsync` accept a `CancellationToken` that is honored while
+the request is still pending: cancelling withdraws the request — it never executes —
+and the awaiting caller throws `OperationCanceledException`. Once the current page's
+`OnNavigatedFrom` has started for the departure that will execute the request, the
+departure is no longer interrupted: the callback runs to completion. A cancellation
+that arrives afterwards is still honored where the executing step checks the token
+(while the target is being resolved and just before the commit); withdrawing there
+re-activates the departing page — its `OnNavigatedTo` runs again — instead of
+completing the departure. (Those checkpoints exist on the `NavigateToAsync` hop
+only; `GoBackAsync` has none, so once its `OnNavigatedFrom` has started the token
+no longer withdraws the request.)
 
 ### Refreshing the active page
 
@@ -365,8 +402,9 @@ their teardown in the ViewModel (e.g. `OnNavigatedFromAsync` or the ViewModel's 
 
 ## Thread safety
 
-All public members are safe to call from any thread. Navigation transitions and disposal
-are serialized with an async lock; shared state is guarded by a dedicated lock.
+All public members are safe to call from any thread. Navigation requests within a
+region are executed one at a time by the region's navigation pump; shared state is
+guarded by a dedicated lock.
 
 ## Native AOT / trimming
 
@@ -396,6 +434,7 @@ framework's AOT story (verified by the Native AOT publish smoke test in CI).
 | `AddElegantSeriesFlow(configure, lifetime?)` | DI registration with `NavigationOptions` |
 | `NavigationOptions.DisposalGateTimeout` | Async lifecycle wait timeout (default 5s) |
 | `NavigationOptions.SyncLockTimeout` | Sync API lock acquisition timeout (default 2s) |
+| `NavigationOptions.MaxNavigationChainLength` | Max consecutive callback-driven hops (default 10) |
 
 ## Contributing
 

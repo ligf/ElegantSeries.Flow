@@ -1,175 +1,49 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ElegantSeries.Flow.Navigation;
 
 /// <summary>
-/// <see cref="NavigationService"/> — navigation core: <c>NavigateToAsync</c> internals,
-/// guard invocation and stack-membership checks.
+/// <see cref="NavigationService"/> — hop execution for Navigate intents:
+/// target resolution and stack surgery, invoked by the region's pump after the
+/// departing page's window has closed, plus guard invocation and
+/// stack-membership checks.
 /// </summary>
 public sealed partial class NavigationService
 {
     /// <summary>
-    /// Core navigation logic shared by both <see cref="NavigateToAsync{TViewModel}"/> overloads.
+    /// Executes one Navigate hop: resolves the target page (reusing the
+    /// KeepAlive cache entry when present) and performs the stack surgery for
+    /// the intent's mode. Runs after the departing page's From callbacks, with
+    /// the final intent known, so the departing entry's deactivation plan is
+    /// computed against the move that actually happens.
     /// </summary>
     /// <remarks>
-    /// Resolution (page-scope creation and ViewModel activation) happens outside
-    /// <see cref="_navigationLock"/>; only the state transition runs under the lock and
-    /// only lifecycle/disposal work items are queued there. Everything queued runs
-    /// outside both locks via <see cref="RunTransitionAsync"/>.
+    /// Failure before any stack surgery (the caller's token fired, resolution
+    /// threw, or the resolved instance already lives on another region's
+    /// stack) completes the intent's fate accordingly and revives the departing
+    /// page — its From already ran, so its To runs again to restore the
+    /// lifecycle pairing, and it stays the region's current page.
     /// </remarks>
-    private async Task<bool> NavigateInternalAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
-        string regionName,
-        object? parameter,
-        NavigationMode mode,
-        bool refreshIfActive,
-        CancellationToken cancellationToken)
+    private async Task<HopResult> ExecuteNavigateHopAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
+        NavigationIntent intent,
+        TransitionWork work,
+        List<Exception> errors,
+        RegionWindow window)
         where TViewModel : INavigationViewModel
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
-        ThrowIfDisposed();
-        cancellationToken.ThrowIfCancellationRequested();
+        var regionName = intent.RegionName;
+        var parameter = intent.Parameter;
+        var mode = intent.Mode;
+        var cancellationToken = intent.CancellationToken;
 
-        INavigationViewModel? currentVmForGuard = null;
+        // The departing entry (already run through From by the pump), if any.
+        // The pump is the region's only writer, so this is still the stack top
+        // when the surgery below runs.
+        NavigationEntry? departing;
         using (_stateLock.EnterScope())
         {
-            if (_regionStacks.TryGetValue(regionName, out var peekStack) && peekStack.Count > 0)
-            {
-                currentVmForGuard = peekStack.Peek().ViewModel;
-            }
-        }
-
-        // Early no-op: a New-mode navigation to the already-active type with no refresh
-        // changes nothing, so the leave guard must not veto it. Verified under the
-        // navigation lock to guard against a concurrent navigation changing the stack.
-        if (mode == NavigationMode.New && !refreshIfActive &&
-            currentVmForGuard?.GetType() == typeof(TViewModel))
-        {
-            await _navigationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                using (_stateLock.EnterScope())
-                {
-                    if (_regionStacks.TryGetValue(regionName, out var checkStack) &&
-                        checkStack.Count > 0 &&
-                        ReferenceEquals(checkStack.Peek().ViewModel, currentVmForGuard))
-                    {
-                        return true;
-                    }
-                }
-            }
-            finally
-            {
-                _navigationLock.Release();
-            }
-            // The active page changed concurrently: fall through to the normal path.
-        }
-
-        if (currentVmForGuard is not null)
-        {
-            var guardContext = new NavigationGuardContext(regionName, typeof(TViewModel), mode, parameter, isBack: false);
-            // Race the guard against the caller's cancellation: if the caller cancels
-            // while the guard is still running, stop waiting and report cancellation.
-            // The guard receives the token for cooperative cancellation, but the
-            // guard task itself cannot be force-aborted.
-            var guardTask = InvokeFromGuardAsync(currentVmForGuard, guardContext, cancellationToken);
-            var completed = await Task.WhenAny(guardTask, Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)).ConfigureAwait(false);
-            if (!ReferenceEquals(completed, guardTask))
-            {
-                // The guard is still running; observe its eventual exception so it
-                // doesn't surface as UnobservedTaskException. The navigation is
-                // cancelled regardless of the guard's eventual result.
-                _ = guardTask.ContinueWith(
-                    t => { try { SubscriberError?.Invoke(t.Exception!.InnerException ?? t.Exception!); } catch { } },
-                    CancellationToken.None,
-                    TaskContinuationOptions.OnlyOnFaulted,
-                    TaskScheduler.Default);
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-
-            if (!await guardTask.ConfigureAwait(false))
-            {
-                return false;
-            }
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-
-        // Fast path: a New-mode navigation to the already-active type needs no new
-        // page scope. Resolving a throwaway ViewModel just to discard it wastes
-        // construction and disposal (and can cause real side effects when the
-        // constructor subscribes events or starts work), so the same-type check
-        // runs here — under _navigationLock, before any scope is created.
-        // The guard above already ran on this exact instance (ReferenceEquals),
-        // so a refresh keeps its "guard may veto" semantics.
-        if (mode == NavigationMode.New && !_disposed)
-        {
-            var fastWork = new TransitionWork();
-            INavigationViewModel? fastVm = null;
-            NavigationEntry? fastEntry = null;
-            bool fastRefresh = false;
-            CancellationTokenSource? fastRetiredCts = null;
-
-            await _navigationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                using (_stateLock.EnterScope())
-                {
-                    if (_regionStacks.TryGetValue(regionName, out var fastStack) &&
-                        fastStack.Count > 0)
-                    {
-                        var peeked = fastStack.Peek();
-                        if (ReferenceEquals(peeked.ViewModel, currentVmForGuard) &&
-                            peeked.ViewModel.GetType() == typeof(TViewModel))
-                        {
-                            fastVm = peeked.ViewModel;
-                            fastRefresh = refreshIfActive;
-                            if (fastRefresh)
-                            {
-                                // Refresh: reuse the active entry — same ViewModel, stack
-                                // slot, mode and page scope. The entry's in-flight
-                                // tracking (counter + gate) and lifecycle state stay
-                                // with the page, so an in-progress activation remains
-                                // tracked. The retired CTS is cancelled after locks are
-                                // released (Cancel invokes user callbacks; must not
-                                // run while holding locks).
-                                // Only the parameter is updated.
-                                peeked.Parameter = parameter;
-                                fastRetiredCts = peeked.BeginNewActivation();
-                                fastEntry = peeked;
-                            }
-                        }
-                    }
-                }
-
-                // Queue lifecycle work while holding _navigationLock but not _stateLock,
-                // mirroring the main path below.
-                if (fastEntry is not null && fastRefresh)
-                {
-                    // The ViewModel is already attached from its original activation.
-                    QueueActivate(fastEntry, parameter, fastWork);
-                    QueueRegionNavigatedEvent(regionName, fastEntry.ViewModel, fastWork);
-                }
-            }
-            finally
-            {
-                _navigationLock.Release();
-            }
-
-            // Cancel the retired CTS outside locks.
-            if (fastRetiredCts is not null)
-            {
-                NavigationEntry.CancelOutsideLocks(fastRetiredCts);
-            }
-
-            if (fastVm is not null)
-            {
-                fastWork.CancelQueuedCts();
-                await RunTransitionAsync(fastWork).ConfigureAwait(false);
-                return true;
-            }
-            // Not a same-type hit: fall through to the resolve loop below.
+            departing = _regionStacks.TryGetValue(regionName, out var s) && s.Count > 0 ? s.Peek() : null;
         }
 
         // Resolve the target page outside _navigationLock: reuse the KeepAlive entry
@@ -187,7 +61,25 @@ public sealed partial class NavigationService
 
         for (int attempt = 0; ; attempt++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                // Withdrawn before execution: release nothing (no scope exists
+                // yet on the first pass; on retries the tentative scope is
+                // dropped by the loop tail) and revive the departing page.
+                if (ownedScope is not null)
+                {
+                    await DisposeScopeBestEffortAsync(ownedScope).ConfigureAwait(false);
+                    ownedScope = null;
+                }
+
+                CancelIntent(intent);
+                if (departing is not null)
+                {
+                    await ReviveCurrentPageAsync(window, regionName, departing, intent: null, errors).ConfigureAwait(false);
+                }
+
+                return new HopResult(null, null, null);
+            }
 
             // After repeated races, stop consulting the cache and resolve a fresh page.
             // (Practically unreachable; guards against a pathological ClearCache loop.)
@@ -215,12 +107,18 @@ public sealed partial class NavigationService
                 {
                     targetVm = ownedScope.ServiceProvider.GetRequiredService<TViewModel>();
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Resolution failed: the scope never produced a page; drop it quietly
-                    // so the original exception propagates unmodified.
+                    // Resolution failed: the scope never produced a page; drop it quietly.
                     await DisposeScopeBestEffortAsync(ownedScope).ConfigureAwait(false);
-                    throw;
+                    ownedScope = null;
+                    FaultOrReport(intent, ex);
+                    if (departing is not null)
+                    {
+                        await ReviveCurrentPageAsync(window, regionName, departing, intent: null, errors).ConfigureAwait(false);
+                    }
+
+                    return new HopResult(null, null, null);
                 }
             }
 
@@ -237,9 +135,13 @@ public sealed partial class NavigationService
                     ownedScope = null;
                 }
 
-                // Normalize: SemaphoreSlim surfaces TaskCanceledException, but the public
-                // contract is OperationCanceledException carrying the caller's token.
-                throw new OperationCanceledException(cancellationToken);
+                CancelIntent(intent);
+                if (departing is not null)
+                {
+                    await ReviveCurrentPageAsync(window, regionName, departing, intent: null, errors).ConfigureAwait(false);
+                }
+
+                return new HopResult(null, null, null);
             }
 
             bool cacheValid;
@@ -263,26 +165,25 @@ public sealed partial class NavigationService
             }
         }
 
-        var work = new TransitionWork();
         bool success = false;
         bool canceled = false;
+        Exception? queueError = null;
         IServiceScope? scopeToRelease = null;
         Exception? duplicateException = null;
-        List<(NavigationEntry Entry, bool Destroy, bool NotifyLifecycle)> deactivations = [];
+        List<(NavigationEntry Entry, bool Destroy)> deactivations = [];
         NavigationEntry? pushedEntry = null;
-        NavigationEntry? refreshEntry = null;
         NavigationEntry? reactivatedEntry = null;
+        Task? toGate = null;
         // Retired CTSs to cancel after the navigation lock is released.
-        // Cancel() invokes user callbacks synchronously and must not run
-        // while holding locks (deadlock risk).
+        // Cancel() invokes user callbacks synchronously and must not run while
+        // holding locks (deadlock risk).
         List<CancellationTokenSource> retiredCtsList = [];
 
         try
         {
             if (cancellationToken.IsCancellationRequested)
             {
-                // Cancelled before the stack was touched: release the created scope
-                // and report cancellation below, after the scope is released.
+                // Cancelled before the stack was touched: release the created scope.
                 scopeToRelease = ownedScope;
                 ownedScope = null;
                 canceled = true;
@@ -302,11 +203,13 @@ public sealed partial class NavigationService
                         _regionStacks[regionName] = stack;
                     }
 
-                    // Make sure the current page did not change while the guard/resolve was running.
-                    var actualCurrentVm = stack.Count > 0 ? stack.Peek().ViewModel : null;
-                    if (!ReferenceEquals(actualCurrentVm, currentVmForGuard))
+                    // The departing entry must still be the stack top: the pump
+                    // is the region's only writer between the departure and here.
+                    var actualCurrent = stack.Count > 0 ? stack.Peek() : null;
+                    if (!ReferenceEquals(actualCurrent, departing))
                     {
-                        // stateMismatch: abandon this navigation; the owned scope never became a page.
+                        // Only reachable when the service was disposed mid-hop
+                        // (its stacks were cleared) — handled like the disposed case.
                         scopeToRelease = ownedScope;
                         ownedScope = null;
                     }
@@ -314,213 +217,168 @@ public sealed partial class NavigationService
                     {
                         // The cached entry was re-validated before acquiring the lock,
                         // so no race adoption is needed here.
-                        // An explicit navigation mode takes precedence over the same-type
-                        // no-op: Replace/ClearStack/KeepAlive express stack surgery or reuse
+                        // An explicit navigation mode takes precedence over instance reuse:
+                        // ClearStack/Replace express stack surgery or reuse
                         // intent that must not be silently swallowed when the target type is
-                        // already the active page. The no-op/refresh shortcut below only
-                        // applies to the default New mode.
-                        if (mode == NavigationMode.New &&
-                            stack.Count > 0 && stack.Peek().ViewModel.GetType() == typeof(TViewModel))
+                        // already the active page.
+                        var existingEntry = (mode == NavigationMode.ClearStack || mode == NavigationMode.Replace)
+                            ? null
+                            : FindEntryOnStackLocked(stack, targetVm);
+                        if (existingEntry is not null)
                         {
-                            // No-op: a page of the same type is already the active page.
-                            // The freshly resolved instance is abandoned and its page scope
-                            // is released below; the active instance is untouched.
+                            // Pop back to the existing instance (mainstream behavior):
+                            // the pages above it leave the stack and the existing page
+                            // is re-activated with the new parameter. A duplicate
+                            // instance is never pushed. The abandoned scope (fresh
+                            // singleton re-resolution) is released below.
                             scopeToRelease = ownedScope;
                             ownedScope = null;
-                            if (refreshIfActive)
+
+                            while (stack.Count > 0 && !ReferenceEquals(stack.Peek(), existingEntry))
                             {
-                                // Refresh: keep the active ViewModel, its stack slot, its
-                                // mode and its page scope; only the activation callbacks
-                                // run again. The entry is reused (not swapped) so its
-                                // in-flight tracking and lifecycle state stay with the
-                                // page; the parameter is updated in place. The retired
-                                // CTS is cancelled after locks are released (see below).
-                                var current = stack.Peek();
-                                current.Parameter = parameter;
-                                retiredCtsList.Add(current.BeginNewActivation());
-                                refreshEntry = current;
+                                var old = stack.Pop();
+                                deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
                             }
+
+                            // Reuse the entry so re-activation carries the new
+                            // parameter; the ViewModel instance, page scope, mode,
+                            // in-flight tracking and lifecycle state are preserved.
+                            // The retired CTS is cancelled after locks are released.
+                            var target = stack.Peek();
+                            target.Parameter = parameter;
+                            retiredCtsList.Add(target.BeginNewActivation());
+                            reactivatedEntry = target;
 
                             success = true;
                         }
+                        else if (IsOnOtherRegionStackLocked(regionName, targetVm))
+                        {
+                            // The instance lives on a *different* region's stack: a
+                            // ViewModel has a single Navigation reference and cannot
+                            // be active in two regions at once.
+                            scopeToRelease = ownedScope;
+                            ownedScope = null;
+                            duplicateException = new InvalidOperationException(
+                                $"Cannot navigate to '{targetVm.GetType().FullName}': the same ViewModel instance " +
+                                $"is already present on another region's navigation stack. A ViewModel instance " +
+                                $"cannot be active in two regions at once.");
+                        }
                         else
                         {
-                            // Explicit stack-surgery modes take precedence over instance reuse:
-                            // ClearStack/Replace express the caller's intent to restructure the
-                            // stack, which must not be bypassed just because the resolved
-                            // instance (e.g. a Singleton) already lives on it.
-                            var existingEntry = (mode == NavigationMode.ClearStack || mode == NavigationMode.Replace)
-                                ? null
-                                : FindEntryOnStackLocked(stack, targetVm);
-                            if (existingEntry is not null)
+                            var entryMode = mode == NavigationMode.ClearStack ? NavigationMode.New : mode;
+                            if (cachedEntry is not null)
                             {
-                                // Pop back to the existing instance (mainstream behavior):
-                                // the pages above it leave the stack and the existing page
-                                // is re-activated with the new parameter. A duplicate
-                                // instance is never pushed. The abandoned scope (fresh
-                                // singleton re-resolution) is released below.
-                                scopeToRelease = ownedScope;
-                                ownedScope = null;
-
-                                bool firstPopped = true;
-                                while (stack.Count > 0 && !ReferenceEquals(stack.Peek(), existingEntry))
-                                {
-                                    var old = stack.Pop();
-                                    // Only the first popped entry was active; the ones below
-                                    // already received OnNavigatedFrom when they were covered.
-                                    deactivations.Add((old, old.Mode != NavigationMode.KeepAlive, firstPopped));
-                                    firstPopped = false;
-                                }
-
-                                // Reuse the entry so re-activation carries the new
-                                // parameter; the ViewModel instance, page scope, mode,
-                                // in-flight tracking and lifecycle state are preserved.
-                                // The retired CTS is cancelled after locks are released.
-                                var target = stack.Peek();
-                                target.Parameter = parameter;
-                                retiredCtsList.Add(target.BeginNewActivation());
-                                reactivatedEntry = target;
-
-                                success = true;
-                            }
-                            else if (IsOnOtherRegionStackLocked(regionName, targetVm))
-                            {
-                                // The instance lives on a *different* region's stack: a
-                                // ViewModel has a single Navigation reference and cannot
-                                // be active in two regions at once.
-                                scopeToRelease = ownedScope;
-                                ownedScope = null;
-                                duplicateException = new InvalidOperationException(
-                                    $"Cannot navigate to '{targetVm.GetType().FullName}': the same ViewModel instance " +
-                                    $"is already present on another region's navigation stack. A ViewModel instance " +
-                                    $"cannot be active in two regions at once.");
+                                // KeepAlive reuse: share the cached entry's page scope.
+                                // Mutual exclusion: the entry moves from cache to stack.
+                                // Propagate the cache key so a later pop writes it back
+                                // under the same key.
+                                _keepAliveCache.Remove(cacheKey);
+                                pushedEntry = new NavigationEntry(regionName, cachedEntry.ViewModel, parameter, entryMode, cachedEntry.Scope, cachedEntry.CacheKeyType) { OwnerService = this };
                             }
                             else
                             {
-                                var entryMode = mode == NavigationMode.ClearStack ? NavigationMode.New : mode;
-                                if (cachedEntry is not null)
+                                // The retry loop resolves fresh without consulting the cache once
+                                // attempt >= 4 (pathological ClearCache race), so a winner may
+                                // have been cached concurrently. Re-check under the locks already
+                                // held and adopt it: pushing a never-cached KeepAlive page would
+                                // leak its scope (it pops with destroy=false, and with no cache
+                                // entry nothing would ever reclaim it).
+                                NavigationEntry? winner = null;
+                                if (useKeepAlive)
                                 {
-                                    // KeepAlive reuse: share the cached entry's page scope.
-                                    // Mutual exclusion: the entry moves from cache to stack.
-                                    // Propagate the cache key so a later pop writes it back
-                                    // under the same key.
+                                    _keepAliveCache.TryGetValue(cacheKey, out winner);
+                                }
+
+                                if (winner is not null)
+                                {
+                                    scopeToRelease = ownedScope;
+                                    ownedScope = null;
+                                    // Mutual exclusion: winner moves from cache to stack.
                                     _keepAliveCache.Remove(cacheKey);
-                                    pushedEntry = new NavigationEntry(regionName, cachedEntry.ViewModel, parameter, entryMode, cachedEntry.Scope, cachedEntry.CacheKeyType);
+                                    pushedEntry = new NavigationEntry(regionName, winner.ViewModel, parameter, entryMode, winner.Scope, winner.CacheKeyType) { OwnerService = this };
                                 }
                                 else
                                 {
-                                    // The retry loop resolves fresh without consulting the cache once
-                                    // attempt >= 4 (pathological ClearCache race), so a winner may
-                                    // have been cached concurrently. Re-check under the locks already
-                                    // held and adopt it: pushing a never-cached KeepAlive page would
-                                    // leak its scope (it pops with destroy=false, and with no cache
-                                    // entry nothing would ever reclaim it).
-                                    NavigationEntry? winner = null;
-                                    if (useKeepAlive)
-                                    {
-                                        _keepAliveCache.TryGetValue(cacheKey, out winner);
-                                    }
-
-                                    if (winner is not null)
-                                    {
-                                        scopeToRelease = ownedScope;
-                                        ownedScope = null;
-                                        // Mutual exclusion: winner moves from cache to stack.
-                                        _keepAliveCache.Remove(cacheKey);
-                                        pushedEntry = new NavigationEntry(regionName, winner.ViewModel, parameter, entryMode, winner.Scope, winner.CacheKeyType);
-                                    }
-                                    else
-                                    {
-                                        pushedEntry = new NavigationEntry(regionName, targetVm, parameter, entryMode, ownedScope!, typeof(TViewModel));
-                                        ownedScope = null;
-                                        // Mutual exclusion: a fresh KeepAlive entry lives on the
-                                        // stack only; it enters the cache when popped (see
-                                        // BuildDeactivatePlan). No cache write here.
-                                    }
+                                    pushedEntry = new NavigationEntry(regionName, targetVm, parameter, entryMode, ownedScope!, typeof(TViewModel)) { OwnerService = this };
+                                    ownedScope = null;
+                                    // Mutual exclusion: a fresh KeepAlive entry lives on the
+                                    // stack only; it enters the cache when popped (see
+                                    // BuildDeactivatePlan). No cache write here.
                                 }
-
-                                if (mode == NavigationMode.ClearStack)
-                                {
-                                    bool firstPopped = true;
-                                    while (stack.Count > 0)
-                                    {
-                                        var old = stack.Pop();
-                                        // Only the first popped entry was active; the ones below
-                                        // already received OnNavigatedFrom when they were covered.
-                                        deactivations.Add((old, old.Mode != NavigationMode.KeepAlive, firstPopped));
-                                        firstPopped = false;
-                                    }
-                                }
-                                else if (stack.Count > 0)
-                                {
-                                    if (mode == NavigationMode.Replace)
-                                    {
-                                        // Remove any deeper duplicate of the target instance first
-                                        // (e.g. a Singleton already on this stack): it was inactive,
-                                        // so no lifecycle notification, just disposal bookkeeping.
-                                        // Instance match only: a different instance of the same
-                                        // type deeper on the stack is a distinct page, not a duplicate.
-                                        var duplicate = FindEntryOnStackLocked(stack, targetVm, allowTypeMatch: false);
-                                        if (duplicate is not null && !ReferenceEquals(stack.Peek(), duplicate))
-                                        {
-                                            RemoveEntryLocked(stack, duplicate, deactivations);
-                                        }
-
-                                        var old = stack.Pop();
-                                        deactivations.Add((old, old.Mode != NavigationMode.KeepAlive, true));
-                                    }
-                                    else
-                                    {
-                                        deactivations.Add((stack.Peek(), false, true));
-                                    }
-                                }
-
-                                stack.Push(pushedEntry);
-
-                                success = true;
                             }
+
+                            if (mode == NavigationMode.ClearStack)
+                            {
+                                while (stack.Count > 0)
+                                {
+                                    var old = stack.Pop();
+                                    deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                }
+                            }
+                            else if (stack.Count > 0)
+                            {
+                                if (mode == NavigationMode.Replace)
+                                {
+                                    // Remove any deeper duplicate of the target instance first
+                                    // (e.g. a Singleton already on this stack): it was inactive,
+                                    // so no lifecycle notification, just disposal bookkeeping.
+                                    // Instance match only: a different instance of the same
+                                    // type deeper on the stack is a distinct page, not a duplicate.
+                                    var duplicate = FindEntryOnStackLocked(stack, targetVm, allowTypeMatch: false);
+                                    if (duplicate is not null && !ReferenceEquals(stack.Peek(), duplicate))
+                                    {
+                                        RemoveEntryLocked(stack, duplicate, deactivations);
+                                    }
+
+                                    var old = stack.Pop();
+                                    deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                }
+                                else
+                                {
+                                    deactivations.Add((stack.Peek(), false));
+                                }
+                            }
+
+                            stack.Push(pushedEntry);
+
+                            success = true;
                         }
                     }
                 }
             }
 
-            // Queue lifecycle work while holding _navigationLock but not _stateLock
-            // (QueueDeactivation acquires _stateLock internally via BuildDeactivatePlan),
-            // mirroring the GoBackAsync path. This avoids relying on Lock reentrancy
-            // and guarantees the work list is fully built before any concurrent
-            // navigation can acquire _navigationLock and queue its own work,
-            // preserving lifecycle/event ordering across navigations.
+            // Queue the outgoing entries' disposal work while holding
+            // _navigationLock but not _stateLock (QueueOutgoingDisposal acquires
+            // _stateLock internally via BuildDeactivatePlan). The departing
+            // entry's From callbacks already ran during the leaving phase; only
+            // detach, plan and disposal remain.
             if (!canceled)
             {
-                foreach (var (entry, destroy, notifyLifecycle) in deactivations)
+                foreach (var (entry, destroy) in deactivations)
                 {
-                    QueueDeactivation(entry, destroy, notifyLifecycle, work);
+                    try
+                    {
+                        QueueOutgoingDisposal(entry, destroy, work);
+                    }
+                    catch (Exception ex)
+                    {
+                        // A throwing detach (user code) must not orphan the
+                        // scopes of this and every later popped entry: salvage
+                        // each one's disposal, finish the commit, and let the
+                        // first failure fault the hop afterwards.
+                        queueError ??= ex;
+                        SalvageOutgoingDisposal(entry, destroy, work);
+                    }
                 }
 
-                if (success && pushedEntry is not null)
+                var landedEntry = pushedEntry ?? reactivatedEntry;
+                if (success && landedEntry is not null)
                 {
-                    AttachNavigation(pushedEntry.ViewModel, work);
-                    QueueActivate(pushedEntry, parameter, work);
-                    var capturedVm = pushedEntry.ViewModel;
-                    QueueRegionNavigatedEvent(regionName, capturedVm, work);
-                }
-                else if (refreshEntry is not null)
-                {
-                    // Refresh: the entry keeps its stack slot and page scope; only the
-                    // activation callbacks run again, with the new parameter.
-                    // (The ViewModel is already attached from its original activation.)
-                    QueueActivate(refreshEntry, parameter, work);
-                    var capturedVm = refreshEntry.ViewModel;
-                    QueueRegionNavigatedEvent(regionName, capturedVm, work);
-                }
-                else if (reactivatedEntry is not null)
-                {
-                    // Pop-to-existing: the instance was detached when it was covered;
-                    // re-attach it as the active page.
-                    AttachNavigation(reactivatedEntry.ViewModel, work);
-                    QueueActivate(reactivatedEntry, parameter, work);
-                    var capturedVm = reactivatedEntry.ViewModel;
-                    QueueRegionNavigatedEvent(regionName, capturedVm, work);
+                    AttachNavigation(landedEntry.ViewModel, work);
+                    // Register the activation as in-flight NOW, under the lock:
+                    // a concurrent disposal starting after this point must
+                    // observe it (mirrors the historical queue-time registration).
+                    toGate = landedEntry.EnterInFlightLifecycle();
                 }
             }
         }
@@ -544,62 +402,88 @@ public sealed partial class NavigationService
             await DisposeScopeBestEffortAsync(scopeToRelease).ConfigureAwait(false);
         }
 
-        // Cancellation is reported only when the stack was never touched: once the
-        // stack has been updated the transition runs to completion.
+        if (queueError is not null)
+        {
+            // A popped entry's detach threw during the commit (its disposal
+            // was salvaged per entry). The commit itself stands; fault the hop
+            // so the caller observes the failure and the pump runs its
+            // recovery — the same outcome as an attach throw. One asymmetry
+            // with an attach throw must be repaired first: the attach runs
+            // before the in-flight registration, but this throw happens after
+            // it, and the pump's recovery registers its own gate — so exit
+            // the commit-time registration here, or the landed entry's gate
+            // count stays one too high forever and its gate task never
+            // completes (every later disposal of the page would wait out
+            // the full gate timeout and report a spurious timeout).
+            var queueLandedEntry = pushedEntry ?? reactivatedEntry;
+            if (queueLandedEntry is not null && toGate is not null)
+            {
+                queueLandedEntry.ExitInFlightLifecycle(toGate);
+            }
+
+            throw queueError;
+        }
+
         if (canceled)
         {
-            throw new OperationCanceledException(cancellationToken);
+            CancelIntent(intent);
+            if (departing is not null)
+            {
+                await ReviveCurrentPageAsync(window, regionName, departing, intent: null, errors).ConfigureAwait(false);
+            }
+
+            return new HopResult(null, null, null);
         }
 
         if (duplicateException is not null)
         {
-            // Fire queued PropertyChanged notifications before throwing: the silent
-            // sets already happened under the lock, and RunTransitionAsync won't run.
-            foreach (var vm in work.NavigationChangedNotifications)
+            FaultOrReport(intent, duplicateException);
+            if (departing is not null)
             {
-                try { vm.RaiseNavigationChanged(); }
-                catch { }
+                await ReviveCurrentPageAsync(window, regionName, departing, intent: null, errors).ConfigureAwait(false);
             }
 
-            ExceptionDispatchInfo.Capture(duplicateException).Throw();
+            return new HopResult(null, null, null);
         }
 
         if (!success)
         {
-            // Same as duplicateException above: silent sets happened, but
-            // RunTransitionAsync won't run, so fire notifications here.
+            // The service was disposed mid-hop: fire the queued PropertyChanged
+            // notifications (silent sets happened under the lock) and stop.
             foreach (var vm in work.NavigationChangedNotifications)
             {
-                try { vm.RaiseNavigationChanged(); }
+                try { RaiseNavigationChangedNotification(vm); }
                 catch { }
             }
 
-            return false;
+            CompleteIntent(intent, result: false);
+            return new HopResult(null, null, null);
         }
 
-        // Cancel queued CTSs now that the lock is released (see TransitionWork).
-        work.CancelQueuedCts();
+        // Run the outgoing entries' page-scope disposals now that the state is
+        // committed; the entering page's To callback runs afterwards, in the
+        // pump's entering step.
+        await RunDisposalActionsAsync(work).ConfigureAwait(false);
+        errors.AddRange(work.Errors);
 
-        await RunTransitionAsync(work).ConfigureAwait(false);
-
-        return true;
-    }
-
-    /// <summary>
-    /// Queues a <see cref="RegionNavigated"/> event that is suppressed if the ViewModel
-    /// is no longer the region's current page when the event runs. This handles reentrant
-    /// navigation: an outer transition's event must not overwrite a newer inner transition's
-    /// state.
-    /// </summary>
-    private void QueueRegionNavigatedEvent(string regionName, INavigationViewModel viewModel, TransitionWork work)
-    {
-        work.Events.Add(() =>
+        if (_disposed)
         {
-            if (ReferenceEquals(GetCurrentViewModel(regionName), viewModel))
+            RaiseEvents(work.Events, ReportSubscriberError);
+            // The entering step will never run for this hop: exit the in-flight
+            // registration made at commit time, otherwise the entry's gate
+            // stays open and DisposeAsync waits out the full gate timeout for
+            // a callback that never ran.
+            var landedEntry = pushedEntry ?? reactivatedEntry;
+            if (landedEntry is not null && toGate is not null)
             {
-                RaiseRegionNavigated(regionName, viewModel);
+                landedEntry.ExitInFlightLifecycle(toGate);
             }
-        });
+
+            CompleteIntent(intent, result: false);
+            return new HopResult(null, null, null);
+        }
+
+        return new HopResult(pushedEntry ?? reactivatedEntry, toGate, work);
     }
 
     /// <summary>
@@ -634,7 +518,7 @@ public sealed partial class NavigationService
     private void RemoveEntryLocked(
         Stack<NavigationEntry> stack,
         NavigationEntry entry,
-        List<(NavigationEntry Entry, bool Destroy, bool NotifyLifecycle)> deactivations)
+        List<(NavigationEntry Entry, bool Destroy)> deactivations)
     {
         var temp = new Stack<NavigationEntry>();
         while (stack.Count > 0)
@@ -646,7 +530,7 @@ public sealed partial class NavigationService
             }
             else
             {
-                deactivations.Add((popped, popped.Mode != NavigationMode.KeepAlive, false));
+                deactivations.Add((popped, popped.Mode != NavigationMode.KeepAlive));
             }
         }
 
