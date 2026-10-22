@@ -22,6 +22,12 @@ namespace ElegantSeries.Flow.Navigation;
 /// <see cref="INavigationGuardWithContext"/> instead: it is consulted in place of
 /// this interface and receives a <see cref="NavigationGuardContext"/>.
 /// </para>
+/// <para>
+/// The guard runs once per departure, against the request that started the
+/// departure. A navigation request registered later — from
+/// <see cref="INavigationAware.OnNavigatedFrom"/> or from the guard itself —
+/// supersedes the pending request but does not re-run the guard.
+/// </para>
 /// </remarks>
 public interface INavigationGuard
 {

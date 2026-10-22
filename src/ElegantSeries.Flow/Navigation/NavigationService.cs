@@ -303,7 +303,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
         where TViewModel : INavigationViewModel
-        => NavigateInternalAsync<TViewModel>(regionName, null, mode, refreshIfActive, cancellationToken);
+        => NavigateIntentAsync<TViewModel>(regionName, null, mode, refreshIfActive, cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
@@ -313,151 +313,11 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
         where TViewModel : INavigationViewModel
-        => NavigateInternalAsync<TViewModel>(regionName, parameter, mode, refreshIfActive, cancellationToken);
+        => NavigateIntentAsync<TViewModel>(regionName, parameter, mode, refreshIfActive, cancellationToken);
 
     /// <inheritdoc />
-    public async Task<bool> GoBackAsync(string regionName = DefaultRegionName, CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
-        ThrowIfDisposed();
-        cancellationToken.ThrowIfCancellationRequested();
-
-        INavigationViewModel? currentVmForGuard = null;
-        NavigationGuardContext? guardContext = null;
-        using (_stateLock.EnterScope())
-        {
-            if (_regionStacks.TryGetValue(regionName, out var stack) && stack.Count > 1)
-            {
-                currentVmForGuard = stack.Peek().ViewModel;
-                // Hand-written loop: avoids LINQ allocation/closure while holding _stateLock.
-                NavigationEntry? target = null;
-                var skipped = 0;
-                foreach (var entry in stack)
-                {
-                    if (skipped++ == 1)
-                    {
-                        target = entry;
-                        break;
-                    }
-                }
-                guardContext = new NavigationGuardContext(
-                    regionName, target!.ViewModel.GetType(), mode: null, target.Parameter, isBack: true);
-            }
-        }
-
-        // Run the navigation guard outside the locks to avoid deadlocks.
-        // Race against the caller's cancellation: stop waiting promptly if cancelled.
-        // The guard receives the token for cooperative cancellation.
-        if (currentVmForGuard is not null && guardContext is not null)
-        {
-            var guardTask = InvokeFromGuardAsync(currentVmForGuard, guardContext, cancellationToken);
-            var completed = await Task.WhenAny(guardTask, Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)).ConfigureAwait(false);
-            if (!ReferenceEquals(completed, guardTask))
-            {
-                // The guard is still running; observe its eventual exception so it
-                // doesn't surface as UnobservedTaskException. The navigation is
-                // cancelled regardless of the guard's eventual result.
-                _ = guardTask.ContinueWith(
-                    t => { try { SubscriberError?.Invoke(t.Exception!.InnerException ?? t.Exception!); } catch { } },
-                    CancellationToken.None,
-                    TaskContinuationOptions.OnlyOnFaulted,
-                    TaskScheduler.Default);
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-
-            if (!await guardTask.ConfigureAwait(false))
-            {
-                return false;
-            }
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var work = new TransitionWork();
-        bool success = false;
-
-        try
-        {
-            await _navigationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Normalize: SemaphoreSlim surfaces TaskCanceledException, but the public
-            // contract is OperationCanceledException carrying the caller's token.
-            throw new OperationCanceledException(cancellationToken);
-        }
-
-        CancellationTokenSource? retiredCts = null;
-        try
-        {
-            // No page scope is created on this path, so cancellation before the pop
-            // needs no cleanup; after the pop the transition runs to completion.
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (_disposed) return false;
-
-            NavigationEntry current;
-            NavigationEntry previous;
-
-            using (_stateLock.EnterScope())
-            {
-                if (!_regionStacks.TryGetValue(regionName, out var stack) || stack.Count <= 1)
-                {
-                    return false;
-                }
-
-                current = stack.Peek();
-                if (!ReferenceEquals(current.ViewModel, currentVmForGuard))
-                {
-                    return false;
-                }
-
-                stack.Pop();
-                previous = stack.Peek();
-            }
-
-            // Queue the work items while holding _navigationLock but not _stateLock,
-            // mirroring the NavigateInternalAsync path.
-            QueueDeactivation(current, destroy: current.Mode != NavigationMode.KeepAlive, notifyLifecycle: true, work);
-
-            // The reactivated entry gets a fresh lifecycle token: its previous CTS
-            // was cancelled when it was covered. In-flight callbacks from the old
-            // cycle remain tracked and are not forgotten.
-            // The retired CTS is cancelled after the navigation lock is released:
-            // Cancel() invokes user callbacks synchronously and must not run
-            // while holding locks (deadlock risk).
-            retiredCts = previous.BeginNewActivation();
-            AttachNavigation(previous.ViewModel, work);
-            QueueActivate(previous, previous.Parameter, work);
-            QueueRegionNavigatedEvent(regionName, previous.ViewModel, work);
-
-            success = true;
-        }
-        finally
-        {
-            _navigationLock.Release();
-        }
-
-        // Cancel outside the lock (see above).
-        if (success)
-        {
-            NavigationEntry.CancelOutsideLocks(retiredCts);
-            work.CancelQueuedCts();
-            await RunTransitionAsync(work).ConfigureAwait(false);
-        }
-        else
-        {
-            // Fire queued PropertyChanged notifications: silent sets happened
-            // under the lock, but RunTransitionAsync won't run.
-            foreach (var vm in work.NavigationChangedNotifications)
-            {
-                try { vm.RaiseNavigationChanged(); }
-                catch { }
-            }
-        }
-
-        return success;
-    }
+    public Task<bool> GoBackAsync(string regionName = DefaultRegionName, CancellationToken cancellationToken = default)
+        => GoBackIntentAsync(regionName, cancellationToken);
 
     // ───────────────────────── Queries (sync) ─────────────────────────
 
@@ -509,7 +369,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
         if (_disposed) return;
-        if (_currentLifecycleEntry.Value is not null)
+        if (CurrentOwnLifecycleEntry is not null)
             throw new InvalidOperationException(
                 "ClearCache cannot be called from within a page lifecycle callback. " +
                 "Call it outside the callback instead.");
@@ -574,7 +434,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     public void ClearAllCache()
     {
         if (_disposed) return;
-        if (_currentLifecycleEntry.Value is not null)
+        if (CurrentOwnLifecycleEntry is not null)
             throw new InvalidOperationException(
                 "ClearAllCache cannot be called from within a page lifecycle callback. " +
                 "Call it outside the callback instead.");
@@ -628,7 +488,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
         if (_disposed) return;
-        if (_currentLifecycleEntry.Value is not null)
+        if (CurrentOwnLifecycleEntry is not null)
             throw new InvalidOperationException(
                 "ClearCacheAsync cannot be called from within a page lifecycle callback. " +
                 "Call it outside the callback instead.");
@@ -712,7 +572,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     public async ValueTask ClearAllCacheAsync()
     {
         if (_disposed) return;
-        if (_currentLifecycleEntry.Value is not null)
+        if (CurrentOwnLifecycleEntry is not null)
             throw new InvalidOperationException(
                 "ClearAllCacheAsync cannot be called from within a page lifecycle callback. " +
                 "Call it outside the callback instead.");
@@ -842,6 +702,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             _navigationLock.Release();
         }
 
+        // Pending navigation intents will never execute: complete them as false.
+        // A running pump observes _disposed at its next phase boundary and stops.
+        DrainWindowIntents();
+
         // Cancel outside the lock.
         foreach (var cts in ctsToCancel)
         {
@@ -907,6 +771,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         {
             _navigationLock.Release();
         }
+
+        // Pending navigation intents will never execute: complete them as false.
+        // A running pump observes _disposed at its next phase boundary and stops.
+        DrainWindowIntents();
 
         // Cancel tokens outside the lock (see above). This is a terminal navigation —
         // no page will become active again. In-flight callbacks observe the

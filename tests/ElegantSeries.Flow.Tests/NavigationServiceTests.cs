@@ -54,7 +54,7 @@ public class ReentrantNavigatedToViewModel : NavigationViewModelBase, INavigatio
 
 /// <summary>
 /// Guard that replaces itself via a nested navigation while an outer navigation is
-/// awaiting this guard, forcing the outer navigation into the stateMismatch path.
+/// awaiting this guard, superseding the request that started the departure.
 /// </summary>
 public class StateMismatchGuardViewModel : NavigationViewModelBase, INavigationGuard
 {
@@ -65,9 +65,9 @@ public class StateMismatchGuardViewModel : NavigationViewModelBase, INavigationG
         if (!_nestedDone)
         {
             _nestedDone = true;
-            // Replace the current page while the outer navigation is awaiting this guard:
-            // when the guard returns, the stack top no longer matches and the outer
-            // navigation is abandoned (stateMismatch).
+            // Register a Replace while the departure that triggered this guard
+            // is in flight: the Replace is the last request in the page's window,
+            // so it supersedes the pending request when the window closes.
             await Navigation!.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.Replace);
         }
 
@@ -149,6 +149,568 @@ public class CountingAwareViewModel : NavigationViewModelBase, INavigationAware
 
     public void OnNavigatedTo(object? parameter) => NavigatedToCount++;
     public void OnNavigatedFrom() => NavigatedFromCount++;
+}
+
+// ---- Window model test doubles ----
+// Lifecycle/registration counters are static because an intermediate page's
+// instance is unreachable once the chain has moved past it; each test resets
+// the counters it relies on. Tests in this class run sequentially.
+
+public class ChainLandingViewModel : NavigationViewModelBase
+{
+    public static int ConstructionCount;
+
+    public ChainLandingViewModel() => Interlocked.Increment(ref ConstructionCount);
+
+    public static void Reset() => ConstructionCount = 0;
+}
+
+public class FromLandingViewModel : NavigationViewModelBase
+{
+}
+
+public class ButtonTargetViewModel : NavigationViewModelBase
+{
+    public static int ConstructionCount;
+
+    public ButtonTargetViewModel() => Interlocked.Increment(ref ConstructionCount);
+
+    public static void Reset() => ConstructionCount = 0;
+}
+
+/// <summary>Registers a navigation to the landing page from inside its own To.</summary>
+public class ToRedirectViewModel : NavigationViewModelBase, INavigationAware
+{
+    public static int ToCount;
+    public static int FromCount;
+
+    public static void Reset() { ToCount = 0; FromCount = 0; }
+
+    public void OnNavigatedTo(object? parameter)
+    {
+        Interlocked.Increment(ref ToCount);
+        _ = Navigation.NavigateToAsync<ChainLandingViewModel>();
+    }
+
+    public void OnNavigatedFrom() => Interlocked.Increment(ref FromCount);
+}
+
+/// <summary>Registers a navigation to the landing page from inside its own From (once).</summary>
+public class FromRedirectViewModel : NavigationViewModelBase, INavigationAware
+{
+    public static int ToCount;
+    public static int FromCount;
+    private bool _redirected;
+
+    public static void Reset() { ToCount = 0; FromCount = 0; }
+
+    public void OnNavigatedTo(object? parameter) => Interlocked.Increment(ref ToCount);
+
+    public void OnNavigatedFrom()
+    {
+        Interlocked.Increment(ref FromCount);
+        if (!_redirected)
+        {
+            _redirected = true;
+            _ = Navigation.NavigateToAsync<FromLandingViewModel>();
+        }
+    }
+}
+
+/// <summary>Registers a GoBack from inside its own From (once).</summary>
+public class FromGoBackViewModel : NavigationViewModelBase, INavigationAware
+{
+    private bool _redirected;
+
+    public void OnNavigatedTo(object? parameter) { }
+
+    public void OnNavigatedFrom()
+    {
+        if (!_redirected)
+        {
+            _redirected = true;
+            _ = Navigation.GoBackAsync();
+        }
+    }
+}
+
+public class ChainFirstViewModel : NavigationViewModelBase, INavigationAware
+{
+    public static int ToCount;
+    public static int FromCount;
+
+    public static void Reset() { ToCount = 0; FromCount = 0; }
+
+    public void OnNavigatedTo(object? parameter)
+    {
+        Interlocked.Increment(ref ToCount);
+        _ = Navigation.NavigateToAsync<ChainSecondViewModel>();
+    }
+
+    public void OnNavigatedFrom() => Interlocked.Increment(ref FromCount);
+}
+
+public class ChainSecondViewModel : NavigationViewModelBase, INavigationAware
+{
+    public static int ToCount;
+    public static int FromCount;
+
+    public static void Reset() { ToCount = 0; FromCount = 0; }
+
+    public void OnNavigatedTo(object? parameter)
+    {
+        Interlocked.Increment(ref ToCount);
+        _ = Navigation.NavigateToAsync<ChainThirdViewModel>();
+    }
+
+    public void OnNavigatedFrom() => Interlocked.Increment(ref FromCount);
+}
+
+public class ChainThirdViewModel : NavigationViewModelBase, INavigationAware
+{
+    public static int ToCount;
+
+    public static void Reset() => ToCount = 0;
+
+    public void OnNavigatedTo(object? parameter) => Interlocked.Increment(ref ToCount);
+
+    public void OnNavigatedFrom() { }
+}
+
+public class LoopAViewModel : NavigationViewModelBase, INavigationAware
+{
+    public static int ConstructionCount;
+
+    public LoopAViewModel() => Interlocked.Increment(ref ConstructionCount);
+
+    public static void Reset() => ConstructionCount = 0;
+
+    public void OnNavigatedTo(object? parameter) => _ = Navigation.NavigateToAsync<LoopBViewModel>();
+
+    public void OnNavigatedFrom() { }
+}
+
+public class LoopBViewModel : NavigationViewModelBase, INavigationAware
+{
+    public static int ConstructionCount;
+
+    public LoopBViewModel() => Interlocked.Increment(ref ConstructionCount);
+
+    public static void Reset() => ConstructionCount = 0;
+
+    public void OnNavigatedTo(object? parameter) => _ = Navigation.NavigateToAsync<LoopAViewModel>();
+
+    public void OnNavigatedFrom() { }
+}
+
+/// <summary>
+/// Guard that, while <see cref="Veto"/> is set, registers a navigation of its
+/// own and then vetoes the departure.
+/// </summary>
+public class VetoGuardViewModel : NavigationViewModelBase, INavigationAware, INavigationGuard
+{
+    public bool Veto { get; set; }
+    public int NavigatedToCount { get; private set; }
+    public int NavigatedFromCount { get; private set; }
+
+    public void OnNavigatedTo(object? parameter) => NavigatedToCount++;
+
+    public void OnNavigatedFrom() => NavigatedFromCount++;
+
+    public Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
+    {
+        if (Veto)
+        {
+            _ = Navigation.NavigateToAsync<ButtonTargetViewModel>();
+            return Task.FromResult(false);
+        }
+
+        return Task.FromResult(true);
+    }
+}
+
+/// <summary>Page whose async From blocks until the test releases it.</summary>
+public class SlowFromViewModel : NavigationViewModelBase, INavigationAwareAsync
+{
+    public TaskCompletionSource FromStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource ReleaseFrom { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public async Task OnNavigatedFromAsync(CancellationToken cancellationToken = default)
+    {
+        FromStarted.TrySetResult();
+        await ReleaseFrom.Task;
+    }
+}
+
+/// <summary>
+/// Page that, from inside its own From (once), registers a refresh navigation
+/// back to its own type with a new parameter.
+/// </summary>
+public class SelfRefreshFromViewModel : NavigationViewModelBase, INavigationAware
+{
+    private bool _redirected;
+
+    public int NavigatedToCount { get; private set; }
+    public int NavigatedFromCount { get; private set; }
+    public object? LastParameter { get; private set; }
+
+    public void OnNavigatedTo(object? parameter)
+    {
+        NavigatedToCount++;
+        LastParameter = parameter;
+    }
+
+    public void OnNavigatedFrom()
+    {
+        NavigatedFromCount++;
+        if (!_redirected)
+        {
+            _redirected = true;
+            _ = Navigation.NavigateToAsync<SelfRefreshFromViewModel, string>("two", refreshIfActive: true);
+        }
+    }
+}
+
+/// <summary>Records whether the task returned by an in-callback navigation call was already completed.</summary>
+public class InCallbackTaskStateViewModel : NavigationViewModelBase, INavigationAware
+{
+    public static bool CallbackTaskWasCompleted;
+
+    public static void Reset() => CallbackTaskWasCompleted = false;
+
+    public void OnNavigatedTo(object? parameter)
+    {
+        var task = Navigation.NavigateToAsync<ChainLandingViewModel>();
+        CallbackTaskWasCompleted = task.IsCompleted;
+    }
+
+    public void OnNavigatedFrom() { }
+}
+
+/// <summary>Deliberately never registered in any test container: resolving it fails.</summary>
+public class UnregisteredViewModel : NavigationViewModelBase
+{
+}
+
+/// <summary>Page whose async To blocks until the test releases it; records To/From ordering.</summary>
+public class SlowToViewModel : NavigationViewModelBase, INavigationAwareAsync
+{
+    public TaskCompletionSource ToStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource ReleaseTo { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public bool ToCompleted { get; private set; }
+    public bool FromRanBeforeToCompleted { get; private set; }
+
+    public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+    {
+        ToStarted.TrySetResult();
+        await ReleaseTo.Task;
+        ToCompleted = true;
+    }
+
+    public Task OnNavigatedFromAsync(CancellationToken cancellationToken = default)
+    {
+        if (!ToCompleted)
+        {
+            FromRanBeforeToCompleted = true;
+        }
+
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// Page that registers a navigation from its own To and whose guard then
+/// vetoes that very departure: the page comes to rest without ever having
+/// been surfaced by its landing.
+/// </summary>
+public class LandingVetoViewModel : NavigationViewModelBase, INavigationAware, INavigationGuard
+{
+    public void OnNavigatedTo(object? parameter)
+        => _ = Navigation.NavigateToAsync<ChainLandingViewModel>();
+
+    public void OnNavigatedFrom() { }
+
+    public Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
+        => Task.FromResult(false);
+}
+
+/// <summary>
+/// Page that lands from a chain and immediately registers a self-refresh;
+/// the refresh's To then registers a follow-up navigation, so the page
+/// never comes to rest between landing and leaving again.
+/// </summary>
+public class RefreshChainViewModel : NavigationViewModelBase, INavigationAware
+{
+    public static int ToCount;
+
+    public static void Reset() => ToCount = 0;
+
+    public void OnNavigatedTo(object? parameter)
+    {
+        var call = Interlocked.Increment(ref ToCount);
+        if (call == 1)
+        {
+            _ = Navigation.NavigateToAsync<RefreshChainViewModel>(refreshIfActive: true);
+        }
+        else if (call == 2)
+        {
+            _ = Navigation.NavigateToAsync<ChainLandingViewModel>();
+        }
+    }
+
+    public void OnNavigatedFrom() { }
+}
+
+/// <summary>
+/// Page that lands from a chain and registers a self-refresh; the refresh's
+/// To registers a further request carrying a test-controlled token and then
+/// blocks until released, so the test can withdraw that request (flag-only:
+/// a callback-registered request has no awaiting caller to remove it from
+/// the slot) while it is still sitting in the slot.
+/// </summary>
+public class SettleSurfaceViewModel : NavigationViewModelBase, INavigationAwareAsync
+{
+    public static int ToCount;
+    public readonly TaskCompletionSource RefreshToStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public readonly TaskCompletionSource ReleaseRefreshTo = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public readonly CancellationTokenSource FollowUpCts = new();
+
+    public static void Reset() => ToCount = 0;
+
+    public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+    {
+        var call = Interlocked.Increment(ref ToCount);
+        if (call == 1)
+        {
+            _ = Navigation.NavigateToAsync<SettleSurfaceViewModel>(refreshIfActive: true);
+        }
+        else if (call == 2)
+        {
+            _ = Navigation.NavigateToAsync<ChainLandingViewModel>(cancellationToken: FollowUpCts.Token);
+            RefreshToStarted.TrySetResult();
+            await ReleaseRefreshTo.Task;
+        }
+    }
+
+    public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+/// <summary>Disposable stack base page for the detach-throw test.</summary>
+public class StackBaseViewModel : NavigationViewModelBase, IDisposable
+{
+    public static int DisposedCount;
+
+    public static void Reset() => DisposedCount = 0;
+
+    public void Dispose() => Interlocked.Increment(ref DisposedCount);
+}
+
+/// <summary>Disposable stack middle page for the detach-throw test: it sits
+/// BELOW the throwing page, so it is queued after it in pop order.</summary>
+public class StackMidViewModel : NavigationViewModelBase, IDisposable
+{
+    public static int DisposedCount;
+
+    public static void Reset() => DisposedCount = 0;
+
+    public void Dispose() => Interlocked.Increment(ref DisposedCount);
+}
+
+/// <summary>Disposable stack top page for the detach-throw test.</summary>
+public class StackTopViewModel : NavigationViewModelBase, IDisposable
+{
+    public static int DisposedCount;
+
+    public static void Reset() => DisposedCount = 0;
+
+    public void Dispose() => Interlocked.Increment(ref DisposedCount);
+}
+
+/// <summary>
+/// Page whose detach (SetNavigationSilent with null) throws, and which is
+/// disposable so a test can observe whether its page scope was disposed.
+/// </summary>
+public class DetachThrowingViewModel : INavigationViewModel, IDisposable
+{
+    public static int DisposedCount;
+    public static bool ThrowOnDetach;
+
+    public static void Reset() { DisposedCount = 0; ThrowOnDetach = false; }
+
+    public void Dispose() => Interlocked.Increment(ref DisposedCount);
+
+    INavigationService? INavigationViewModel.Navigation { get; set; }
+
+    void INavigationViewModel.SetNavigationSilent(INavigationService? service)
+    {
+        // The test arms the throw after setup: being covered during setup
+        // also detaches the page, and only the pop's detach may throw.
+        if (service is null && ThrowOnDetach)
+        {
+            throw new InvalidOperationException("Detach boom.");
+        }
+    }
+
+    void INavigationViewModel.RaiseNavigationChanged() { }
+}
+
+/// <summary>
+/// Page whose async To calls into a SECOND navigation service instance and
+/// records the awaited outcome: the call must be classified as an outside
+/// call for that instance (real fate), not as an in-callback registration.
+/// </summary>
+public class CrossCallerViewModel : NavigationViewModelBase, INavigationAwareAsync
+{
+    public static INavigationService? OtherService;
+    public static bool? ObservedResult;
+    public static TaskCompletionSource Done = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public static void Reset()
+    {
+        OtherService = null;
+        ObservedResult = null;
+        Done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+    {
+        ObservedResult = await OtherService!.NavigateToAsync<TestHomeViewModel>();
+        Done.TrySetResult();
+    }
+
+    public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+/// <summary>Page whose From registers a redirect to <see cref="ChainMidViewModel"/>.</summary>
+public class ChainStartViewModel : NavigationViewModelBase, INavigationAware
+{
+    public void OnNavigatedTo(object? parameter) { }
+
+    public void OnNavigatedFrom() => _ = Navigation.NavigateToAsync<ChainMidViewModel>();
+}
+
+/// <summary>Chain middle page: its To registers a further callback request.</summary>
+public class ChainMidViewModel : NavigationViewModelBase, INavigationAware
+{
+    public static int ConstructionCount;
+
+    public ChainMidViewModel() => Interlocked.Increment(ref ConstructionCount);
+
+    public static void Reset() => ConstructionCount = 0;
+
+    public void OnNavigatedTo(object? parameter) => _ = Navigation.NavigateToAsync<ChainEndViewModel>();
+
+    public void OnNavigatedFrom() { }
+}
+
+/// <summary>Chain end page: must never be constructed when the chain is stopped.</summary>
+public class ChainEndViewModel : NavigationViewModelBase
+{
+    public static int ConstructionCount;
+
+    public ChainEndViewModel() => Interlocked.Increment(ref ConstructionCount);
+
+    public static void Reset() => ConstructionCount = 0;
+}
+
+/// <summary>Rescue-test start page: its To registers the mid page.</summary>
+public class RescueStartViewModel : NavigationViewModelBase, INavigationAware
+{
+    public void OnNavigatedTo(object? parameter) => _ = Navigation.NavigateToAsync<RescueMidViewModel>();
+
+    public void OnNavigatedFrom() { }
+}
+
+/// <summary>
+/// Rescue-test middle page: its To registers the end page, and its leave
+/// guard blocks until released so a test can place an outside request in
+/// the slot while the (doomed) chain departure is still in its guard.
+/// </summary>
+public class RescueMidViewModel : NavigationViewModelBase, INavigationAware, INavigationGuard
+{
+    public readonly TaskCompletionSource GuardStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _guardGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public void ReleaseGuard() => _guardGate.TrySetResult();
+
+    public async Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
+    {
+        GuardStarted.TrySetResult();
+        await _guardGate.Task;
+        return true;
+    }
+
+    public void OnNavigatedTo(object? parameter) => _ = Navigation.NavigateToAsync<RescueEndViewModel>();
+
+    public void OnNavigatedFrom() { }
+}
+
+/// <summary>Rescue-test end page: the chain candidate that trips the limit.</summary>
+public class RescueEndViewModel : NavigationViewModelBase
+{
+    public static int ConstructionCount;
+
+    public RescueEndViewModel() => Interlocked.Increment(ref ConstructionCount);
+
+    public static void Reset() => ConstructionCount = 0;
+}
+
+/// <summary>Page whose leave guard blocks until explicitly released.</summary>
+public class BlockingGuardViewModel : NavigationViewModelBase, INavigationAware, INavigationGuard
+{
+    public readonly TaskCompletionSource GuardStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public void ReleaseGuard() => _gate.TrySetResult();
+
+    public async Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
+    {
+        GuardStarted.TrySetResult();
+        await _gate.Task;
+        return true;
+    }
+
+    public void OnNavigatedTo(object? parameter) { }
+
+    public void OnNavigatedFrom() { }
+}
+
+/// <summary>
+/// ViewModel whose navigation attach throws: user code failing inside a
+/// hop's commit section.
+/// </summary>
+public class ThrowingAttachViewModel : INavigationViewModel
+{
+    INavigationService? INavigationViewModel.Navigation { get; set; }
+
+    void INavigationViewModel.SetNavigationSilent(INavigationService? service)
+    {
+        if (service is not null)
+        {
+            throw new InvalidOperationException("Attach boom.");
+        }
+    }
+
+    void INavigationViewModel.RaiseNavigationChanged() { }
+}
+
+/// <summary>Page whose async To blocks until released and then throws.</summary>
+public class SlowThrowingToViewModel : NavigationViewModelBase, INavigationAwareAsync
+{
+    public TaskCompletionSource ToStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource ReleaseTo { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+    {
+        ToStarted.TrySetResult();
+        await ReleaseTo.Task;
+        throw new InvalidOperationException("Init failed.");
+    }
+
+    public Task OnNavigatedFromAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
 public class KeepAliveViewModel : NavigationViewModelBase, IDisposable
@@ -265,6 +827,39 @@ public class NavigationServiceTests
         services.AddTransient<ContextGuardDetailViewModel>();
         services.AddTransient<CancelInNavigatedToViewModel>();
         services.AddTransient<ThinViewModel>();
+        services.AddTransient<ChainLandingViewModel>();
+        services.AddTransient<FromLandingViewModel>();
+        services.AddTransient<ButtonTargetViewModel>();
+        services.AddTransient<ToRedirectViewModel>();
+        services.AddTransient<FromRedirectViewModel>();
+        services.AddTransient<FromGoBackViewModel>();
+        services.AddTransient<ChainFirstViewModel>();
+        services.AddTransient<ChainSecondViewModel>();
+        services.AddTransient<ChainThirdViewModel>();
+        services.AddTransient<LoopAViewModel>();
+        services.AddTransient<LoopBViewModel>();
+        services.AddTransient<VetoGuardViewModel>();
+        services.AddTransient<SlowFromViewModel>();
+        services.AddTransient<SelfRefreshFromViewModel>();
+        services.AddTransient<InCallbackTaskStateViewModel>();
+        services.AddTransient<SlowToViewModel>();
+        services.AddTransient<SlowThrowingToViewModel>();
+        services.AddTransient<LandingVetoViewModel>();
+        services.AddTransient<ThrowingAttachViewModel>();
+        services.AddTransient<RefreshChainViewModel>();
+        services.AddTransient<BlockingGuardViewModel>();
+        services.AddTransient<SettleSurfaceViewModel>();
+        services.AddTransient<ChainStartViewModel>();
+        services.AddTransient<ChainMidViewModel>();
+        services.AddTransient<ChainEndViewModel>();
+        services.AddTransient<RescueStartViewModel>();
+        services.AddTransient<RescueMidViewModel>();
+        services.AddTransient<RescueEndViewModel>();
+        services.AddTransient<StackBaseViewModel>();
+        services.AddTransient<StackMidViewModel>();
+        services.AddTransient<StackTopViewModel>();
+        services.AddTransient<DetachThrowingViewModel>();
+        services.AddTransient<CrossCallerViewModel>();
 
         _serviceProvider = services.BuildServiceProvider();
         _navigationService = _serviceProvider.GetRequiredService<INavigationService>();
@@ -590,18 +1185,20 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task NavigateToAsync_WhenStackChangesDuringGuard_ShouldDisposeAbandonedPageScope()
+    public async Task NavigateToAsync_WhenGuardRegistersReplace_ShouldSupersedePendingRequest()
     {
         TrackedDisposeViewModel.DisposeCount = 0;
 
         await _navigationService.NavigateToAsync<StateMismatchGuardViewModel>();
         var result = await _navigationService.NavigateToAsync<TrackedDisposeViewModel>();
 
-        // The navigation was abandoned: the guard's nested Replace won the race.
+        // The pending request was superseded: the Replace the guard registered
+        // was the last request in the window and won.
         Assert.False(result);
         Assert.True(_navigationService.IsActive<TestHomeViewModel>());
-        // The pre-resolved but never used Transient instance is disposed by the service.
-        Assert.Equal(1, TrackedDisposeViewModel.DisposeCount);
+        // The superseded request never constructed its page, so there is no
+        // resolved-but-unused instance to dispose.
+        Assert.Equal(0, TrackedDisposeViewModel.DisposeCount);
     }
 
     [Fact]
@@ -2444,6 +3041,11 @@ public class NavigationServiceTests
 
         await _navigationService.NavigateToAsync<ReentrantNavigatedToViewModel>();
 
+        // The redirect registered in OnNavigatedTo executes right after
+        // the initiating call completes; RegionNavigated for the final
+        // page fires when it comes to rest — wait for both before
+        // asserting the final state.
+        await WaitUntilAsync(() => events.Contains(nameof(TestHomeViewModel)));
         Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
         Assert.DoesNotContain(nameof(ReentrantNavigatedToViewModel), events);
         Assert.Equal(new[] { nameof(TestHomeViewModel) }, events);
@@ -2659,6 +3261,11 @@ public class NavigationServiceTests
         var result = await nav.NavigateToAsync<ReentrantAsyncViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.True(result);
+        // The initiating call completes when the reentrant page's window
+        // closes; the redirect its callback registered executes right
+        // afterwards on the pump — wait for the chain to settle before
+        // asserting the final page.
+        await WaitUntilAsync(() => nav.GetCurrentViewModel() is TestHomeViewModel);
         Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
     }
 
@@ -2722,12 +3329,30 @@ public class NavigationServiceTests
         var provider = services.BuildServiceProvider();
         var nav = provider.GetRequiredService<INavigationService>();
 
+        // The self-wait, if it recurs, happens in the Replace hop's
+        // disposal of the replaced page — which runs AFTER the hop's stack
+        // commit flips the current page. The observable that brackets it
+        // is the page's release (its scope disposal), not the flip.
+        var replacedReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        nav.ViewModelReleased += (_, vm) =>
+        {
+            if (vm is SelfReplacingViewModel)
+            {
+                replacedReleased.TrySetResult();
+            }
+        };
+
         var startTime = DateTime.UtcNow;
         var result = await nav.NavigateToAsync<SelfReplacingViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
-        var elapsed = DateTime.UtcNow - startTime;
 
         Assert.True(result);
+        // As in the reentrant-navigation test: the Replace the callback
+        // registered executes right after the initiating call completes.
+        await WaitUntilAsync(() => nav.GetCurrentViewModel() is TestHomeViewModel);
         Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
+
+        await replacedReleased.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var elapsed = DateTime.UtcNow - startTime;
         Assert.True(elapsed < TimeSpan.FromSeconds(4), $"Took {elapsed}, self-wait would take ~5s");
     }
 
@@ -2824,6 +3449,9 @@ public class NavigationServiceTests
         // ObjectDisposedException inside the callback, failing the navigation.
         var result = await nav.NavigateToAsync<SelfReplacingAndContinuingViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(result);
+        // The Replace the callback registered executes right after the
+        // initiating call completes — wait for the chain to settle.
+        await WaitUntilAsync(() => nav.GetCurrentViewModel() is TestHomeViewModel);
         Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
     }
 
@@ -2844,6 +3472,8 @@ public class NavigationServiceTests
 
         var result = await nav.NavigateToAsync<SyncSelfReplacingAndContinuingViewModel>().WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(result);
+        // Same settle wait as the async counterpart.
+        await WaitUntilAsync(() => nav.GetCurrentViewModel() is TestHomeViewModel);
         Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
     }
 
@@ -3058,10 +3688,12 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task Navigate_StateMismatchAbandonsAndReturnsFalse()
+    public async Task Navigate_RequestRegisteredDuringGuard_SupersedesDepartureCandidate()
     {
-        // If the stack top changes while the from-guard is running, the navigation
-        // must be abandoned (return false) and its speculatively created scope released.
+        // A request registered while the leave guard is still running does not
+        // execute concurrently: it waits in the window's slot, is sampled when
+        // the window closes, and supersedes the request that started the
+        // departure — which therefore never constructs its page.
         ConcurrentTargetViewModel.DisposeCount = 0;
 
         var services = new ServiceCollection();
@@ -3075,25 +3707,811 @@ public class NavigationServiceTests
         await nav.NavigateToAsync<ConcurrentGuardViewModel>();
         var guardVm = Assert.IsType<ConcurrentGuardViewModel>(nav.GetCurrentViewModel());
 
-        // First navigation blocks in the guard.
+        // First navigation starts a departure and blocks in the guard.
         var firstNav = Task.Run(() => nav.NavigateToAsync<ConcurrentTargetViewModel>());
         // Wait until the guard is actually running.
         await guardVm.GuardEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
-        // Second navigation: guard lets it through immediately; stack top changes.
-        guardVm.AllowThrough = true;
-        var secondResult = await nav.NavigateToAsync<TestDetailViewModel>()
-            .WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.True(secondResult);
+        // Second request registers into the slot while the guard is running.
+        // It cannot complete before the window closes.
+        var secondNav = nav.NavigateToAsync<TestDetailViewModel>();
+        Assert.False(secondNav.IsCompleted);
 
-        // Release the first guard; it must detect the mismatch and abandon.
+        // Release the guard: the departure finishes, the slot is sampled, and
+        // the second request wins.
         guardVm.ReleaseGuard();
         var firstResult = await firstNav.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.False(firstResult);
-        // The abandoned navigation's speculatively created scope was released, not leaked.
-        Assert.Equal(1, ConcurrentTargetViewModel.DisposeCount);
-        // Active page is the second navigation's target.
+        var secondResult = await secondNav.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(secondResult);
+        // The superseded request never constructed its page: nothing to dispose.
+        Assert.Equal(0, ConcurrentTargetViewModel.DisposeCount);
+        // Active page is the second request's target.
         Assert.IsType<TestDetailViewModel>(nav.GetCurrentViewModel());
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        // For effects that land just after an intent's fate completes (the
+        // fate is decided at the sampling point; the winning hop or the
+        // revive runs immediately afterwards on the pump).
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException("Condition was not met within 10 seconds.");
+            }
+
+            await Task.Delay(10);
+        }
+    }
+
+    private TaskCompletionSource RestSignalFor<TViewModel>()
+    {
+        // RegionNavigated fires exactly when a page comes to rest as the
+        // region's settled current page, so it is a deterministic settle probe.
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            if (vm is TViewModel)
+            {
+                tcs.TrySetResult();
+            }
+        };
+        return tcs;
+    }
+
+    [Fact]
+    public async Task Window_ToRedirect_IntermediateRunsFullCycle_AndOnlyLandingPageRaisesRegionNavigated()
+    {
+        ToRedirectViewModel.Reset();
+        ChainLandingViewModel.Reset();
+        var navigatedTypes = new List<Type>();
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            lock (navigatedTypes) navigatedTypes.Add(vm!.GetType());
+        };
+        var rest = RestSignalFor<ChainLandingViewModel>();
+
+        var result = await _navigationService.NavigateToAsync<ToRedirectViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(result);
+        await rest.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The intermediate page ran a complete, correctly ordered cycle.
+        Assert.Equal(1, ToRedirectViewModel.ToCount);
+        Assert.Equal(1, ToRedirectViewModel.FromCount);
+        Assert.Equal(1, ChainLandingViewModel.ConstructionCount);
+        Assert.IsType<ChainLandingViewModel>(_navigationService.GetCurrentViewModel());
+        // Only the page that came to rest raised RegionNavigated.
+        Assert.Equal(new[] { typeof(ChainLandingViewModel) }, navigatedTypes);
+    }
+
+    [Fact]
+    public async Task Window_FromRedirect_SupersedesButtonRequest_AndButtonTargetNeverConstructed()
+    {
+        FromRedirectViewModel.Reset();
+        ButtonTargetViewModel.Reset();
+        await _navigationService.NavigateToAsync<FromRedirectViewModel>();
+        var rest = RestSignalFor<FromLandingViewModel>();
+
+        var buttonNav = _navigationService.NavigateToAsync<ButtonTargetViewModel>();
+        var buttonResult = await buttonNav.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(buttonResult);
+        await rest.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(1, FromRedirectViewModel.FromCount);
+        Assert.Equal(0, ButtonTargetViewModel.ConstructionCount);
+        Assert.IsType<FromLandingViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Window_AsyncFrom_SecondRegistrationDuringFrom_Wins()
+    {
+        ButtonTargetViewModel.Reset();
+        await _navigationService.NavigateToAsync<SlowFromViewModel>();
+        var slow = Assert.IsType<SlowFromViewModel>(_navigationService.GetCurrentViewModel());
+
+        var firstNav = _navigationService.NavigateToAsync<ButtonTargetViewModel>();
+        await slow.FromStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Registered while the first request's From is still running: it is
+        // sampled when the window closes and wins.
+        var secondNav = _navigationService.NavigateToAsync<FromLandingViewModel>();
+        slow.ReleaseFrom.TrySetResult();
+
+        Assert.False(await firstNav.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(await secondNav.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(0, ButtonTargetViewModel.ConstructionCount);
+        Assert.IsType<FromLandingViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Window_ChainOfRedirects_ConstructsEveryHop_AndRaisesRegionNavigatedOnce()
+    {
+        ChainFirstViewModel.Reset();
+        ChainSecondViewModel.Reset();
+        ChainThirdViewModel.Reset();
+        var navigatedTypes = new List<Type>();
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            lock (navigatedTypes) navigatedTypes.Add(vm!.GetType());
+        };
+        var rest = RestSignalFor<ChainThirdViewModel>();
+
+        var result = await _navigationService.NavigateToAsync<ChainFirstViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(result);
+        await rest.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Every executed hop was constructed and ran a complete cycle.
+        Assert.Equal(1, ChainFirstViewModel.ToCount);
+        Assert.Equal(1, ChainFirstViewModel.FromCount);
+        Assert.Equal(1, ChainSecondViewModel.ToCount);
+        Assert.Equal(1, ChainSecondViewModel.FromCount);
+        Assert.Equal(1, ChainThirdViewModel.ToCount);
+        Assert.IsType<ChainThirdViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.Equal(new[] { typeof(ChainThirdViewModel) }, navigatedTypes);
+    }
+
+    [Fact]
+    public async Task Window_RedirectLoop_StopsAtChainLimit_ReportsError_AndServiceStaysUsable()
+    {
+        LoopAViewModel.Reset();
+        LoopBViewModel.Reset();
+        var loopError = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _navigationService.SubscriberError += ex =>
+        {
+            if (ex is InvalidOperationException && ex.Message.Contains("Navigation chain exceeded"))
+            {
+                loopError.TrySetResult(ex);
+            }
+        };
+
+        var result = await _navigationService.NavigateToAsync<LoopAViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(result);
+
+        await loopError.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The loop stopped: construction counts are bounded by the chain
+        // limit (plus the initial landing) and no longer grow.
+        var constructions = LoopAViewModel.ConstructionCount + LoopBViewModel.ConstructionCount;
+        Assert.InRange(constructions, 2, 12);
+        await Task.Delay(300);
+        Assert.Equal(constructions,
+            LoopAViewModel.ConstructionCount + LoopBViewModel.ConstructionCount);
+
+        // The page whose departure was refused is still the intact current page.
+        Assert.True(_navigationService.GetCurrentViewModel() is LoopAViewModel or LoopBViewModel);
+
+        // The service remains usable.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task Window_GuardVeto_DrainsRegisteredIntents_AndPageStaysIntact()
+    {
+        ButtonTargetViewModel.Reset();
+        await _navigationService.NavigateToAsync<VetoGuardViewModel>();
+        var guard = Assert.IsType<VetoGuardViewModel>(_navigationService.GetCurrentViewModel());
+        guard.Veto = true;
+
+        // The guard registers its own request and then vetoes: the departure
+        // does not start, both requests are drained unexecuted.
+        var result = await _navigationService.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(result);
+        Assert.Same(guard, _navigationService.GetCurrentViewModel());
+        Assert.Equal(0, guard.NavigatedFromCount);
+        Assert.Equal(0, ButtonTargetViewModel.ConstructionCount);
+
+        guard.Veto = false;
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task Window_ResolutionFailure_FaultsRequest_AndRevivesCurrentPage()
+    {
+        await _navigationService.NavigateToAsync<CountingAwareViewModel>();
+        var home = Assert.IsType<CountingAwareViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.Equal(1, home.NavigatedToCount);
+
+        // UnregisteredViewModel is deliberately not in the container: its
+        // resolution fails after the current page already ran From.
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _navigationService.NavigateToAsync<UnregisteredViewModel>()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // The current page was revived: To ran again with its original
+        // parameter, restoring the To/From pairing, and it is still current.
+        await WaitUntilAsync(() => home.NavigatedToCount == 2);
+        Assert.Same(home, _navigationService.GetCurrentViewModel());
+        Assert.Equal(1, home.NavigatedFromCount);
+    }
+
+    [Fact]
+    public async Task Window_SelfRefreshRegisteredInFrom_RevivesWithNewParameter()
+    {
+        ButtonTargetViewModel.Reset();
+        await _navigationService.NavigateToAsync<SelfRefreshFromViewModel, string>("one");
+        var page = Assert.IsType<SelfRefreshFromViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.Equal("one", page.LastParameter);
+
+        // The revive re-activates the page as the region's resting current
+        // page, so RegionNavigated must be raised for it again (as a refresh
+        // would), with the same instance.
+        object? revivedVm = null;
+        var reviveRaised = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            if (vm is SelfRefreshFromViewModel)
+            {
+                revivedVm = vm;
+                reviveRaised.TrySetResult();
+            }
+        };
+
+        // The departure's From registers a refresh back to the page itself:
+        // the sampled intent targets the departing page, so the button request
+        // is superseded and the page is revived in place with the new parameter.
+        var buttonNav = _navigationService.NavigateToAsync<ButtonTargetViewModel>();
+        Assert.False(await buttonNav.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        await reviveRaised.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Same(page, revivedVm);
+        await WaitUntilAsync(() => page.NavigatedToCount == 2);
+        Assert.Same(page, _navigationService.GetCurrentViewModel());
+        Assert.Equal(0, ButtonTargetViewModel.ConstructionCount);
+        Assert.Equal(1, page.NavigatedFromCount);
+        Assert.Equal("two", page.LastParameter);
+    }
+
+    [Fact]
+    public async Task Window_GoBack_SupersededByFromRegisteredNavigate()
+    {
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await _navigationService.NavigateToAsync<FromRedirectViewModel>();
+        var rest = RestSignalFor<FromLandingViewModel>();
+
+        var backNav = _navigationService.GoBackAsync();
+        Assert.False(await backNav.WaitAsync(TimeSpan.FromSeconds(10)));
+        await rest.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The From-registered navigation was pushed instead of going back.
+        Assert.IsType<FromLandingViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.True(await _navigationService.GoBackAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<FromRedirectViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Window_Navigate_SupersededByFromRegisteredGoBack()
+    {
+        ButtonTargetViewModel.Reset();
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await _navigationService.NavigateToAsync<FromGoBackViewModel>();
+        var rest = RestSignalFor<TestHomeViewModel>();
+
+        var nav = _navigationService.NavigateToAsync<ButtonTargetViewModel>();
+        Assert.False(await nav.WaitAsync(TimeSpan.FromSeconds(10)));
+        await rest.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(0, ButtonTargetViewModel.ConstructionCount);
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Window_WithdrawnRegistrationDuringSlowTo_DoesNotCloseWindowEarly()
+    {
+        var navigated = new List<object>();
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            lock (navigated) navigated.Add(vm!);
+        };
+
+        var navTask = _navigationService.NavigateToAsync<SlowToViewModel>();
+        // Reach the page instance through a completed short navigation probe:
+        // the instance exists once its scope was created; poll for it.
+        SlowToViewModel? page = null;
+        await WaitUntilAsync(() =>
+        {
+            page = _navigationService.GetCurrentViewModel() as SlowToViewModel;
+            return page is not null;
+        });
+        await page!.ToStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Register a follow-up request and withdraw it immediately (the caller
+        // cancels before the entering page's To has finished). The wake this
+        // causes is void: the window must stay open until the To completes.
+        using var cts = new CancellationTokenSource();
+        var withdrawn = _navigationService.NavigateToAsync<ChainLandingViewModel>(cancellationToken: cts.Token);
+        cts.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await withdrawn);
+
+        await Task.Delay(500);
+        Assert.False(navTask.IsCompleted);
+        lock (navigated) Assert.Empty(navigated);
+
+        // Let the activation finish: only now may the page rest and surface.
+        page.ReleaseTo.TrySetResult();
+        Assert.True(await navTask.WaitAsync(TimeSpan.FromSeconds(10)));
+        lock (navigated) Assert.Single(navigated);
+        Assert.Same(page, _navigationService.GetCurrentViewModel());
+
+        // Navigating away afterwards runs From strictly after the To completed.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.False(page.FromRanBeforeToCompleted);
+    }
+
+    [Fact]
+    public async Task Window_WithdrawnRegistrationDuringSlowTo_ToExceptionStillReachesCaller()
+    {
+        var navTask = _navigationService.NavigateToAsync<SlowThrowingToViewModel>();
+        SlowThrowingToViewModel? page = null;
+        await WaitUntilAsync(() =>
+        {
+            page = _navigationService.GetCurrentViewModel() as SlowThrowingToViewModel;
+            return page is not null;
+        });
+        await page!.ToStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        using var cts = new CancellationTokenSource();
+        var withdrawn = _navigationService.NavigateToAsync<ChainLandingViewModel>(cancellationToken: cts.Token);
+        cts.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await withdrawn);
+
+        await Task.Delay(500);
+        Assert.False(navTask.IsCompleted);
+
+        // The To now throws: the exception must fault the original caller's
+        // task, not vanish into an error list that was already consumed.
+        page.ReleaseTo.TrySetResult();
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await navTask.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("Init failed.", ex.Message);
+    }
+
+    [Fact]
+    public async Task Window_LandingChainedDepartureVetoed_SurfacesPageWhenItRests()
+    {
+        ChainLandingViewModel.Reset();
+        object? surfaced = null;
+        var surfacedSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            if (vm is LandingVetoViewModel)
+            {
+                surfaced = vm;
+                surfacedSignal.TrySetResult();
+            }
+        };
+
+        // The page's To registers a follow-up request; the entering step hands
+        // it straight to a departure (no landing raise — a request is pending),
+        // and the page's own guard vetoes that departure. The page therefore
+        // comes to rest as the current page and must be surfaced now.
+        var result = await _navigationService.NavigateToAsync<LandingVetoViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(result);
+        await surfacedSignal.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var current = Assert.IsType<LandingVetoViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.Same(current, surfaced);
+        Assert.Equal(0, ChainLandingViewModel.ConstructionCount);
+    }
+
+    [Fact]
+    public async Task Window_RegionNavigated_RaisedBeforeLandingCallerResumes()
+    {
+        var handlerRan = false;
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            if (vm is TestHomeViewModel)
+            {
+                handlerRan = true;
+            }
+        };
+
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        // The await resumed only after subscribers were notified.
+        Assert.True(handlerRan);
+    }
+
+    [Fact]
+    public async Task Window_WithdrawnRegistrationDuringSlowFrom_DoesNotStartGateClock()
+    {
+        var reported = new List<Exception>();
+        _navigationService.SubscriberError += ex =>
+        {
+            lock (reported) reported.Add(ex);
+        };
+
+        await _navigationService.NavigateToAsync<SlowFromViewModel>();
+        var slow = Assert.IsType<SlowFromViewModel>(_navigationService.GetCurrentViewModel());
+
+        var candidate = _navigationService.NavigateToAsync<ButtonTargetViewModel>();
+        await slow.FromStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Register and immediately withdraw a superseding request while From
+        // is still in flight. The wake is void: nobody is superseding the
+        // departure anymore, so the disposal-gate clock must not run against
+        // the still-running From.
+        using var cts = new CancellationTokenSource();
+        var withdrawn = _navigationService.NavigateToAsync<ChainLandingViewModel>(cancellationToken: cts.Token);
+        cts.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await withdrawn);
+
+        // Wait past the disposal-gate timeout (5s): with the gate clock
+        // wrongly running, From would be abandoned here and the candidate
+        // would execute while From is still blocked.
+        await Task.Delay(TimeSpan.FromSeconds(6));
+        Assert.Same(slow, _navigationService.GetCurrentViewModel());
+        lock (reported) Assert.DoesNotContain(reported, e => e is TimeoutException);
+
+        slow.ReleaseFrom.TrySetResult();
+        Assert.True(await candidate.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<ButtonTargetViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Window_HopCommitThrow_FaultsCaller_AndRegionStaysUsable()
+    {
+        await _navigationService.NavigateToAsync<CountingAwareViewModel>();
+
+        // The target's attach throws inside the hop's commit section. The
+        // exception must reach the caller (not wedge the region in the
+        // Leaving phase), and the committed page is activated by recovery.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _navigationService.NavigateToAsync<ThrowingAttachViewModel>()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("Attach boom.", ex.Message);
+        await WaitUntilAsync(() => _navigationService.GetCurrentViewModel() is ThrowingAttachViewModel);
+
+        // The region is fully usable afterwards.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Window_FirstNavigationCommitThrow_FaultsCaller_AndRegionStaysUsable()
+    {
+        // The same commit throw as the departure-path test, but as the very
+        // first navigation into an empty region: no departing page exists,
+        // and the caller's fate must still be faulted rather than left
+        // incomplete (which would hang the caller forever).
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _navigationService.NavigateToAsync<ThrowingAttachViewModel>()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("Attach boom.", ex.Message);
+        await WaitUntilAsync(() => _navigationService.GetCurrentViewModel() is ThrowingAttachViewModel);
+
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Window_RefreshWithFollowUpRegistered_NeverSurfacesTheIntermediatePage()
+    {
+        RefreshChainViewModel.Reset();
+        ChainLandingViewModel.Reset();
+        var raised = new List<INavigationViewModel>();
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            lock (raised) raised.Add(vm);
+        };
+
+        // The page lands (raise deferred: its To registered a refresh), the
+        // refresh's To registers a follow-up, and only the follow-up's target
+        // ever comes to rest. RegionNavigated must fire exactly once — for
+        // the final page. The refresh path suppresses its own raise because
+        // a further intent is pending; the departure wrapper must apply the
+        // same rests test instead of surfacing the page anyway.
+        Assert.True(await _navigationService.NavigateToAsync<RefreshChainViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        await WaitUntilAsync(() => _navigationService.GetCurrentViewModel() is ChainLandingViewModel);
+        await Task.Delay(300);
+
+        List<INavigationViewModel> snapshot;
+        lock (raised) snapshot = [.. raised];
+        var single = Assert.Single(snapshot);
+        Assert.IsType<ChainLandingViewModel>(single);
+    }
+
+    [Fact]
+    public async Task Window_FollowUpWithdrawnAfterRefresh_SurfacesPageAtSettle()
+    {
+        SettleSurfaceViewModel.Reset();
+        ChainLandingViewModel.Reset();
+        var surfaced = new TaskCompletionSource<INavigationViewModel>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            if (vm is SettleSurfaceViewModel)
+            {
+                surfaced.TrySetResult(vm);
+            }
+        };
+
+        // Land (raise deferred: the To registered a refresh) and wait until
+        // the refresh's To has registered its follow-up request and blocked
+        // on the test's gate.
+        Assert.True(await _navigationService.NavigateToAsync<SettleSurfaceViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        var page = Assert.IsType<SettleSurfaceViewModel>(_navigationService.GetCurrentViewModel());
+        await page.RefreshToStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Withdraw the follow-up while it sits in the slot. Every earlier
+        // raise point now defers: the refresh's rests check sees the slot
+        // occupied, and the departure wrapper sees it too — so the page can
+        // only be surfaced by the pump's settle branch, after the open step
+        // discards the withdrawn request and finds nothing left to do.
+        page.FollowUpCts.Cancel();
+        page.ReleaseRefreshTo.TrySetResult();
+        var raised = await surfaced.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Same(page, raised);
+        Assert.Same(page, _navigationService.GetCurrentViewModel());
+        Assert.Equal(0, ChainLandingViewModel.ConstructionCount);
+    }
+
+    [Fact]
+    public async Task Window_CallbackRedirectOverOutsideCandidate_CountsAsChainHop()
+    {
+        ChainMidViewModel.Reset();
+        ChainEndViewModel.Reset();
+        using var svc = new NavigationService(_serviceProvider, new NavigationOptions { MaxNavigationChainLength = 1 });
+        var limitError = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        svc.SubscriberError += ex =>
+        {
+            if (ex is InvalidOperationException && ex.Message.Contains("Navigation chain exceeded"))
+            {
+                limitError.TrySetResult();
+            }
+        };
+
+        await svc.NavigateToAsync<ChainStartViewModel>();
+        // Outside candidate: the departure it starts is superseded during
+        // From by the page's own callback redirect (the caller's fate is
+        // therefore false — superseded), but the executed hop is
+        // callback-driven, so it must count as chain hop 1 — with a limit
+        // of 1, the mid page's own follow-up request then trips the limit.
+        Assert.False(await svc.NavigateToAsync<ButtonTargetViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+
+        await limitError.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, ChainMidViewModel.ConstructionCount);
+        Assert.Equal(0, ChainEndViewModel.ConstructionCount);
+        Assert.IsType<ChainMidViewModel>(svc.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Window_OutsideRequestInSlotAtChainLimit_SurvivesAndExecutes()
+    {
+        RescueEndViewModel.Reset();
+        using var svc = new NavigationService(_serviceProvider, new NavigationOptions { MaxNavigationChainLength = 1 });
+        var limitError = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        svc.SubscriberError += ex =>
+        {
+            if (ex is InvalidOperationException && ex.Message.Contains("Navigation chain exceeded"))
+            {
+                limitError.TrySetResult();
+            }
+        };
+
+        // Land the start page; its To registers the mid page (chain hop 1,
+        // exhausting the limit of 1). The mid page's To registers the end
+        // page, whose departure starts with the mid page's blocking guard.
+        Assert.True(await svc.NavigateToAsync<RescueStartViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        await WaitUntilAsync(() => svc.GetCurrentViewModel() is RescueMidViewModel);
+        var mid = Assert.IsType<RescueMidViewModel>(svc.GetCurrentViewModel());
+        await mid.GuardStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // While the doomed chain departure is still in its guard, an outside
+        // request arrives. When the guard passes and the limit stops the
+        // chain, the outside request must not be drained as collateral: it
+        // stays pending and executes as a fresh departure.
+        var outside = svc.NavigateToAsync<TestHomeViewModel>();
+        mid.ReleaseGuard();
+
+        await limitError.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(await outside.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(svc.GetCurrentViewModel());
+        Assert.Equal(0, RescueEndViewModel.ConstructionCount);
+    }
+
+    [Fact]
+    public async Task Window_DetachThrowDuringMultiPop_SalvagesEveryPoppedScope()
+    {
+        StackBaseViewModel.Reset();
+        StackMidViewModel.Reset();
+        StackTopViewModel.Reset();
+        DetachThrowingViewModel.Reset();
+
+        // The base page is KeepAlive so the final navigation to its type
+        // takes the pop-to-existing path (type match) instead of pushing a
+        // fresh instance. The throwing page sits in the middle of the
+        // stack, so in pop order it is neither first nor last: the pages
+        // queued before AND after it must both survive its throw.
+        await _navigationService.NavigateToAsync<StackBaseViewModel>(mode: NavigationMode.KeepAlive);
+        await _navigationService.NavigateToAsync<StackMidViewModel>();
+        await _navigationService.NavigateToAsync<DetachThrowingViewModel>();
+        await _navigationService.NavigateToAsync<StackTopViewModel>();
+        DetachThrowingViewModel.ThrowOnDetach = true;
+
+        // Pop-to-existing back to the base: the commit pops the top page
+        // (queued normally), then the detach-throwing page, then the mid
+        // page. The throw must fault the caller, and ALL THREE popped
+        // pages' scopes must still be disposed — without the salvage, the
+        // loop aborts at the throwing entry and its own scope (and, in a
+        // break-after-salvage regression, the mid page's) is simply lost.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _navigationService.NavigateToAsync<StackBaseViewModel>()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("Detach boom.", ex.Message);
+
+        await WaitUntilAsync(() => StackTopViewModel.DisposedCount == 1
+            && DetachThrowingViewModel.DisposedCount == 1
+            && StackMidViewModel.DisposedCount == 1);
+        Assert.IsType<StackBaseViewModel>(_navigationService.GetCurrentViewModel());
+
+        // The region is fully usable afterwards.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task Window_DetachThrowWhileCovered_KeepsThePageAlive()
+    {
+        DetachThrowingViewModel.Reset();
+
+        // The throwing page is the region's current page (KeepAlive);
+        // pushing another page over it merely COVERS it (destroy: false)
+        // — and its detach throws during that commit. The covered page
+        // stays on the stack and must NOT be marked for disposal: the
+        // salvage has to honor the destroy flag, or the page's later
+        // KeepAlive pop would dispose its scope instead of caching it.
+        await _navigationService.NavigateToAsync<StackBaseViewModel>(mode: NavigationMode.KeepAlive);
+        await _navigationService.NavigateToAsync<DetachThrowingViewModel>(mode: NavigationMode.KeepAlive);
+        DetachThrowingViewModel.ThrowOnDetach = true;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _navigationService.NavigateToAsync<StackTopViewModel>()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("Detach boom.", ex.Message);
+        Assert.IsType<StackTopViewModel>(_navigationService.GetCurrentViewModel());
+
+        // Back to the covered page: it is still the same live instance.
+        DetachThrowingViewModel.ThrowOnDetach = false;
+        Assert.True(await _navigationService.GoBackAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<DetachThrowingViewModel>(_navigationService.GetCurrentViewModel());
+
+        // Pop the throwing page itself (KeepAlive): with the destroy flag
+        // honored, no pending disposal was ever recorded for its scope,
+        // so the pop caches the page instead of disposing it.
+        Assert.True(await _navigationService.GoBackAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<StackBaseViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.Equal(0, DetachThrowingViewModel.DisposedCount);
+    }
+
+    [Fact]
+    public async Task Window_DetachThrowLanding_RecoveredPageGateIsBalanced()
+    {
+        StackBaseViewModel.Reset();
+        StackTopViewModel.Reset();
+        DetachThrowingViewModel.Reset();
+        var gateTimeouts = new List<Exception>();
+        _navigationService.SubscriberError += ex =>
+        {
+            if (ex is TimeoutException)
+            {
+                lock (gateTimeouts) gateTimeouts.Add(ex);
+            }
+        };
+
+        await _navigationService.NavigateToAsync<StackBaseViewModel>(mode: NavigationMode.KeepAlive);
+        await _navigationService.NavigateToAsync<DetachThrowingViewModel>(mode: NavigationMode.KeepAlive);
+        DetachThrowingViewModel.ThrowOnDetach = true;
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _navigationService.NavigateToAsync<StackTopViewModel>()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+        DetachThrowingViewModel.ThrowOnDetach = false;
+
+        // Pop the recovered page for destroy: its scope disposal waits on
+        // its in-flight gate. If the commit-time registration leaked on the
+        // detach-throw path, the gate never completes — the disposal waits
+        // out the full gate timeout and reports a spurious TimeoutException
+        // blaming the page's lifecycle, BEFORE the disposal proceeds. So by
+        // the time the scope is observed disposed, a leaked gate has
+        // necessarily already reported: the emptiness assertion below is
+        // the discriminator, with no wall-clock threshold involved.
+        Assert.True(await _navigationService.GoBackAsync().WaitAsync(TimeSpan.FromSeconds(15)));
+        await WaitUntilAsync(() => StackTopViewModel.DisposedCount == 1);
+        lock (gateTimeouts) Assert.Empty(gateTimeouts);
+    }
+
+    [Fact]
+    public async Task CrossInstance_CallFromCallback_IsAnOutsideCallForTheOtherInstance()
+    {
+        CrossCallerViewModel.Reset();
+        using var svcA = new NavigationService(_serviceProvider);
+        using var svcB = new NavigationService(_serviceProvider);
+
+        // Instance B rests on a page whose guard vetoes departures.
+        await svcB.NavigateToAsync<VetoGuardViewModel>();
+        var guard = Assert.IsType<VetoGuardViewModel>(svcB.GetCurrentViewModel());
+        guard.Veto = true;
+
+        // From instance A's page callback, a call into B is awaited. For B
+        // it is an outside call with a real fate: the veto must be observed
+        // as false — not swallowed by an in-callback classification (which
+        // would return an already-completed true).
+        CrossCallerViewModel.OtherService = svcB;
+        await svcA.NavigateToAsync<CrossCallerViewModel>();
+        await CrossCallerViewModel.Done.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(false, CrossCallerViewModel.ObservedResult);
+    }
+
+    [Fact]
+    public async Task Dispose_DuringInFlightGuard_SettlesTheDepartingCallerFalse()
+    {
+        await _navigationService.NavigateToAsync<BlockingGuardViewModel>();
+        var guardPage = Assert.IsType<BlockingGuardViewModel>(_navigationService.GetCurrentViewModel());
+
+        var candidate = _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await guardPage.GuardStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The guard never completes on its own; disposal must still settle
+        // the departing caller instead of leaving it hanging past Dispose.
+        ((IDisposable)_navigationService).Dispose();
+        Assert.False(await candidate.WaitAsync(TimeSpan.FromSeconds(10)));
+        guardPage.ReleaseGuard();
+    }
+
+    [Fact]
+    public async Task Window_Refresh_ConsultsGuard_AndVetoLeavesPageUntouched()
+    {
+        await _navigationService.NavigateToAsync<VetoGuardViewModel>();
+        var guard = Assert.IsType<VetoGuardViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.Equal(1, guard.NavigatedToCount);
+
+        // A refresh is not a departure, but the leave guard is still consulted
+        // for it (a same-type no-op without refresh is not — it short-circuits
+        // before the guard).
+        guard.Veto = true;
+        var vetoed = await _navigationService.NavigateToAsync<VetoGuardViewModel>(refreshIfActive: true)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(vetoed);
+        Assert.Equal(1, guard.NavigatedToCount);
+
+        guard.Veto = false;
+        var refreshed = await _navigationService.NavigateToAsync<VetoGuardViewModel>(refreshIfActive: true)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(refreshed);
+        Assert.Equal(2, guard.NavigatedToCount);
+        Assert.Same(guard, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Window_InCallbackNavigationCall_ReturnsAlreadyCompletedTask()
+    {
+        InCallbackTaskStateViewModel.Reset();
+        var rest = RestSignalFor<ChainLandingViewModel>();
+
+        var result = await _navigationService.NavigateToAsync<InCallbackTaskStateViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(result);
+        await rest.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Registration from inside a lifecycle callback completes the returned
+        // task immediately (the request's fate is decided at the window edge).
+        Assert.True(InCallbackTaskStateViewModel.CallbackTaskWasCompleted);
+        Assert.IsType<ChainLandingViewModel>(_navigationService.GetCurrentViewModel());
     }
 
     private sealed class ConcurrentGuardViewModel : NavigationViewModelBase, INavigationGuard
