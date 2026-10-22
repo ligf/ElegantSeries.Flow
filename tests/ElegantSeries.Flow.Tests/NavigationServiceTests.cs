@@ -189,7 +189,7 @@ public class ToRedirectViewModel : NavigationViewModelBase, INavigationAware
     public void OnNavigatedTo(object? parameter)
     {
         Interlocked.Increment(ref ToCount);
-        _ = Navigation.NavigateToAsync<ChainLandingViewModel>();
+        _ = Navigation!.NavigateToAsync<ChainLandingViewModel>();
     }
 
     public void OnNavigatedFrom() => Interlocked.Increment(ref FromCount);
@@ -212,7 +212,7 @@ public class FromRedirectViewModel : NavigationViewModelBase, INavigationAware
         if (!_redirected)
         {
             _redirected = true;
-            _ = Navigation.NavigateToAsync<FromLandingViewModel>();
+            _ = Navigation!.NavigateToAsync<FromLandingViewModel>();
         }
     }
 }
@@ -229,7 +229,7 @@ public class FromGoBackViewModel : NavigationViewModelBase, INavigationAware
         if (!_redirected)
         {
             _redirected = true;
-            _ = Navigation.GoBackAsync();
+            _ = Navigation!.GoBackAsync();
         }
     }
 }
@@ -244,7 +244,7 @@ public class ChainFirstViewModel : NavigationViewModelBase, INavigationAware
     public void OnNavigatedTo(object? parameter)
     {
         Interlocked.Increment(ref ToCount);
-        _ = Navigation.NavigateToAsync<ChainSecondViewModel>();
+        _ = Navigation!.NavigateToAsync<ChainSecondViewModel>();
     }
 
     public void OnNavigatedFrom() => Interlocked.Increment(ref FromCount);
@@ -260,7 +260,7 @@ public class ChainSecondViewModel : NavigationViewModelBase, INavigationAware
     public void OnNavigatedTo(object? parameter)
     {
         Interlocked.Increment(ref ToCount);
-        _ = Navigation.NavigateToAsync<ChainThirdViewModel>();
+        _ = Navigation!.NavigateToAsync<ChainThirdViewModel>();
     }
 
     public void OnNavigatedFrom() => Interlocked.Increment(ref FromCount);
@@ -285,7 +285,7 @@ public class LoopAViewModel : NavigationViewModelBase, INavigationAware
 
     public static void Reset() => ConstructionCount = 0;
 
-    public void OnNavigatedTo(object? parameter) => _ = Navigation.NavigateToAsync<LoopBViewModel>();
+    public void OnNavigatedTo(object? parameter) => _ = Navigation!.NavigateToAsync<LoopBViewModel>();
 
     public void OnNavigatedFrom() { }
 }
@@ -298,7 +298,7 @@ public class LoopBViewModel : NavigationViewModelBase, INavigationAware
 
     public static void Reset() => ConstructionCount = 0;
 
-    public void OnNavigatedTo(object? parameter) => _ = Navigation.NavigateToAsync<LoopAViewModel>();
+    public void OnNavigatedTo(object? parameter) => _ = Navigation!.NavigateToAsync<LoopAViewModel>();
 
     public void OnNavigatedFrom() { }
 }
@@ -321,7 +321,7 @@ public class VetoGuardViewModel : NavigationViewModelBase, INavigationAware, INa
     {
         if (Veto)
         {
-            _ = Navigation.NavigateToAsync<ButtonTargetViewModel>();
+            _ = Navigation!.NavigateToAsync<ButtonTargetViewModel>();
             return Task.FromResult(false);
         }
 
@@ -369,7 +369,7 @@ public class SelfRefreshFromViewModel : NavigationViewModelBase, INavigationAwar
         if (!_redirected)
         {
             _redirected = true;
-            _ = Navigation.NavigateToAsync<SelfRefreshFromViewModel, string>("two", refreshIfActive: true);
+            _ = Navigation!.NavigateToAsync<SelfRefreshFromViewModel, string>("two", refreshIfActive: true);
         }
     }
 }
@@ -383,7 +383,7 @@ public class InCallbackTaskStateViewModel : NavigationViewModelBase, INavigation
 
     public void OnNavigatedTo(object? parameter)
     {
-        var task = Navigation.NavigateToAsync<ChainLandingViewModel>();
+        var task = Navigation!.NavigateToAsync<ChainLandingViewModel>();
         CallbackTaskWasCompleted = task.IsCompleted;
     }
 
@@ -429,7 +429,7 @@ public class SlowToViewModel : NavigationViewModelBase, INavigationAwareAsync
 public class LandingVetoViewModel : NavigationViewModelBase, INavigationAware, INavigationGuard
 {
     public void OnNavigatedTo(object? parameter)
-        => _ = Navigation.NavigateToAsync<ChainLandingViewModel>();
+        => _ = Navigation!.NavigateToAsync<ChainLandingViewModel>();
 
     public void OnNavigatedFrom() { }
 
@@ -453,11 +453,11 @@ public class RefreshChainViewModel : NavigationViewModelBase, INavigationAware
         var call = Interlocked.Increment(ref ToCount);
         if (call == 1)
         {
-            _ = Navigation.NavigateToAsync<RefreshChainViewModel>(refreshIfActive: true);
+            _ = Navigation!.NavigateToAsync<RefreshChainViewModel>(refreshIfActive: true);
         }
         else if (call == 2)
         {
-            _ = Navigation.NavigateToAsync<ChainLandingViewModel>();
+            _ = Navigation!.NavigateToAsync<ChainLandingViewModel>();
         }
     }
 
@@ -485,11 +485,11 @@ public class SettleSurfaceViewModel : NavigationViewModelBase, INavigationAwareA
         var call = Interlocked.Increment(ref ToCount);
         if (call == 1)
         {
-            _ = Navigation.NavigateToAsync<SettleSurfaceViewModel>(refreshIfActive: true);
+            _ = Navigation!.NavigateToAsync<SettleSurfaceViewModel>(refreshIfActive: true);
         }
         else if (call == 2)
         {
-            _ = Navigation.NavigateToAsync<ChainLandingViewModel>(cancellationToken: FollowUpCts.Token);
+            _ = Navigation!.NavigateToAsync<ChainLandingViewModel>(cancellationToken: FollowUpCts.Token);
             RefreshToStarted.TrySetResult();
             await ReleaseRefreshTo.Task;
         }
@@ -589,7 +589,7 @@ public class ChainStartViewModel : NavigationViewModelBase, INavigationAware
 {
     public void OnNavigatedTo(object? parameter) { }
 
-    public void OnNavigatedFrom() => _ = Navigation.NavigateToAsync<ChainMidViewModel>();
+    public void OnNavigatedFrom() => _ = Navigation!.NavigateToAsync<ChainMidViewModel>();
 }
 
 /// <summary>Chain middle page: its To registers a further callback request.</summary>
@@ -601,7 +601,7 @@ public class ChainMidViewModel : NavigationViewModelBase, INavigationAware
 
     public static void Reset() => ConstructionCount = 0;
 
-    public void OnNavigatedTo(object? parameter) => _ = Navigation.NavigateToAsync<ChainEndViewModel>();
+    public void OnNavigatedTo(object? parameter) => _ = Navigation!.NavigateToAsync<ChainEndViewModel>();
 
     public void OnNavigatedFrom() { }
 }
@@ -619,7 +619,7 @@ public class ChainEndViewModel : NavigationViewModelBase
 /// <summary>Rescue-test start page: its To registers the mid page.</summary>
 public class RescueStartViewModel : NavigationViewModelBase, INavigationAware
 {
-    public void OnNavigatedTo(object? parameter) => _ = Navigation.NavigateToAsync<RescueMidViewModel>();
+    public void OnNavigatedTo(object? parameter) => _ = Navigation!.NavigateToAsync<RescueMidViewModel>();
 
     public void OnNavigatedFrom() { }
 }
@@ -643,7 +643,7 @@ public class RescueMidViewModel : NavigationViewModelBase, INavigationAware, INa
         return true;
     }
 
-    public void OnNavigatedTo(object? parameter) => _ = Navigation.NavigateToAsync<RescueEndViewModel>();
+    public void OnNavigatedTo(object? parameter) => _ = Navigation!.NavigateToAsync<RescueEndViewModel>();
 
     public void OnNavigatedFrom() { }
 }
@@ -2580,6 +2580,7 @@ public class NavigationServiceTests
     {
         public TaskCompletionSource<bool> InitStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource<bool> InitCanComplete { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<bool> CleanupStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public CancellationToken ReceivedToken { get; private set; }
         public bool TokenWasCancelled { get; private set; }
         /// <summary>Simulates slow cleanup after observing cancellation.</summary>
@@ -2599,6 +2600,7 @@ public class NavigationServiceTests
                 if (SimulateSlowCleanup)
                 {
                     // Non-cancellable cleanup: disposal gating must wait for this.
+                    CleanupStarted.TrySetResult(true);
                     await Task.Delay(1000).ConfigureAwait(false);
                 }
                 throw;
@@ -3183,9 +3185,9 @@ public class NavigationServiceTests
         await slowVm.InitStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         var replaceTask = nav.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.Replace);
-        // Give the replace a moment to reach the disposal gate (it should block
-        // while B's slow cleanup runs).
-        await Task.Delay(300);
+        // Once B's slow cleanup is running, the replace is causally blocked
+        // behind it: the disposal gate cannot release before the cleanup ends.
+        await slowVm.CleanupStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(replaceTask.IsCompleted); // gated: waiting for B's cleanup
 
         await replaceTask.WaitAsync(TimeSpan.FromSeconds(10));
@@ -4518,15 +4520,9 @@ public class NavigationServiceTests
     {
         public readonly TaskCompletionSource GuardEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _guardRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public volatile bool AllowThrough;
 
         public async Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
         {
-            if (AllowThrough)
-            {
-                return true;
-            }
-
             GuardEntered.TrySetResult();
             await _guardRelease.Task.ConfigureAwait(false);
             return true;

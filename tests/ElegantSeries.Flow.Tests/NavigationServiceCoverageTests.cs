@@ -644,7 +644,7 @@ public class NavigationServiceCoverageTests
     }
 
     [Fact]
-    public void ClearCache_FromOwnNavigatedFrom_ThrowsInvalidOperationException()
+    public async Task ClearCache_FromOwnNavigatedFrom_ThrowsInvalidOperationException()
     {
         var services = new ServiceCollection();
         services.AddElegantSeriesFlow();
@@ -654,10 +654,9 @@ public class NavigationServiceCoverageTests
         SyncSelfClearingViewModel.Service = svc;
         SyncSelfClearingViewModel.ThrownException = null;
 
-        svc.NavigateToAsync<SyncSelfClearingViewModel>(mode: NavigationMode.KeepAlive)
-            .GetAwaiter().GetResult();
+        await svc.NavigateToAsync<SyncSelfClearingViewModel>(mode: NavigationMode.KeepAlive);
 
-        svc.NavigateToAsync<TestHomeViewModel>().GetAwaiter().GetResult();
+        await svc.NavigateToAsync<TestHomeViewModel>();
 
         Assert.NotNull(SyncSelfClearingViewModel.ThrownException);
         Assert.IsType<InvalidOperationException>(SyncSelfClearingViewModel.ThrownException);
@@ -716,7 +715,7 @@ public class NavigationServiceCoverageTests
     }
 
     [Fact]
-    public void ClearCache_FromOwnNavigatedTo_ThrowsInvalidOperationException()
+    public async Task ClearCache_FromOwnNavigatedTo_ThrowsInvalidOperationException()
     {
         // Reentrancy guard: ClearCacheAsync from within OnNavigatedToAsync
         // throws InvalidOperationException.
@@ -728,14 +727,13 @@ public class NavigationServiceCoverageTests
         NavigatedToSelfClearingViewModel.Service = svc;
         NavigatedToSelfClearingViewModel.ThrownException = null;
 
-        svc.NavigateToAsync<NavigatedToSelfClearingViewModel>(mode: NavigationMode.KeepAlive)
-            .GetAwaiter().GetResult();
+        await svc.NavigateToAsync<NavigatedToSelfClearingViewModel>(mode: NavigationMode.KeepAlive);
 
         Assert.NotNull(NavigatedToSelfClearingViewModel.ThrownException);
         Assert.IsType<InvalidOperationException>(NavigatedToSelfClearingViewModel.ThrownException);
 
         // The page must still be functional: navigating away works.
-        svc.NavigateToAsync<TestHomeViewModel>().GetAwaiter().GetResult();
+        await svc.NavigateToAsync<TestHomeViewModel>();
         Assert.Equal(typeof(TestHomeViewModel), svc.GetCurrentViewModel()?.GetType());
     }
 
