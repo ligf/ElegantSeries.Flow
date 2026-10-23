@@ -140,6 +140,8 @@ internal sealed class FakeNavigationService : INavigationService
 
     public NavigationRetention? GetCurrentRetention(string regionName = "MainRegion") => null;
 
+    public IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = "MainRegion") => [];
+
     public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(string regionName = "MainRegion", NavigationOperation operation = NavigationOperation.Push, NavigationRetention retention = NavigationRetention.Destroy, bool refreshIfActive = false, CancellationToken cancellationToken = default)
         where TViewModel : INavigationViewModel
         => throw new NotImplementedException();

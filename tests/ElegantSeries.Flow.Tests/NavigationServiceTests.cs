@@ -4282,6 +4282,63 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task GetNavigationStack_ReturnsBottomToTopSnapshot()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>());
+        var home = _navigationService.GetNavigationStack()[0];
+        var top = _navigationService.GetCurrentViewModel();
+
+        var snapshot = _navigationService.GetNavigationStack();
+
+        Assert.Equal(3, snapshot.Count);
+        Assert.IsType<TestHomeViewModel>(snapshot[0]);
+        Assert.IsType<TestDetailViewModel>(snapshot[1]);
+        Assert.IsType<KeepAliveViewModel>(snapshot[2]);
+        Assert.Same(snapshot[0], home);
+        Assert.Same(snapshot[2], top);
+    }
+
+    [Fact]
+    public async Task GetNavigationStack_SnapshotIsIsolatedFromLaterNavigations()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        var snapshot = _navigationService.GetNavigationStack();
+
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel>());
+        Assert.True(await _navigationService.GoBackAsync());
+
+        Assert.Single(snapshot);
+        Assert.IsType<TestHomeViewModel>(snapshot[0]);
+        Assert.Single(_navigationService.GetNavigationStack());
+    }
+
+    [Fact]
+    public async Task GetNavigationStack_EmptyForUnknownRegion_AndExcludesCachedPages()
+    {
+        Assert.Empty(_navigationService.GetNavigationStack("NoSuchRegion"));
+
+        // A page popped into the KeepAlive cache is no longer on the
+        // stack and must not appear in the snapshot.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(
+            retention: NavigationRetention.KeepAlive));
+        Assert.True(await _navigationService.GoBackAsync());
+        var snapshot = _navigationService.GetNavigationStack();
+        Assert.Single(snapshot);
+        Assert.IsType<TestHomeViewModel>(snapshot[0]);
+    }
+
+    [Fact]
+    public async Task GetNavigationStack_PaddedRegionName_AddressesSameStack()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>("  MainRegion  "));
+        Assert.Single(_navigationService.GetNavigationStack(" MainRegion "));
+        Assert.Single(_navigationService.GetNavigationStack("MainRegion"));
+    }
+
+    [Fact]
     public async Task RegionName_SurroundingWhitespace_AddressesSameRegionAcrossApis()
     {
         // Names are trimmed at the API boundary: every spelling of the
