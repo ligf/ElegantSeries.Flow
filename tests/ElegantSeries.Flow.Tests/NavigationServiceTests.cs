@@ -1506,8 +1506,11 @@ public class NavigationServiceTests
         var kept = _navigationService.GetCurrentViewModel();
         Assert.False(_navigationService.CanGoBack());
 
-        // Home really was destroyed: navigating there creates a new instance.
-        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        // Home really was destroyed — proven through the cache: had the
+        // Replace wrongly cached it (per the incoming request's retention),
+        // this KeepAlive navigation would reuse the same instance.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>(
+            retention: NavigationRetention.KeepAlive));
         Assert.NotSame(home, _navigationService.GetCurrentViewModel());
         Assert.True(await _navigationService.GoBackAsync());
 
