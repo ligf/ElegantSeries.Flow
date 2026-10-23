@@ -39,6 +39,28 @@ namespace ElegantSeries.Flow.Navigation;
 /// its last stack/cache reference disappears.
 /// </para>
 /// <para>
+/// <b>Recognition:</b> when several <see cref="NavigationRetention.KeepAlive"/>
+/// instances of the target type may qualify — covered entries on the stack or
+/// the entry held in the KeepAlive cache — the navigation is addressed to
+/// exactly one of them, decided per candidate, nearest to the stack top
+/// first. A candidate implementing <see cref="INavigationTargetAware"/>
+/// decides for itself; any other candidate is recognized when the parameter
+/// it was last activated with equals the incoming parameter
+/// (<see cref="object.Equals(object, object)"/>), which is why recognition
+/// works without any code for value-type, <see cref="string"/>, and record
+/// parameters. When no candidate is recognized, a new instance is created:
+/// an existing instance is never reused — and re-purposed with a foreign
+/// parameter — merely because it has the same type. A parameter whose type
+/// provides no value equality can therefore never be recognized by
+/// parameter; the first time that costs a reuse, the service reports it once
+/// per parameter type through <see cref="SubscriberError"/> instead of
+/// degrading silently. The same gate applies to the KeepAlive cache for
+/// every forward operation, including
+/// <see cref="NavigationOperation.Replace"/> and
+/// <see cref="NavigationOperation.Reset"/>: an unrecognized cached instance
+/// is bypassed rather than adopted and refreshed.
+/// </para>
+/// <para>
 /// Navigating to an instance that lives on a <i>different</i> region's stack throws
 /// <see cref="InvalidOperationException"/>: a ViewModel has a single
 /// <see cref="INavigationViewModel.Navigation"/> reference and cannot be active in
