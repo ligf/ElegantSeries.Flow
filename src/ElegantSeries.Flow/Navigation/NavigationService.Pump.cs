@@ -1241,13 +1241,23 @@ public sealed partial class NavigationService
     /// </summary>
     private void RenewActivationIfCancelled(NavigationEntry entry)
     {
-        if (!entry.LifecycleCts.IsCancellationRequested)
+        if (_disposed || !entry.LifecycleCts.IsCancellationRequested)
         {
             return;
         }
 
         var retired = entry.BeginNewActivation();
         NavigationEntry.CancelOutsideLocks(retired);
+
+        // A disposal that collected the entry's sources while the renewal
+        // was swapping must not leave the fresh source live: cancel it too.
+        // (The entry is dead in that interleaving; no callback runs under
+        // the fresh source, and it is left to the GC like any source that
+        // teardown did not collect.)
+        if (_disposed)
+        {
+            NavigationEntry.CancelOutsideLocks(entry.LifecycleCts);
+        }
     }
 
     private async Task<bool> RunDepartureCoreAsync(RegionWindow window, string regionName, NavigationIntent candidate)
@@ -1719,8 +1729,9 @@ public sealed partial class NavigationService
 
     /// <summary>
     /// Whether the region's slot currently holds an intent that has not been
-    /// withdrawn. Used by the entering interrupt: a request that was registered
-    /// and already withdrawn again must not cancel the activating page's token.
+    /// withdrawn. Used by the From-phase interrupt: a superseding request
+    /// that was registered and already withdrawn again must not start the
+    /// disposal-gate clock.
     /// </summary>
     private bool HasLivePendingIntent(RegionWindow window)
     {

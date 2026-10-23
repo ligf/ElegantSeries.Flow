@@ -477,6 +477,49 @@ public class SlowToVetoViewModel : NavigationViewModelBase, INavigationAwareAsyn
 }
 
 /// <summary>
+/// Slow-To page whose guard blocks until released on its first call and
+/// allows later departures; records the tokens its To and From receive.
+/// </summary>
+public class SlowToBlockingGuardViewModel : NavigationViewModelBase, INavigationAwareAsync, INavigationGuard
+{
+    public TaskCompletionSource ToStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource ReleaseTo { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource GuardStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _guardGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public CancellationToken ToToken { get; private set; }
+    public CancellationToken FromToken { get; private set; }
+    public bool FromRan { get; private set; }
+    private int _guardCalls;
+
+    public void ReleaseGuard() => _guardGate.TrySetResult();
+
+    public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+    {
+        ToToken = cancellationToken;
+        ToStarted.TrySetResult();
+        await ReleaseTo.Task;
+    }
+
+    public Task OnNavigatedFromAsync(CancellationToken cancellationToken = default)
+    {
+        FromToken = cancellationToken;
+        FromRan = true;
+        return Task.CompletedTask;
+    }
+
+    public async Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
+    {
+        if (Interlocked.Increment(ref _guardCalls) == 1)
+        {
+            GuardStarted.TrySetResult();
+            await _guardGate.Task;
+        }
+
+        return true;
+    }
+}
+
+/// <summary>
 /// Page that registers a navigation from its own To and whose guard then
 /// vetoes that very departure: the page comes to rest without ever having
 /// been surfaced by its landing.
@@ -900,6 +943,7 @@ public class NavigationServiceTests
         services.AddTransient<SlowToViewModel>();
         services.AddTransient<SlowToTokenViewModel>();
         services.AddTransient<SlowToVetoViewModel>();
+        services.AddTransient<SlowToBlockingGuardViewModel>();
         services.AddTransient<SlowThrowingToViewModel>();
         services.AddTransient<LandingVetoViewModel>();
         services.AddTransient<ThrowingAttachViewModel>();
@@ -4169,6 +4213,15 @@ public class NavigationServiceTests
     [Fact]
     public async Task Window_GuardVetoAfterInterruptedTo_RenewsActivationToken()
     {
+        // Wait for the page to be surfaced as resting before navigating on:
+        // an intent registered while the veto exit is still draining the
+        // slot would be drained as moot along with the vetoed chain.
+        var rested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            if (vm is SlowToVetoViewModel) rested.TrySetResult();
+        };
+
         var navTask = _navigationService.NavigateToAsync<SlowToVetoViewModel>();
         SlowToVetoViewModel? page = null;
         await WaitUntilAsync(() =>
@@ -4189,6 +4242,52 @@ public class NavigationServiceTests
 
         Assert.False(await nav2.WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.True(await navTask.WaitAsync(TimeSpan.FromSeconds(10)));
+        await rested.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Same(page, _navigationService.GetCurrentViewModel());
+
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.True(page.FromRan);
+        Assert.False(page.FromToken.Equals(page.ToToken));
+    }
+
+    [Fact]
+    public async Task Window_CancelAfterClaimDuringGuard_RenewsActivationToken()
+    {
+        var rested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            if (vm is SlowToBlockingGuardViewModel) rested.TrySetResult();
+        };
+
+        var navTask = _navigationService.NavigateToAsync<SlowToBlockingGuardViewModel>();
+        SlowToBlockingGuardViewModel? page = null;
+        await WaitUntilAsync(() =>
+        {
+            page = _navigationService.GetCurrentViewModel() as SlowToBlockingGuardViewModel;
+            return page is not null;
+        });
+        await page!.ToStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The request is claimed as the departure candidate (the claim
+        // cancels the activating page's token) and its guard starts running.
+        // Cancelling the caller's token now aborts the departure in the guard
+        // phase: the page stays, and its lifecycle source must have been
+        // renewed — a later successful departure's From runs under a
+        // different token source than the one the interrupted To captured.
+        using var cts = new CancellationTokenSource();
+        var nav2 = _navigationService.NavigateToAsync<TestHomeViewModel>(cancellationToken: cts.Token);
+        await WaitUntilAsync(() => page!.ToToken.IsCancellationRequested);
+        page.ReleaseTo.TrySetResult();
+
+        await page.GuardStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cts.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await nav2);
+        page.ReleaseGuard();
+
+        Assert.True(await navTask.WaitAsync(TimeSpan.FromSeconds(10)));
+        await rested.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Same(page, _navigationService.GetCurrentViewModel());
 
         Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
