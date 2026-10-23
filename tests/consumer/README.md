@@ -17,7 +17,11 @@ mask. This harness is the independent consumer (roadmap Phase 2C
 2. Restores `ConsumerApp/` — a standalone console app that is **not**
    part of the solution — with `nuget.config` source mapping that
    resolves every `ElegantSeries.Flow*` package **only** from that
-   feed (third-party dependencies still come from nuget.org). The
+   feed (third-party dependencies still come from nuget.org).
+   Restores run with an isolated `NUGET_PACKAGES` folder under
+   `.work/`, so a warm global package cache can never shadow the
+   freshly packed feed with a same-version package from an earlier
+   run. The
    packed version (MinVer) is read from the produced file name and
    passed as `-p:FlowVersion=...`.
 3. Builds and runs the consumer (JIT). The consumer follows the
