@@ -23,9 +23,17 @@ internal sealed class HostBetaView : FrameworkElement
 /// A dedicated STA thread running a WPF dispatcher loop. Work posted
 /// through <see cref="RunAsync"/> executes on that thread with the
 /// dispatcher synchronization context installed, so awaits resume on
-/// the STA thread exactly as in a real WPF application, and posts
-/// from the navigation host (BeginInvoke) interleave in FIFO order
-/// with the scenario's own steps.
+/// the STA thread exactly as in a real WPF application.
+/// Ordering note: the navigation host posts its applies through
+/// <c>WpfDispatcher</c> at <see cref="DispatcherPriority.Render"/>,
+/// which is LOWER than the <see cref="DispatcherPriority.Normal"/>
+/// items this harness queues — a Normal read could overtake a queued
+/// Render apply and observe stale content. After each navigation the
+/// harness therefore awaits a barrier posted at Render priority
+/// (<see cref="RunRenderBarrierAsync"/>): same-priority items run
+/// FIFO, so when the barrier completes, every apply queued before it
+/// (the navigation's event is raised before its task completes, and
+/// the barrier is queued only after that) has executed.
 /// </summary>
 internal sealed class StaDispatcherThread : IDisposable
 {
@@ -64,6 +72,17 @@ internal sealed class StaDispatcherThread : IDisposable
         return completion.Task;
     }
 
+    /// <summary>Completes once every dispatcher item queued at
+    /// <see cref="DispatcherPriority.Render"/> before this call has
+    /// executed (same-priority FIFO), draining any applies the
+    /// navigation host posted for an already-completed navigation.</summary>
+    public Task RunRenderBarrierAsync()
+    {
+        var completion = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _dispatcher.BeginInvoke(new Action(() => completion.TrySetResult(null)), DispatcherPriority.Render);
+        return completion.Task;
+    }
+
     public void Dispose()
     {
         _dispatcher.InvokeShutdown();
@@ -96,13 +115,22 @@ internal sealed class WpfHostHarness : IHostIntegrationHarness
         return provider.GetRequiredService<INavigationService>();
     }
 
-    public Task NavigateAsync(INavigationService service, HostPage page, string region) =>
-        _sta.RunAsync(() => page == HostPage.Alpha
+    public async Task NavigateAsync(INavigationService service, HostPage page, string region)
+    {
+        await _sta.RunAsync(() => page == HostPage.Alpha
             ? service.NavigateToAsync<HostAlphaViewModel>(regionName: region)
             : service.NavigateToAsync<HostBetaViewModel>(regionName: region));
 
-    public Task GoBackAsync(INavigationService service, string region) =>
-        _sta.RunAsync(() => service.GoBackAsync(region));
+        // The host applies event-driven updates from a Render-priority
+        // post; drain those before the scenario reads the content.
+        await _sta.RunRenderBarrierAsync();
+    }
+
+    public async Task GoBackAsync(INavigationService service, string region)
+    {
+        await _sta.RunAsync(() => service.GoBackAsync(region));
+        await _sta.RunRenderBarrierAsync();
+    }
 
     public object CreateHost()
     {
@@ -141,6 +169,17 @@ internal sealed class WpfHostHarness : IHostIntegrationHarness
             return Task.CompletedTask;
         }).GetAwaiter().GetResult();
         return current;
+    }
+
+    public object? ContentView(object host)
+    {
+        object? content = null;
+        _sta.RunAsync(() =>
+        {
+            content = ((NavigationHost)host).Content;
+            return Task.CompletedTask;
+        }).GetAwaiter().GetResult();
+        return content;
     }
 
     public void DisposeHost(object host) =>
@@ -196,6 +235,13 @@ public sealed class HostIntegrationTests
     {
         using var harness = new WpfHostHarness();
         await HostIntegrationScenarios.RegionRename_SyncsToTheNewRegion(harness);
+    }
+
+    [Fact]
+    public async Task RegionRename_WithPadding_StillSyncs()
+    {
+        using var harness = new WpfHostHarness();
+        await HostIntegrationScenarios.RegionRename_WithPadding_StillSyncs(harness);
     }
 
     [Fact]

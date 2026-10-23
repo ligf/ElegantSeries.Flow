@@ -60,6 +60,13 @@ public interface IHostIntegrationHarness : IDisposable
     /// when it shows nothing.</summary>
     INavigationViewModel? ContentViewModel(object host);
 
+    /// <summary>The view object the host currently displays, or null
+    /// when it shows nothing. Each leg's views are named
+    /// <c>HostAlphaView</c> / <c>HostBetaView</c>, so scenarios can
+    /// assert the resolved view type by simple name — a locator
+    /// mix-up that pairs a ViewModel with the wrong view must fail.</summary>
+    object? ContentView(object host);
+
     /// <summary>Disposes (or detaches) the host. The content it last
     /// showed must remain readable through
     /// <see cref="ContentViewModel"/> afterwards.</summary>
@@ -89,6 +96,7 @@ public static class HostIntegrationScenarios
         harness.SetService(host, service);
 
         Assert.Same(alpha, harness.ContentViewModel(host));
+        Assert.Equal("HostAlphaView", harness.ContentView(host)?.GetType().Name);
     }
 
     public static async Task AttachThenNavigate_FollowsNavigationAndGoBack(IHostIntegrationHarness harness)
@@ -104,6 +112,7 @@ public static class HostIntegrationScenarios
 
         await harness.NavigateAsync(service, HostPage.Beta, MainRegion);
         Assert.Same(service.GetCurrentViewModel(MainRegion), harness.ContentViewModel(host));
+        Assert.Equal("HostBetaView", harness.ContentView(host)?.GetType().Name);
 
         await harness.GoBackAsync(service, MainRegion);
         Assert.Same(alpha, harness.ContentViewModel(host));
@@ -170,6 +179,23 @@ public static class HostIntegrationScenarios
         Assert.Null(harness.ContentViewModel(host));
 
         harness.SetRegion(host, MainRegion);
+        Assert.Same(service.GetCurrentViewModel(MainRegion), harness.ContentViewModel(host));
+    }
+
+    public static async Task RegionRename_WithPadding_StillSyncs(IHostIntegrationHarness harness)
+    {
+        // Both hosts trim the region name they are given (mirroring
+        // the service's own normalization), so a padded rename must
+        // behave exactly like the clean spelling.
+        var service = harness.CreateService();
+        await harness.NavigateAsync(service, HostPage.Alpha, MainRegion);
+
+        var host = harness.CreateHost();
+        harness.SetService(host, service);
+        harness.SetRegion(host, "  " + MainRegion + "  ");
+        Assert.Same(service.GetCurrentViewModel(MainRegion), harness.ContentViewModel(host));
+
+        await harness.NavigateAsync(service, HostPage.Beta, MainRegion);
         Assert.Same(service.GetCurrentViewModel(MainRegion), harness.ContentViewModel(host));
     }
 
