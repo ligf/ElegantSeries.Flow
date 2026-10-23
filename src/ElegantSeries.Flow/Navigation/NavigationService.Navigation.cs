@@ -385,21 +385,27 @@ public sealed partial class NavigationService
         finally
         {
             _navigationLock.Release();
-        }
 
-        // Cancel retired CTSs outside the lock: Cancel() invokes user callbacks
-        // synchronously and must not run while holding locks (deadlock risk).
-        // Exceptions are swallowed; the navigation state was already committed.
-        foreach (var (entry, cts) in retiredCtsList)
-        {
-            entry.CancelRetiredOutsideLocks(cts);
-        }
+            // Cancel retired CTSs outside the lock: Cancel() invokes user
+            // callbacks synchronously and must not run while holding locks
+            // (deadlock risk). This runs in the finally — after the lock is
+            // released — so a commit that throws after retiring sources
+            // (e.g. an attach failure during a pop-to-existing reactivation)
+            // cannot skip it: the state changes that retired them were
+            // already committed under the lock, so their cancellation is
+            // part of the commit. Exceptions are swallowed per source.
+            foreach (var (entry, cts) in retiredCtsList)
+            {
+                entry.CancelRetiredOutsideLocks(cts);
+            }
 
-        // A scope resolved but never pushed is owned by nobody: release it best-effort
-        // without disturbing the navigation outcome.
-        if (scopeToRelease is not null)
-        {
-            await DisposeScopeBestEffortAsync(scopeToRelease).ConfigureAwait(false);
+            // A scope resolved but never pushed is owned by nobody: release
+            // it best-effort without disturbing the navigation outcome —
+            // also from the finally, for the same reason.
+            if (scopeToRelease is not null)
+            {
+                await DisposeScopeBestEffortAsync(scopeToRelease).ConfigureAwait(false);
+            }
         }
 
         if (queueError is not null)

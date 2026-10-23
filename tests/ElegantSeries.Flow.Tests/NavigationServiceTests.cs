@@ -795,6 +795,28 @@ public class ThrowingAttachViewModel : INavigationViewModel
     void INavigationViewModel.RaiseNavigationChanged() { }
 }
 
+/// <summary>
+/// ViewModel whose navigation attach succeeds the first time and throws on
+/// every later attach: stages a hop commit that throws after a
+/// pop-to-existing reactivation has retired the entry's previous CTS.
+/// </summary>
+public class SecondAttachThrowingViewModel : INavigationViewModel
+{
+    private int _attachCount;
+
+    INavigationService? INavigationViewModel.Navigation { get; set; }
+
+    void INavigationViewModel.SetNavigationSilent(INavigationService? service)
+    {
+        if (service is not null && Interlocked.Increment(ref _attachCount) > 1)
+        {
+            throw new InvalidOperationException("Second attach boom.");
+        }
+    }
+
+    void INavigationViewModel.RaiseNavigationChanged() { }
+}
+
 /// <summary>Page whose async To blocks until released and then throws.</summary>
 public class SlowThrowingToViewModel : NavigationViewModelBase, INavigationAwareAsync
 {
@@ -4473,6 +4495,37 @@ public class NavigationServiceTests
         Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
             .WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Window_PopToExistingAttachThrow_RetiredCtsCancellationStillSettles()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddSingleton<SecondAttachThrowingViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        Assert.True(await nav.NavigateToAsync<SecondAttachThrowingViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(await nav.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // Pop back to the singleton: the reactivation retires the entry's
+        // previous CTS and then the attach throws inside the commit. The
+        // retirement was committed under the lock, so its cancellation
+        // must still run (and settle) even though the commit threw.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await nav.NavigateToAsync<SecondAttachThrowingViewModel>()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("Second attach boom.", ex.Message);
+
+        // The retired source was cancelled and settled by the finally, so
+        // the next reclaim pass on this entry disposes it: the retired list
+        // drains instead of holding the source forever.
+        await WaitUntilAsync(() =>
+            GetRetiredCtsCount(nav, "MainRegion", typeof(SecondAttachThrowingViewModel)) == 0);
     }
 
     [Fact]
