@@ -96,6 +96,8 @@ internal sealed class AvaloniaHostHarness : IHostIntegrationHarness
     public INavigationViewModel? ContentViewModel(object host) =>
         (((NavigationHost)host).Content as Control)?.DataContext as INavigationViewModel;
 
+    public object? ContentView(object host) => ((NavigationHost)host).Content;
+
     public void DisposeHost(object host) => ((NavigationHost)host).Dispose();
 
     public void Dispose()
@@ -148,6 +150,13 @@ public sealed class HostIntegrationTests
     {
         using var harness = new AvaloniaHostHarness();
         await HostIntegrationScenarios.RegionRename_SyncsToTheNewRegion(harness);
+    }
+
+    [Fact]
+    public async Task RegionRename_WithPadding_StillSyncs()
+    {
+        using var harness = new AvaloniaHostHarness();
+        await HostIntegrationScenarios.RegionRename_WithPadding_StillSyncs(harness);
     }
 
     [Fact]

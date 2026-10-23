@@ -18,11 +18,24 @@ namespace ElegantSeries.Flow.WPF.Tests.Logic;
 /// </summary>
 internal sealed class ControllerHostHarness : IHostIntegrationHarness
 {
+    /// <summary>Stand-in view for the Alpha page; the class name
+    /// mirrors the real hosts' view names so the shared scenarios'
+    /// view-type assertions apply to this leg too.</summary>
+    private sealed class HostAlphaView
+    {
+    }
+
+    /// <summary>Stand-in view for the Beta page.</summary>
+    private sealed class HostBetaView
+    {
+    }
+
     private sealed class HostState
     {
         public NavigationHostController<object> Controller = null!;
         public string Region = HostIntegrationScenarios.MainRegion;
         public INavigationViewModel? Current;
+        public object? CurrentView;
     }
 
     private readonly FakeDispatcher _dispatcher = new(hasAccess: false);
@@ -65,9 +78,17 @@ internal sealed class ControllerHostHarness : IHostIntegrationHarness
         state.Controller = new NavigationHostController<object>(
             _dispatcher,
             regionNameProvider: () => state.Region,
-            viewFactory: _ => new object(),
-            showView: (_, vm) => state.Current = vm,
-            clearView: () => state.Current = null);
+            viewFactory: vm => vm is HostAlphaViewModel ? new HostAlphaView() : new HostBetaView(),
+            showView: (view, vm) =>
+            {
+                state.Current = vm;
+                state.CurrentView = view;
+            },
+            clearView: () =>
+            {
+                state.Current = null;
+                state.CurrentView = null;
+            });
         return state;
     }
 
@@ -92,12 +113,16 @@ internal sealed class ControllerHostHarness : IHostIntegrationHarness
     public void SetRegion(object host, string region)
     {
         var state = (HostState)host;
-        state.Region = region;
+
+        // Mirror the hosts: both trim the region name they are given.
+        state.Region = region.Trim();
         state.Controller.Refresh();
         _dispatcher.RunPosted();
     }
 
     public INavigationViewModel? ContentViewModel(object host) => ((HostState)host).Current;
+
+    public object? ContentView(object host) => ((HostState)host).CurrentView;
 
     public void DisposeHost(object host) => ((HostState)host).Controller.Detach();
 
@@ -146,6 +171,13 @@ public sealed class HostIntegrationTests
     {
         using var harness = new ControllerHostHarness();
         await HostIntegrationScenarios.RegionRename_SyncsToTheNewRegion(harness);
+    }
+
+    [Fact]
+    public async Task RegionRename_WithPadding_StillSyncs()
+    {
+        using var harness = new ControllerHostHarness();
+        await HostIntegrationScenarios.RegionRename_WithPadding_StillSyncs(harness);
     }
 
     [Fact]
