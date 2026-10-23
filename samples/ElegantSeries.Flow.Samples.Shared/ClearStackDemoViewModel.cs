@@ -6,7 +6,7 @@ using ElegantSeries.Flow.Mvvm;
 namespace ElegantSeries.Flow.Samples.Shared;
 
 /// <summary>
-/// Q5 demo — <see cref="NavigationMode.ClearStack"/>: push a few pages, then
+/// Q5 demo — <see cref="NavigationOperation.Reset"/>: push a few pages, then
 /// clear the stack back to a single fresh page. Push alternates with
 /// <see cref="ClearStackChildViewModel"/> because pushing the already-active
 /// type is a no-op by design.
@@ -40,7 +40,7 @@ public sealed partial class ClearStackDemoViewModel : BaseViewModel, INavigation
             return Task.CompletedTask;
         }
 
-        return NavigateToAsync<ClearStackDemoViewModel>(RegionNames.Q5, NavigationMode.ClearStack);
+        return NavigateToAsync<ClearStackDemoViewModel>(RegionNames.Q5, operation: NavigationOperation.Reset);
     }
 
     [RelayCommand]

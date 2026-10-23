@@ -23,8 +23,8 @@
             <TextBlock Text="{Binding IsHomeActive}" Grid.Row="1" Grid.Column="1" Margin="0,2" FontFamily="Consolas" />
             <TextBlock Text="IsActive&lt;CounterViewModel&gt;" Grid.Row="2" Opacity="0.6" Margin="0,2" />
             <TextBlock Text="{Binding IsCounterActive}" Grid.Row="2" Grid.Column="1" Margin="0,2" FontFamily="Consolas" />
-            <TextBlock Text="GetCurrentMode" Grid.Row="3" Opacity="0.6" Margin="0,2" />
-            <TextBlock Text="{Binding CurrentMode}" Grid.Row="3" Grid.Column="1" Margin="0,2" FontFamily="Consolas" />
+            <TextBlock Text="GetCurrentRetention" Grid.Row="3" Opacity="0.6" Margin="0,2" />
+            <TextBlock Text="{Binding CurrentRetention}" Grid.Row="3" Grid.Column="1" Margin="0,2" FontFamily="Consolas" />
             <TextBlock Text="GetCurrentViewModel" Grid.Row="4" Opacity="0.6" Margin="0,2" />
             <TextBlock Text="{Binding CurrentViewModel}" Grid.Row="4" Grid.Column="1" Margin="0,2" FontFamily="Consolas" />
             <TextBlock Text="IsRegistered&lt;HomeViewModel&gt;" Grid.Row="5" Opacity="0.6" Margin="0,2" />

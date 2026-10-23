@@ -215,7 +215,7 @@ public class NavigationServiceCoverageTests
         using var sub = svc.SubscribeRegionCacheCleared(r => cleared.Add(r));
 
         await svc.NavigateToAsync<TestDetailViewModel>();
-        await svc.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.KeepAlive);
+        await svc.NavigateToAsync<TestHomeViewModel>(retention: NavigationRetention.KeepAlive);
         // Mutual exclusion: the page enters the cache only when popped.
         await svc.GoBackAsync();
         svc.ClearCache("MainRegion");
@@ -283,7 +283,7 @@ public class NavigationServiceCoverageTests
 
         await svc.NavigateToAsync<TestHomeViewModel>();
         // Replace mode disposes the old page, firing ViewModelReleased
-        await svc.NavigateToAsync<TestDetailViewModel>(mode: NavigationMode.Replace);
+        await svc.NavigateToAsync<TestDetailViewModel>(operation: NavigationOperation.Replace);
 
         await reportedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.NotNull(reported);
@@ -304,7 +304,7 @@ public class NavigationServiceCoverageTests
         svc.RegionCacheCleared += r => throw new InvalidOperationException("Clear boom.");
 
         await svc.NavigateToAsync<TestDetailViewModel>();
-        await svc.NavigateToAsync<TestHomeViewModel>(mode: NavigationMode.KeepAlive);
+        await svc.NavigateToAsync<TestHomeViewModel>(retention: NavigationRetention.KeepAlive);
         // Mutual exclusion: the page enters the cache only when popped.
         await svc.GoBackAsync();
         svc.ClearCache("MainRegion");
@@ -633,7 +633,7 @@ public class NavigationServiceCoverageTests
         SelfClearingViewModel.Service = svc;
         SelfClearingViewModel.ThrownException = null;
 
-        await svc.NavigateToAsync<SelfClearingViewModel>(mode: NavigationMode.KeepAlive);
+        await svc.NavigateToAsync<SelfClearingViewModel>(retention: NavigationRetention.KeepAlive);
 
         // Navigate away: triggers OnNavigatedFromAsync which reentrantly calls
         // ClearCacheAsync. Must throw InvalidOperationException, not deadlock.
@@ -654,7 +654,7 @@ public class NavigationServiceCoverageTests
         SyncSelfClearingViewModel.Service = svc;
         SyncSelfClearingViewModel.ThrownException = null;
 
-        await svc.NavigateToAsync<SyncSelfClearingViewModel>(mode: NavigationMode.KeepAlive);
+        await svc.NavigateToAsync<SyncSelfClearingViewModel>(retention: NavigationRetention.KeepAlive);
 
         await svc.NavigateToAsync<TestHomeViewModel>();
 
@@ -727,7 +727,7 @@ public class NavigationServiceCoverageTests
         NavigatedToSelfClearingViewModel.Service = svc;
         NavigatedToSelfClearingViewModel.ThrownException = null;
 
-        await svc.NavigateToAsync<NavigatedToSelfClearingViewModel>(mode: NavigationMode.KeepAlive);
+        await svc.NavigateToAsync<NavigatedToSelfClearingViewModel>(retention: NavigationRetention.KeepAlive);
 
         Assert.NotNull(NavigatedToSelfClearingViewModel.ThrownException);
         Assert.IsType<InvalidOperationException>(NavigatedToSelfClearingViewModel.ThrownException);

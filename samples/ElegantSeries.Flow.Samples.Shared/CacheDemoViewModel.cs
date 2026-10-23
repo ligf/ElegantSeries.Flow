@@ -22,7 +22,7 @@ public sealed partial class CacheDemoViewModel : BaseViewModel
 
     [RelayCommand]
     private Task OpenCounterAsync()
-        => NavigateToAsync<CounterViewModel>(RegionNames.MainRegion, NavigationMode.KeepAlive);
+        => NavigateToAsync<CounterViewModel>(RegionNames.MainRegion, retention: NavigationRetention.KeepAlive);
 
     [RelayCommand]
     private void ClearKeepAliveCache()

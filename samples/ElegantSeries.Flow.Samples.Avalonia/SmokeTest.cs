@@ -30,7 +30,7 @@ internal static class SmokeTest
                 return Fail("Refresh NavigateToAsync<SmokeHomeViewModel> returned false.");
 
             // 3. KeepAlive navigation to a second page.
-            if (!await navigation.NavigateToAsync<SmokeDetailViewModel>(mode: NavigationMode.KeepAlive))
+            if (!await navigation.NavigateToAsync<SmokeDetailViewModel>(retention: NavigationRetention.KeepAlive))
                 return Fail("KeepAlive NavigateToAsync<SmokeDetailViewModel> returned false.");
 
             if (navigation.GetCurrentViewModel() is not SmokeDetailViewModel)

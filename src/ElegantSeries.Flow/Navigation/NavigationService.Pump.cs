@@ -167,7 +167,8 @@ public sealed partial class NavigationService
         public required bool RegisteredInCallback { get; init; }
 
         public Type? TargetType { get; init; }
-        public NavigationMode Mode { get; init; }
+        public NavigationOperation Operation { get; init; }
+        public NavigationRetention Retention { get; init; }
         public object? Parameter { get; init; }
         public bool RefreshIfActive { get; init; }
         public CancellationToken CancellationToken { get; init; }
@@ -214,7 +215,8 @@ public sealed partial class NavigationService
     private async Task<bool> NavigateIntentAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
         string regionName,
         object? parameter,
-        NavigationMode mode,
+        NavigationOperation operation,
+        NavigationRetention retention,
         bool refreshIfActive,
         CancellationToken cancellationToken)
         where TViewModel : INavigationViewModel
@@ -235,7 +237,8 @@ public sealed partial class NavigationService
             Kind = NavigationIntentKind.Navigate,
             RegisteredInCallback = inCallback,
             TargetType = typeof(TViewModel),
-            Mode = mode,
+            Operation = operation,
+            Retention = retention,
             Parameter = parameter,
             RefreshIfActive = refreshIfActive,
             CancellationToken = cancellationToken,
@@ -1857,50 +1860,54 @@ public sealed partial class NavigationService
                         if (skipped++ == 1)
                         {
                             return new NavigationGuardContext(
-                                regionName, entry.ViewModel.GetType(), mode: null, entry.Parameter, isBack: true);
+                                regionName, entry.ViewModel.GetType(), operation: null, retention: null, entry.Parameter, isBack: true);
                         }
                     }
                 }
             }
 
-            return new NavigationGuardContext(regionName, current.ViewModel.GetType(), mode: null, current.Parameter, isBack: true);
+            return new NavigationGuardContext(regionName, current.ViewModel.GetType(), operation: null, retention: null, current.Parameter, isBack: true);
         }
 
-        return new NavigationGuardContext(regionName, candidate.TargetType!, candidate.Mode, candidate.Parameter, isBack: false);
+        return new NavigationGuardContext(regionName, candidate.TargetType!, candidate.Operation, candidate.Retention, candidate.Parameter, isBack: false);
     }
 
     /// <summary>
-    /// A New-mode request for the already-active type with no refresh: a no-op.
+    /// A default (Push + Destroy) request for the already-active type with no refresh: a no-op.
     /// It never starts a departure, whether it arrives at rest or mid-window.
     /// </summary>
     private static bool IsSelfNoOp(NavigationIntent intent, NavigationEntry current)
         => intent.Kind == NavigationIntentKind.Navigate
-            && intent.Mode == NavigationMode.New
+            && intent.Operation == NavigationOperation.Push
+            && intent.Retention == NavigationRetention.Destroy
             && !intent.RefreshIfActive
             && intent.TargetType is not null
             && current.ViewModel.GetType() == intent.TargetType;
 
     /// <summary>
-    /// A New-mode request for the already-active type with refresh requested,
+    /// A default (Push + Destroy) request for the already-active type with refresh requested,
     /// arriving while the page rests or enters: re-activation without leaving.
     /// </summary>
     private static bool IsSelfRefresh(NavigationIntent intent, NavigationEntry current)
         => intent.Kind == NavigationIntentKind.Navigate
-            && intent.Mode == NavigationMode.New
+            && intent.Operation == NavigationOperation.Push
+            && intent.Retention == NavigationRetention.Destroy
             && intent.RefreshIfActive
             && intent.TargetType is not null
             && current.ViewModel.GetType() == intent.TargetType;
 
     /// <summary>
-    /// A winning request that targets the current page itself (any mode whose
-    /// target type is the current page's type, or a refresh) after the page
-    /// already ran From: the departure is undone by reviving the page. Explicit
-    /// stack-surgery modes (Replace/ClearStack/KeepAlive) are NOT self-targeting:
-    /// they express restructuring intent and execute as regular hops.
+    /// A winning request that targets the current page itself (a default
+    /// Push + Destroy request whose target type is the current page's type,
+    /// or a refresh) after the page already ran From: the departure is undone
+    /// by reviving the page. Requests with an explicit operation or retention
+    /// (Replace/Reset/KeepAlive) are NOT self-targeting: they express
+    /// restructuring intent and execute as regular hops.
     /// </summary>
     private static bool IsSelfTargeting(NavigationIntent intent, NavigationEntry current)
         => intent.Kind == NavigationIntentKind.Navigate
-            && intent.Mode == NavigationMode.New
+            && intent.Operation == NavigationOperation.Push
+            && intent.Retention == NavigationRetention.Destroy
             && intent.TargetType is not null
             && current.ViewModel.GetType() == intent.TargetType;
 
@@ -2131,14 +2138,14 @@ public sealed partial class NavigationService
                     previous = stack.Peek();
                     try
                     {
-                        QueueOutgoingDisposal(popped, destroy: popped.Mode != NavigationMode.KeepAlive, work);
+                        QueueOutgoingDisposal(popped, destroy: popped.Retention != NavigationRetention.KeepAlive, work);
                     }
                     catch
                     {
                         // A throwing detach must not orphan the popped
                         // entry's scope: salvage its disposal, then let the
                         // failure fault the hop as in the navigate commit.
-                        SalvageOutgoingDisposal(popped, popped.Mode != NavigationMode.KeepAlive, work);
+                        SalvageOutgoingDisposal(popped, popped.Retention != NavigationRetention.KeepAlive, work);
                         throw;
                     }
 

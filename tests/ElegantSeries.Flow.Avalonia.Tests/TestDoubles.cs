@@ -138,13 +138,13 @@ internal sealed class FakeNavigationService : INavigationService
 
     public bool IsActive<TViewModel>(string regionName = "MainRegion") where TViewModel : INavigationViewModel => false;
 
-    public NavigationMode? GetCurrentMode(string regionName = "MainRegion") => null;
+    public NavigationRetention? GetCurrentRetention(string regionName = "MainRegion") => null;
 
-    public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(string regionName = "MainRegion", NavigationMode mode = NavigationMode.New, bool refreshIfActive = false, CancellationToken cancellationToken = default)
+    public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(string regionName = "MainRegion", NavigationOperation operation = NavigationOperation.Push, NavigationRetention retention = NavigationRetention.Destroy, bool refreshIfActive = false, CancellationToken cancellationToken = default)
         where TViewModel : INavigationViewModel
         => throw new NotImplementedException();
 
-    public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(TParam parameter, string regionName = "MainRegion", NavigationMode mode = NavigationMode.New, bool refreshIfActive = false, CancellationToken cancellationToken = default)
+    public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(TParam parameter, string regionName = "MainRegion", NavigationOperation operation = NavigationOperation.Push, NavigationRetention retention = NavigationRetention.Destroy, bool refreshIfActive = false, CancellationToken cancellationToken = default)
         where TViewModel : INavigationViewModel
         => throw new NotImplementedException();
 

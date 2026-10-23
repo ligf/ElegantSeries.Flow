@@ -5,7 +5,7 @@ using ElegantSeries.Flow.Mvvm;
 namespace ElegantSeries.Flow.Samples.Shared;
 
 /// <summary>
-/// Q4 demo — <see cref="NavigationMode.Replace"/>: the current page is
+/// Q4 demo — <see cref="NavigationOperation.Replace"/>: the current page is
 /// swapped for the target type without growing the stack. Replace targets
 /// a different type because replacing with the already-active type is a
 /// no-op by design. The instance id proves a new page was created.
@@ -16,7 +16,7 @@ public sealed partial class ReplaceDemoViewModel : BaseViewModel
 
     [RelayCommand]
     private Task ReplaceWithTargetAsync()
-        => NavigateToAsync<ReplaceTargetViewModel>(RegionNames.Q4, NavigationMode.Replace);
+        => NavigateToAsync<ReplaceTargetViewModel>(RegionNames.Q4, operation: NavigationOperation.Replace);
 
     [RelayCommand]
     private Task PushTargetAsync()

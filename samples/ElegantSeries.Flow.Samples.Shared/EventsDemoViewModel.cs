@@ -77,7 +77,7 @@ public sealed partial class EventsDemoViewModel : BaseViewModel, INavigationAwar
 
     [RelayCommand]
     private Task PushKeepAliveTempAsync()
-        => NavigateToAsync<CounterViewModel>(RegionNames.SwitchA, NavigationMode.KeepAlive);
+        => NavigateToAsync<CounterViewModel>(RegionNames.SwitchA, retention: NavigationRetention.KeepAlive);
 
     [RelayCommand]
     private void ClearTempCache()
