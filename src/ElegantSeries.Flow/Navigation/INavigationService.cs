@@ -221,6 +221,22 @@ public interface INavigationService
     /// <returns>The current page's retention, or <see langword="null"/> if the region is empty.</returns>
     NavigationRetention? GetCurrentRetention(string regionName = DefaultRegionName);
 
+    /// <summary>
+    /// Gets a snapshot of the specified region's navigation stack: the
+    /// ViewModels of the pages on the stack, ordered bottom-to-top (the
+    /// first page navigated to first, the current page last).
+    /// </summary>
+    /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
+    /// <returns>
+    /// A new list on every call; later navigations do not affect a
+    /// snapshot already returned. Empty when the region has no pages.
+    /// Only the stack is reported — a page that was popped into the
+    /// KeepAlive cache is not part of the stack and is not included.
+    /// Intended for breadcrumbs, diagnostics, and state inspection;
+    /// the framework's internal stack entries are never exposed.
+    /// </returns>
+    IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = DefaultRegionName);
+
     // ─────────────────── Navigation Methods (Async) ───────────────────
 
     /// <summary>

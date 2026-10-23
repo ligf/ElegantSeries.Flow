@@ -398,7 +398,7 @@ Avalonia 示例的 csproj 里开了 `PublishAot=true`，作为框架 AOT 能力�
 | `NavigateToAsync<T>(region?, mode?, refreshIfActive?, cancellationToken?)` | 导航到 ViewModel 类型 |
 | `NavigateToAsync<T, TParam>(param, region?, mode?, refreshIfActive?, cancellationToken?)` | 带强类型参数导航 |
 | `GoBackAsync(region?, cancellationToken?)` | 弹出当前页面 |
-| `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentRetention(region?)` | 查询 |
+| `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentRetention(region?)` / `GetNavigationStack(region?)` | 查询 |
 | `ClearCache(region?)` / `ClearCacheAsync(region?)` | 清空单个 region 的 KeepAlive 缓存 |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | 清空所有 KeepAlive 缓存 |
 | `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` | 事件 |

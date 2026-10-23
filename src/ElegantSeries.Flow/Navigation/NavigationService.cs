@@ -383,6 +383,30 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         }
     }
 
+    /// <inheritdoc />
+    public IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = DefaultRegionName)
+    {
+        regionName = NormalizeRegionName(regionName);
+        using (_stateLock.EnterScope())
+        {
+            if (!_regionStacks.TryGetValue(regionName, out var stack) || stack.Count == 0)
+            {
+                return [];
+            }
+
+            // Stack enumeration is top-first; the snapshot reports
+            // bottom-to-top (navigation order).
+            var snapshot = new INavigationViewModel[stack.Count];
+            var index = stack.Count;
+            foreach (var entry in stack)
+            {
+                snapshot[--index] = entry.ViewModel;
+            }
+
+            return snapshot;
+        }
+    }
+
     // ───────────────────── Cache management (sync) ─────────────────────
 
     /// <inheritdoc />

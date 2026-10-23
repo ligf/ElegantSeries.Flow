@@ -25,4 +25,10 @@
     <ProjectReference Include="..\..\src\ElegantSeries.Flow.Avalonia\ElegantSeries.Flow.Avalonia.csproj" />
   </ItemGroup>
 
+  <!-- Shared host integration scenarios, compiled into every UI test
+       project so all hosts run the identical scenario code. -->
+  <ItemGroup>
+    <Compile Include="..\Shared\HostIntegrationScenarios.cs" Link="HostIntegrationScenarios.cs" />
+  </ItemGroup>
+
 </Project>
