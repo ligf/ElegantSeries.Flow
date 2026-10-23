@@ -4125,6 +4125,30 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task RegionName_PaddedClearCache_ClearsTheTrimmedRegionsCache()
+    {
+        string? clearedRegion = null;
+        using var subscription = _navigationService.SubscribeRegionCacheCleared(r => clearedRegion = r);
+
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>(
+            "CacheRegion", mode: NavigationMode.KeepAlive).WaitAsync(TimeSpan.FromSeconds(10)));
+        var first = _navigationService.GetCurrentViewModel("CacheRegion");
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel>("CacheRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // The padded spelling clears the trimmed region's cache, and the
+        // event reports the normalized name.
+        _navigationService.ClearCache("  CacheRegion  ");
+        Assert.Equal("CacheRegion", clearedRegion);
+
+        // The cached instance is gone: going back to Home creates a new one
+        // instead of reusing the KeepAlive entry.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>("CacheRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.NotSame(first, _navigationService.GetCurrentViewModel("CacheRegion"));
+    }
+
+    [Fact]
     public async Task RegionName_ComparisonIsOrdinalCaseSensitive()
     {
         Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>("CaseRegion")
