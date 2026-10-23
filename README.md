@@ -434,7 +434,7 @@ framework's AOT story (verified by the Native AOT publish smoke test in CI).
 | `NavigateToAsync<T>(region?, operation?, retention?, refreshIfActive?, cancellationToken?)` | Navigate to a ViewModel type |
 | `NavigateToAsync<T, TParam>(param, region?, operation?, retention?, refreshIfActive?, cancellationToken?)` | Navigate with a typed parameter |
 | `GoBackAsync(region?, cancellationToken?)` | Pop the current page |
-| `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentRetention(region?)` | Queries |
+| `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentRetention(region?)` / `GetNavigationStack(region?)` | Queries |
 | `ClearCache(region)` / `ClearCacheAsync(region)` | Clear one region's KeepAlive cache |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | Clear all KeepAlive caches |
 | `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` / `SubscriberError` | Events |
