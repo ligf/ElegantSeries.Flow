@@ -21,13 +21,14 @@ namespace ElegantSeries.Flow.Navigation;
 /// </list>
 /// <para>
 /// A ViewModel <i>instance</i> never appears twice on one region's stack.
-/// Navigating to the default <see cref="NavigationMode.New"/> mode while a page
+/// Navigating with the default operation and retention (<see cref="NavigationOperation.Push"/>
+/// + <see cref="NavigationRetention.Destroy"/>) while a page
 /// of the same <i>type</i> is already the active page is a no-op returning
 /// <see langword="true"/> (or a <i>refresh</i> when <c>refreshIfActive</c> is set —
 /// the active instance's activation callbacks run again with the new parameter,
 /// which is also persisted on the stack entry, without creating a new page
-/// scope). An explicit <see cref="NavigationMode"/> (<c>Replace</c>,
-/// <c>ClearStack</c>, <c>KeepAlive</c>) takes precedence over this shortcut and
+/// scope). An explicit operation or retention (<c>Replace</c>,
+/// <c>Reset</c>, <c>KeepAlive</c>) takes precedence over this shortcut and
 /// is always honored. Navigating to a type whose <i>instance</i> lives deeper
 /// on the region's stack <i>pops back to it</i> — the pages above leave the
 /// stack and the existing instance is re-activated with the new parameter.
@@ -213,11 +214,12 @@ public interface INavigationService
     bool IsActive<TViewModel>(string regionName = DefaultRegionName) where TViewModel : INavigationViewModel;
 
     /// <summary>
-    /// Gets the <see cref="NavigationMode"/> of the current page in the specified region.
+    /// Gets the <see cref="NavigationRetention"/> the current page in the specified
+    /// region was recorded with.
     /// </summary>
     /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
-    /// <returns>The navigation mode, or <see langword="null"/> if the region is empty.</returns>
-    NavigationMode? GetCurrentMode(string regionName = DefaultRegionName);
+    /// <returns>The current page's retention, or <see langword="null"/> if the region is empty.</returns>
+    NavigationRetention? GetCurrentRetention(string regionName = DefaultRegionName);
 
     // ─────────────────── Navigation Methods (Async) ───────────────────
 
@@ -226,7 +228,8 @@ public interface INavigationService
     /// </summary>
     /// <typeparam name="TViewModel">The target ViewModel type.</typeparam>
     /// <param name="regionName">The target region. Defaults to <c>"MainRegion"</c>.</param>
-    /// <param name="mode">The navigation mode. Defaults to <see cref="NavigationMode.New"/>.</param>
+    /// <param name="operation">The stack operation. Defaults to <see cref="NavigationOperation.Push"/>.</param>
+    /// <param name="retention">What happens to the page when it later leaves. Defaults to <see cref="NavigationRetention.Destroy"/>.</param>
     /// <param name="refreshIfActive">
     /// When <see langword="true"/> and a page of type <typeparamref name="TViewModel"/> is
     /// already the active page, the page is <i>refreshed</i> instead of being a silent
@@ -299,7 +302,9 @@ public interface INavigationService
     /// </remarks>
     Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
         string regionName = DefaultRegionName,
-        NavigationMode mode = NavigationMode.New,
+        NavigationOperation operation = NavigationOperation.Push,
+
+        NavigationRetention retention = NavigationRetention.Destroy,
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
         where TViewModel : INavigationViewModel;
@@ -311,7 +316,8 @@ public interface INavigationService
     /// <typeparam name="TParam">The parameter type.</typeparam>
     /// <param name="parameter">The navigation parameter.</param>
     /// <param name="regionName">The target region. Defaults to <c>"MainRegion"</c>.</param>
-    /// <param name="mode">The navigation mode. Defaults to <see cref="NavigationMode.New"/>.</param>
+    /// <param name="operation">The stack operation. Defaults to <see cref="NavigationOperation.Push"/>.</param>
+    /// <param name="retention">What happens to the page when it later leaves. Defaults to <see cref="NavigationRetention.Destroy"/>.</param>
     /// <param name="refreshIfActive">
     /// When <see langword="true"/> and a page of type <typeparamref name="TViewModel"/> is
     /// already the active page, the page is <i>refreshed</i> with
@@ -349,12 +355,14 @@ public interface INavigationService
     /// </exception>
     /// <remarks>
     /// See the window-model remarks on
-    /// <see cref="NavigateToAsync{TViewModel}(string, NavigationMode, bool, CancellationToken)"/>.
+    /// <see cref="NavigateToAsync{TViewModel}(string, NavigationOperation, NavigationRetention, bool, CancellationToken)"/>.
     /// </remarks>
     Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
         TParam parameter,
         string regionName = DefaultRegionName,
-        NavigationMode mode = NavigationMode.New,
+        NavigationOperation operation = NavigationOperation.Push,
+
+        NavigationRetention retention = NavigationRetention.Destroy,
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
         where TViewModel : INavigationViewModel;
@@ -390,7 +398,7 @@ public interface INavigationService
     /// </exception>
     /// <remarks>
     /// A back request participates in the same window model as
-    /// <see cref="NavigateToAsync{TViewModel}(string, NavigationMode, bool, CancellationToken)"/>:
+    /// <see cref="NavigateToAsync{TViewModel}(string, NavigationOperation, NavigationRetention, bool, CancellationToken)"/>:
     /// a <c>NavigateToAsync</c> request registered later in the same page window
     /// supersedes it, and a back request registered during the current page's
     /// <c>OnNavigatedFrom</c> supersedes the request that started the departure.

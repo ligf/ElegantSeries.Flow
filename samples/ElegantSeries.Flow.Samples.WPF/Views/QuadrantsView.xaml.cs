@@ -42,7 +42,7 @@ public partial class QuadrantsView : ElegantSeries.Flow.WPF.Views.BaseView<Quadr
         // Each quadrant navigates independently: one failure must not block
         // the others.
         await TryNavigate(() => navigation.NavigateToAsync<StackDemoViewModel, int>(0, RegionNames.Q1, refreshIfActive: true));
-        await TryNavigate(() => navigation.NavigateToAsync<KeepAliveDemoViewModel>(RegionNames.Q2, NavigationMode.KeepAlive, refreshIfActive: true));
+        await TryNavigate(() => navigation.NavigateToAsync<KeepAliveDemoViewModel>(RegionNames.Q2, retention: NavigationRetention.KeepAlive, refreshIfActive: true));
         await TryNavigate(() => navigation.NavigateToAsync<ParamDemoViewModel, string>("Initial parameter", RegionNames.Q3, refreshIfActive: true));
         await TryNavigate(() => navigation.NavigateToAsync<ReplaceDemoViewModel>(RegionNames.Q4, refreshIfActive: true));
         await TryNavigate(() => navigation.NavigateToAsync<ClearStackDemoViewModel>(RegionNames.Q5, refreshIfActive: true));

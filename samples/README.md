@@ -41,9 +41,9 @@ Both samples demonstrate the library's full feature set:
      instance id proves a popped page is disposed and re-created on revisit;
    - Q2 KeepAlive — counter; the count survives leaving and coming back;
    - Q3 Typed Parameters — strongly-typed parameters pushed per button;
-   - Q4 Replace — `NavigationMode.Replace` swaps the page without growing
+   - Q4 Replace — `NavigationOperation.Replace` swaps the page without growing
      the stack;
-   - Q5 ClearStack — `NavigationMode.ClearStack` resets to one fresh page;
+   - Q5 Reset — `NavigationOperation.Reset` resets to one fresh page;
    - Q6 Refresh — `refreshIfActive: true` re-runs activation on the same
      instance (id stays, activation count grows).
 
@@ -58,7 +58,7 @@ Both samples demonstrate the library's full feature set:
    navigate them.
 5. **Typed parameters** — `NavigateToAsync<DetailViewModel, string>(...)`.
 6. **KeepAlive** — the Counter page is navigated with
-   `NavigationMode.KeepAlive`: increment, navigate away and back, the count is
+   `NavigationRetention.KeepAlive`: increment, navigate away and back, the count is
    preserved because the page (ViewModel + scope) is cached, not disposed.
 7. **Singleton ViewModel** — `MenuViewModel` is registered as singleton to show
    it coexists fine with transient pages: the page scope resolves the shared
@@ -110,7 +110,7 @@ Both samples demonstrate the library's full feature set:
     re-displays the other region's current page; switching to an empty region
     clears the host.
 18. **State inspector** — read-only navigation-state queries for MainRegion:
-    `CanGoBack`, `IsActive<T>`, `GetCurrentMode`, `GetCurrentViewModel`, and
+    `CanGoBack`, `IsActive<T>`, `GetCurrentRetention`, `GetCurrentViewModel`, and
     `IViewLocator.IsRegistered<T>`.
 19. **Navigation events** — `RegionNavigated`, `ViewModelReleased`, and
     `RegionCacheCleared` observed live: push/pop a temp page in region A and

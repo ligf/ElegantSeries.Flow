@@ -15,7 +15,7 @@ ElegantSeries.Flow 提供基于 region 的导航栈、可选的 KeepAlive ViewMo
 ## 功能特性
 
 - **基于 Region 的导航**——每个 region 拥有独立的导航栈（默认 `"MainRegion"`）
-- **导航模式**——`New`、`Replace`、`KeepAlive`、`ClearStack`
+- **导航操作与保留策略**——`Push` / `Replace` / `Reset`，与 `Destroy` / `KeepAlive` 保留策略正交组合
 - **KeepAlive 缓存**——按需复用 ViewModel，跨导航保持状态
 - **强类型参数**——`NavigateToAsync<TViewModel, TParam>(param)`，编译期类型安全
 - **生命周期回调**——`INavigationAware`（`OnNavigatedTo` / `OnNavigatedFrom`），
@@ -88,7 +88,7 @@ public partial class HomeViewModel : BaseViewModel, INavigationAware
     public void OnNavigatedFrom() { /* 页面离开 */ }
 
     public Task GoToDetailAsync()
-        => NavigateToAsync<DetailViewModel, string>("hello", mode: NavigationMode.New);
+        => NavigateToAsync<DetailViewModel, string>("hello");
 }
 ```
 
@@ -113,7 +113,7 @@ var navigation = serviceProvider.GetRequiredService<INavigationService>();
 
 await navigation.NavigateToAsync<HomeViewModel>();                              // 推入新页面
 await navigation.NavigateToAsync<DetailViewModel, string>("hello");             // 带强类型参数
-await navigation.NavigateToAsync<DetailViewModel>("Sidebar", NavigationMode.Replace);
+await navigation.NavigateToAsync<DetailViewModel>("Sidebar", operation: NavigationOperation.Replace);
 await navigation.GoBackAsync();                                                // 弹出
 
 bool canGoBack = navigation.CanGoBack();
@@ -197,14 +197,21 @@ ViewModel 必须实现 `INavigationViewModel`（或从 `BaseViewModel` /
 可运行的 WPF/Avalonia 演示见 [samples](samples/)（多 region 布局、强类型参数、
 KeepAlive、单例 ViewModel）。
 
-## 导航模式
+## 导航操作与保留策略
 
-| 模式 | 行为 |
+每次导航由两个正交的选择组合而成：`NavigationOperation`（对栈做什么）
+与 `NavigationRetention`（新页面日后离开时如何处置）。
+
+| 操作 | 行为 |
 |------|----------|
-| `New` | 把新页面推入 region 栈。上一页被停用。 |
-| `Replace` | 替换当前页面。除非是 `KeepAlive`，旧页面会被释放。 |
-| `KeepAlive` | 复用该 region 里同类型的缓存 ViewModel，而不是新建。 |
-| `ClearStack` | 清空整个栈，用新页面重新开始。 |
+| `Push` | 把新页面推入 region 栈。上一页被停用。 |
+| `Replace` | 替换当前页面。旧页面按它自己的保留策略离开。 |
+| `Reset` | 清空整个栈，用新页面重新开始。 |
+
+| 保留策略 | 行为 |
+|------|----------|
+| `Destroy` | 页面离开时销毁（释放其页面作用域）。 |
+| `KeepAlive` | 页面离开时进缓存；之后以 `KeepAlive` 导航到同类型时复用缓存的 ViewModel，而不是新建。 |
 
 ## Region
 
@@ -342,12 +349,12 @@ ViewModel 自身的 DI 生命周期——即你的 `services.AddXxx<MyViewModel>
 
 ## KeepAlive 缓存
 
-`NavigationMode.KeepAlive` 把页面（ViewModel + 它的页面作用域）按
+`NavigationRetention.KeepAlive` 把页面（ViewModel + 它的页面作用域）按
 `(region, ViewModel 类型)` 缓存在每个 region 里。导航到同类型时复用缓存页
 及其作用域——不建新作用域。
 
 ```csharp
-await navigation.NavigateToAsync<SettingsViewModel>(mode: NavigationMode.KeepAlive);
+await navigation.NavigateToAsync<SettingsViewModel>(retention: NavigationRetention.KeepAlive);
 
 navigation.ClearCache("MainRegion");   // 或 await navigation.ClearCacheAsync("MainRegion");
 navigation.ClearAllCache();            // 或 await navigation.ClearAllCacheAsync();
@@ -391,7 +398,7 @@ Avalonia 示例的 csproj 里开了 `PublishAot=true`，作为框架 AOT 能力�
 | `NavigateToAsync<T>(region?, mode?, refreshIfActive?, cancellationToken?)` | 导航到 ViewModel 类型 |
 | `NavigateToAsync<T, TParam>(param, region?, mode?, refreshIfActive?, cancellationToken?)` | 带强类型参数导航 |
 | `GoBackAsync(region?, cancellationToken?)` | 弹出当前页面 |
-| `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentMode(region?)` | 查询 |
+| `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentRetention(region?)` | 查询 |
 | `ClearCache(region?)` / `ClearCacheAsync(region?)` | 清空单个 region 的 KeepAlive 缓存 |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | 清空所有 KeepAlive 缓存 |
 | `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` | 事件 |

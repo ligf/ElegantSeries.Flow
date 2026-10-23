@@ -302,21 +302,23 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <inheritdoc />
     public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
         string regionName = DefaultRegionName,
-        NavigationMode mode = NavigationMode.New,
+        NavigationOperation operation = NavigationOperation.Push,
+        NavigationRetention retention = NavigationRetention.Destroy,
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
         where TViewModel : INavigationViewModel
-        => NavigateIntentAsync<TViewModel>(regionName, null, mode, refreshIfActive, cancellationToken);
+        => NavigateIntentAsync<TViewModel>(regionName, null, operation, retention, refreshIfActive, cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
         TParam parameter,
         string regionName = DefaultRegionName,
-        NavigationMode mode = NavigationMode.New,
+        NavigationOperation operation = NavigationOperation.Push,
+        NavigationRetention retention = NavigationRetention.Destroy,
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
         where TViewModel : INavigationViewModel
-        => NavigateIntentAsync<TViewModel>(regionName, parameter, mode, refreshIfActive, cancellationToken);
+        => NavigateIntentAsync<TViewModel>(regionName, parameter, operation, retention, refreshIfActive, cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> GoBackAsync(string regionName = DefaultRegionName, CancellationToken cancellationToken = default)
@@ -370,13 +372,13 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     }
 
     /// <inheritdoc />
-    public NavigationMode? GetCurrentMode(string regionName = DefaultRegionName)
+    public NavigationRetention? GetCurrentRetention(string regionName = DefaultRegionName)
     {
         regionName = NormalizeRegionName(regionName);
         using (_stateLock.EnterScope())
         {
             return _regionStacks.TryGetValue(regionName, out var stack) && stack.Count > 0
-                ? stack.Peek().Mode
+                ? stack.Peek().Retention
                 : null;
         }
     }

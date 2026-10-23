@@ -741,12 +741,12 @@ public sealed partial class NavigationService
         // ObjectDisposedException in the callbacks.
         private readonly HashSet<CancellationTokenSource> _settledRetiredCts = new();
 
-        public NavigationEntry(string regionName, INavigationViewModel viewModel, object? parameter, NavigationMode mode, IServiceScope scope, Type? cacheKeyType = null)
+        public NavigationEntry(string regionName, INavigationViewModel viewModel, object? parameter, NavigationRetention retention, IServiceScope scope, Type? cacheKeyType = null)
         {
             RegionName = regionName;
             ViewModel = viewModel;
             Parameter = parameter;
-            Mode = mode;
+            Retention = retention;
             Scope = scope;
             // The static ViewModel type used as the KeepAlive cache key.
             // Defaults to the runtime type; callers that know the static
@@ -769,7 +769,7 @@ public sealed partial class NavigationService
         /// </summary>
         public NavigationService? OwnerService { get; set; }
         public object? Parameter { get; set; }
-        public NavigationMode Mode { get; }
+        public NavigationRetention Retention { get; }
         public IServiceScope Scope { get; }
 
         /// <summary>

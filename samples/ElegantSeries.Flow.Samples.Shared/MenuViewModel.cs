@@ -21,7 +21,7 @@ public sealed partial class MenuViewModel : BaseViewModel
 
     [RelayCommand]
     private Task GoCounterAsync()
-        => NavigateToAsync<CounterViewModel>(RegionNames.MainRegion, NavigationMode.KeepAlive);
+        => NavigateToAsync<CounterViewModel>(RegionNames.MainRegion, retention: NavigationRetention.KeepAlive);
 
     [RelayCommand]
     private Task GoQuadrantsAsync()

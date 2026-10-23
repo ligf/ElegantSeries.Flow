@@ -104,7 +104,8 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     /// </summary>
     /// <typeparam name="TViewModel">The target ViewModel type.</typeparam>
     /// <param name="regionName">The target navigation region. Defaults to <c>"MainRegion"</c>.</param>
-    /// <param name="mode">The navigation mode. Defaults to <see cref="NavigationMode.New"/>.</param>
+    /// <param name="operation">The stack operation. Defaults to <see cref="NavigationOperation.Push"/>.</param>
+    /// <param name="retention">What happens to the page when it later leaves. Defaults to <see cref="NavigationRetention.Destroy"/>.</param>
     /// <param name="refreshIfActive">
     /// When <see langword="true"/> and the target type is already the active page, re-invokes
     /// its activation callbacks with the new parameter instead of being a silent no-op.
@@ -125,11 +126,13 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     /// </returns>
     protected Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
         string regionName = DefaultRegionName,
-        NavigationMode mode = NavigationMode.New,
+        NavigationOperation operation = NavigationOperation.Push,
+
+        NavigationRetention retention = NavigationRetention.Destroy,
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
         where TViewModel : INavigationViewModel
-        => Navigation?.NavigateToAsync<TViewModel>(regionName, mode, refreshIfActive, cancellationToken)
+        => Navigation?.NavigateToAsync<TViewModel>(regionName, operation, retention, refreshIfActive, cancellationToken)
             ?? Task.FromResult(false);
 
     /// <summary>
@@ -139,7 +142,8 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     /// <typeparam name="TParam">The parameter type.</typeparam>
     /// <param name="parameter">The navigation parameter.</param>
     /// <param name="regionName">The target navigation region. Defaults to <c>"MainRegion"</c>.</param>
-    /// <param name="mode">The navigation mode. Defaults to <see cref="NavigationMode.New"/>.</param>
+    /// <param name="operation">The stack operation. Defaults to <see cref="NavigationOperation.Push"/>.</param>
+    /// <param name="retention">What happens to the page when it later leaves. Defaults to <see cref="NavigationRetention.Destroy"/>.</param>
     /// <param name="refreshIfActive">
     /// When <see langword="true"/> and the target type is already the active page, re-invokes
     /// its activation callbacks with the new parameter instead of being a silent no-op.
@@ -161,11 +165,13 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     protected Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
         TParam parameter,
         string regionName = DefaultRegionName,
-        NavigationMode mode = NavigationMode.New,
+        NavigationOperation operation = NavigationOperation.Push,
+
+        NavigationRetention retention = NavigationRetention.Destroy,
         bool refreshIfActive = false,
         CancellationToken cancellationToken = default)
         where TViewModel : INavigationViewModel
-        => Navigation?.NavigateToAsync<TViewModel, TParam>(parameter, regionName, mode, refreshIfActive, cancellationToken)
+        => Navigation?.NavigateToAsync<TViewModel, TParam>(parameter, regionName, operation, retention, refreshIfActive, cancellationToken)
             ?? Task.FromResult(false);
 
     /// <summary>

@@ -8,7 +8,7 @@ namespace ElegantSeries.Flow.Samples.Shared;
 /// <summary>
 /// Read-only navigation-state inspection: <see cref="INavigationService.CanGoBack"/>,
 /// <see cref="INavigationService.IsActive{TViewModel}"/>,
-/// <see cref="INavigationService.GetCurrentMode"/>,
+/// <see cref="INavigationService.GetCurrentRetention"/>,
 /// <see cref="INavigationService.GetCurrentViewModel"/> and
 /// <c>IViewLocator.IsRegistered{T}</c>. Navigate around with the buttons, then
 /// hit Refresh. (The registration flags are supplied by the platform view's
@@ -27,7 +27,7 @@ public sealed partial class StateInspectorViewModel : BaseViewModel, INavigation
     private bool _isCounterActive;
 
     [ObservableProperty]
-    private string _currentMode = "-";
+    private string _currentRetention = "-";
 
     [ObservableProperty]
     private string _currentViewModel = "-";
@@ -59,7 +59,7 @@ public sealed partial class StateInspectorViewModel : BaseViewModel, INavigation
         CanGoBack = navigation?.CanGoBack(RegionNames.MainRegion) ?? false;
         IsHomeActive = navigation?.IsActive<HomeViewModel>(RegionNames.MainRegion) ?? false;
         IsCounterActive = navigation?.IsActive<CounterViewModel>(RegionNames.MainRegion) ?? false;
-        CurrentMode = navigation?.GetCurrentMode(RegionNames.MainRegion)?.ToString() ?? "-";
+        CurrentRetention = navigation?.GetCurrentRetention(RegionNames.MainRegion)?.ToString() ?? "-";
         CurrentViewModel = navigation?.GetCurrentViewModel(RegionNames.MainRegion)?.GetType().Name ?? "-";
     }
 
@@ -69,7 +69,7 @@ public sealed partial class StateInspectorViewModel : BaseViewModel, INavigation
 
     [RelayCommand]
     private Task PushCounterAsync()
-        => NavigateToAsync<CounterViewModel>(RegionNames.MainRegion, NavigationMode.KeepAlive);
+        => NavigateToAsync<CounterViewModel>(RegionNames.MainRegion, retention: NavigationRetention.KeepAlive);
 
     [RelayCommand]
     private Task GoBackAsync() => base.GoBackAsync();

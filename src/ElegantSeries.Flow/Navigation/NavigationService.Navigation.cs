@@ -34,7 +34,8 @@ public sealed partial class NavigationService
     {
         var regionName = intent.RegionName;
         var parameter = intent.Parameter;
-        var mode = intent.Mode;
+        var operation = intent.Operation;
+        var retention = intent.Retention;
         var cancellationToken = intent.CancellationToken;
 
         // The departing entry (already run through From by the pump), if any.
@@ -53,7 +54,7 @@ public sealed partial class NavigationService
         // _navigationLock and the resolution is retried when it went stale. Without
         // this, navigation could push a page whose scope was already disposed.
         var cacheKey = (regionName, typeof(TViewModel));
-        bool useKeepAlive = mode == NavigationMode.KeepAlive;
+        bool useKeepAlive = retention == NavigationRetention.KeepAlive;
 
         IServiceScope? ownedScope = null;
         INavigationViewModel targetVm = null!;
@@ -217,11 +218,11 @@ public sealed partial class NavigationService
                     {
                         // The cached entry was re-validated before acquiring the lock,
                         // so no race adoption is needed here.
-                        // An explicit navigation mode takes precedence over instance reuse:
-                        // ClearStack/Replace express stack surgery or reuse
+                        // An explicit operation takes precedence over instance reuse:
+                        // Reset/Replace express stack surgery or reuse
                         // intent that must not be silently swallowed when the target type is
                         // already the active page.
-                        var existingEntry = (mode == NavigationMode.ClearStack || mode == NavigationMode.Replace)
+                        var existingEntry = (operation is NavigationOperation.Reset or NavigationOperation.Replace)
                             ? null
                             : FindEntryOnStackLocked(stack, targetVm);
                         if (existingEntry is not null)
@@ -237,7 +238,7 @@ public sealed partial class NavigationService
                             while (stack.Count > 0 && !ReferenceEquals(stack.Peek(), existingEntry))
                             {
                                 var old = stack.Pop();
-                                deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                deactivations.Add((old, old.Retention != NavigationRetention.KeepAlive));
                             }
 
                             // Reuse the entry so re-activation carries the new
@@ -265,7 +266,7 @@ public sealed partial class NavigationService
                         }
                         else
                         {
-                            var entryMode = mode == NavigationMode.ClearStack ? NavigationMode.New : mode;
+                            var entryRetention = retention;
                             if (cachedEntry is not null)
                             {
                                 // KeepAlive reuse: share the cached entry's page scope.
@@ -273,7 +274,7 @@ public sealed partial class NavigationService
                                 // Propagate the cache key so a later pop writes it back
                                 // under the same key.
                                 _keepAliveCache.Remove(cacheKey);
-                                pushedEntry = new NavigationEntry(regionName, cachedEntry.ViewModel, parameter, entryMode, cachedEntry.Scope, cachedEntry.CacheKeyType) { OwnerService = this };
+                                pushedEntry = new NavigationEntry(regionName, cachedEntry.ViewModel, parameter, entryRetention, cachedEntry.Scope, cachedEntry.CacheKeyType) { OwnerService = this };
                             }
                             else
                             {
@@ -295,11 +296,11 @@ public sealed partial class NavigationService
                                     ownedScope = null;
                                     // Mutual exclusion: winner moves from cache to stack.
                                     _keepAliveCache.Remove(cacheKey);
-                                    pushedEntry = new NavigationEntry(regionName, winner.ViewModel, parameter, entryMode, winner.Scope, winner.CacheKeyType) { OwnerService = this };
+                                    pushedEntry = new NavigationEntry(regionName, winner.ViewModel, parameter, entryRetention, winner.Scope, winner.CacheKeyType) { OwnerService = this };
                                 }
                                 else
                                 {
-                                    pushedEntry = new NavigationEntry(regionName, targetVm, parameter, entryMode, ownedScope!, typeof(TViewModel)) { OwnerService = this };
+                                    pushedEntry = new NavigationEntry(regionName, targetVm, parameter, entryRetention, ownedScope!, typeof(TViewModel)) { OwnerService = this };
                                     ownedScope = null;
                                     // Mutual exclusion: a fresh KeepAlive entry lives on the
                                     // stack only; it enters the cache when popped (see
@@ -307,17 +308,17 @@ public sealed partial class NavigationService
                                 }
                             }
 
-                            if (mode == NavigationMode.ClearStack)
+                            if (operation == NavigationOperation.Reset)
                             {
                                 while (stack.Count > 0)
                                 {
                                     var old = stack.Pop();
-                                    deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                    deactivations.Add((old, old.Retention != NavigationRetention.KeepAlive));
                                 }
                             }
                             else if (stack.Count > 0)
                             {
-                                if (mode == NavigationMode.Replace)
+                                if (operation == NavigationOperation.Replace)
                                 {
                                     // Remove any deeper duplicate of the target instance first
                                     // (e.g. a Singleton already on this stack): it was inactive,
@@ -331,7 +332,7 @@ public sealed partial class NavigationService
                                     }
 
                                     var old = stack.Pop();
-                                    deactivations.Add((old, old.Mode != NavigationMode.KeepAlive));
+                                    deactivations.Add((old, old.Retention != NavigationRetention.KeepAlive));
                                 }
                                 else
                                 {
@@ -530,7 +531,7 @@ public sealed partial class NavigationService
             }
             else
             {
-                deactivations.Add((popped, popped.Mode != NavigationMode.KeepAlive));
+                deactivations.Add((popped, popped.Retention != NavigationRetention.KeepAlive));
             }
         }
 
@@ -589,7 +590,7 @@ public sealed partial class NavigationService
             }
 
             if (allowTypeMatch
-                && entry.Mode == NavigationMode.KeepAlive
+                && entry.Retention == NavigationRetention.KeepAlive
                 && entry.ViewModel.GetType() == targetType)
             {
                 return entry;

@@ -16,7 +16,7 @@ thread-safe by design.
 ## Features
 
 - **Region-based navigation** — independent navigation stacks per region (`"MainRegion"` by default)
-- **Navigation modes** — `New`, `Replace`, `KeepAlive`, `ClearStack`
+- **Navigation operations & retention** — `Push` / `Replace` / `Reset`, composed with `Destroy` / `KeepAlive` retention
 - **KeepAlive cache** — opt-in ViewModel reuse across navigations
 - **Typed parameters** — `NavigateToAsync<TViewModel, TParam>(param)` with compile-time type safety
 - **Lifecycle callbacks** — `INavigationAware` (`OnNavigatedTo` / `OnNavigatedFrom`),
@@ -94,7 +94,7 @@ public partial class HomeViewModel : BaseViewModel, INavigationAware
     public void OnNavigatedFrom() { /* page is leaving */ }
 
     public Task GoToDetailAsync()
-        => NavigateToAsync<DetailViewModel, string>("hello", mode: NavigationMode.New);
+        => NavigateToAsync<DetailViewModel, string>("hello");
 }
 ```
 
@@ -121,7 +121,7 @@ var navigation = serviceProvider.GetRequiredService<INavigationService>();
 
 await navigation.NavigateToAsync<HomeViewModel>();                              // push a new page
 await navigation.NavigateToAsync<DetailViewModel, string>("hello");             // with a typed parameter
-await navigation.NavigateToAsync<DetailViewModel>("Sidebar", NavigationMode.Replace);
+await navigation.NavigateToAsync<DetailViewModel>("Sidebar", operation: NavigationOperation.Replace);
 await navigation.GoBackAsync();                                                // pop
 
 bool canGoBack = navigation.CanGoBack();
@@ -206,14 +206,22 @@ See [ElegantSeries.Flow.WPF](src/ElegantSeries.Flow.WPF/README.md) and
 and [samples](samples/) for runnable WPF/Avalonia demos (multi-region layout,
 typed parameters, KeepAlive, singleton ViewModel).
 
-## Navigation modes
+## Navigation operations and retention
 
-| Mode | Behavior |
+Every navigation composes two independent choices: a `NavigationOperation`
+(what happens to the stack) and a `NavigationRetention` (what happens to the
+new page when it later leaves).
+
+| Operation | Behavior |
 |------|----------|
-| `New` | Push a new page onto the region stack. The previous page is deactivated. |
-| `Replace` | Replace the current page. The old page is disposed unless it was `KeepAlive`. |
-| `KeepAlive` | Reuse a cached ViewModel of the same type in the region instead of creating a new one. |
-| `ClearStack` | Drop the whole stack and start fresh with the new page. |
+| `Push` | Push a new page onto the region stack. The previous page is deactivated. |
+| `Replace` | Replace the current page. The old page leaves per its own retention. |
+| `Reset` | Drop the whole stack and start fresh with the new page. |
+
+| Retention | Behavior |
+|------|----------|
+| `Destroy` | The page is destroyed when it leaves (its page scope is disposed). |
+| `KeepAlive` | The page is cached when it leaves; a later `KeepAlive` navigation to the same type reuses the cached ViewModel instead of creating a new one. |
 
 ## Regions
 
@@ -366,12 +374,12 @@ shared instance itself survives because it is owned by the root container.
 
 ## KeepAlive cache
 
-`NavigationMode.KeepAlive` keeps the page (ViewModel + its page scope) in a per-region
+`NavigationRetention.KeepAlive` keeps the page (ViewModel + its page scope) in a per-region
 cache keyed by `(region, ViewModel type)`. Navigating to the same type reuses the cached
 page and its scope — no new scope is created.
 
 ```csharp
-await navigation.NavigateToAsync<SettingsViewModel>(mode: NavigationMode.KeepAlive);
+await navigation.NavigateToAsync<SettingsViewModel>(retention: NavigationRetention.KeepAlive);
 
 navigation.ClearCache("MainRegion");   // or await navigation.ClearCacheAsync("MainRegion");
 navigation.ClearAllCache();            // or await navigation.ClearAllCacheAsync();
@@ -423,10 +431,10 @@ framework's AOT story (verified by the Native AOT publish smoke test in CI).
 
 | Member | Description |
 |--------|-------------|
-| `NavigateToAsync<T>(region?, mode?, refreshIfActive?, cancellationToken?)` | Navigate to a ViewModel type |
-| `NavigateToAsync<T, TParam>(param, region?, mode?, refreshIfActive?, cancellationToken?)` | Navigate with a typed parameter |
+| `NavigateToAsync<T>(region?, operation?, retention?, refreshIfActive?, cancellationToken?)` | Navigate to a ViewModel type |
+| `NavigateToAsync<T, TParam>(param, region?, operation?, retention?, refreshIfActive?, cancellationToken?)` | Navigate with a typed parameter |
 | `GoBackAsync(region?, cancellationToken?)` | Pop the current page |
-| `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentMode(region?)` | Queries |
+| `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentRetention(region?)` | Queries |
 | `ClearCache(region)` / `ClearCacheAsync(region)` | Clear one region's KeepAlive cache |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | Clear all KeepAlive caches |
 | `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` / `SubscriberError` | Events |
