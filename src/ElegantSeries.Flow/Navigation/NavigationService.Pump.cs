@@ -114,6 +114,31 @@ public sealed partial class NavigationService
         return window;
     }
 
+    /// <summary>
+    /// Removes the window from <see cref="_windows"/> when the region has
+    /// nothing left to track: the pump flag is released, no intent is
+    /// pending, the window is at rest, and the region's stack is empty (or
+    /// absent). The caller must hold <see cref="_stateLock"/> and must have
+    /// released the window's pump flag in the same critical section, so the
+    /// removal is atomic against <see cref="RegisterIntent"/>: a later
+    /// registration either lands in this window before the removal (and
+    /// keeps it alive) or recreates a fresh window after it. Windows of
+    /// regions with live pages stay — their surfacing and chain state
+    /// belongs to the resting page.
+    /// </summary>
+    private void RemoveWindowIfIdleLocked(RegionWindow window, string regionName)
+    {
+        if (!window.PumpActive
+            && window.PendingIntent is null
+            && window.Phase is WindowPhase.Open or WindowPhase.None
+            && (!_regionStacks.TryGetValue(regionName, out var stack) || stack.Count == 0)
+            && _windows.TryGetValue(regionName, out var current)
+            && ReferenceEquals(current, window))
+        {
+            _windows.Remove(regionName);
+        }
+    }
+
     // ────────────────────────── Intents ──────────────────────────
 
     private enum NavigationIntentKind
@@ -158,9 +183,12 @@ public sealed partial class NavigationService
 
         /// <summary>
         /// Executes one hop for a Navigate intent (resolution + stack surgery +
-        /// disposals). Supplied by the generic registration entry point.
+        /// disposals). Supplied by the generic registration entry point. The
+        /// executing pump passes its own window: the window an intent was
+        /// registered into is not necessarily the window that executes it
+        /// (an idle window may have been reclaimed and recreated in between).
         /// </summary>
-        public Func<NavigationIntent, TransitionWork, List<Exception>, Task<HopResult>>? ExecuteHop { get; init; }
+        public Func<NavigationIntent, RegionWindow, TransitionWork, List<Exception>, Task<HopResult>>? ExecuteHop { get; init; }
 
         public bool IsWithdrawn => CancellationToken.IsCancellationRequested;
 
@@ -201,12 +229,6 @@ public sealed partial class NavigationService
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        RegionWindow window;
-        using (_stateLock.EnterScope())
-        {
-            window = GetOrCreateWindowLocked(regionName);
-        }
-
         var intent = new NavigationIntent
         {
             RegionName = regionName,
@@ -218,7 +240,7 @@ public sealed partial class NavigationService
             RefreshIfActive = refreshIfActive,
             CancellationToken = cancellationToken,
             Fate = inCallback ? null : new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
-            ExecuteHop = (i, work, errors) => ExecuteNavigateHopAsync<TViewModel>(i, work, errors, window),
+            ExecuteHop = (i, w, work, errors) => ExecuteNavigateHopAsync<TViewModel>(i, work, errors, w),
         };
 
         RegisterIntent(intent);
@@ -248,12 +270,6 @@ public sealed partial class NavigationService
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        RegionWindow window;
-        using (_stateLock.EnterScope())
-        {
-            window = GetOrCreateWindowLocked(regionName);
-        }
-
         var intent = new NavigationIntent
         {
             RegionName = regionName,
@@ -261,7 +277,7 @@ public sealed partial class NavigationService
             RegisteredInCallback = inCallback,
             CancellationToken = cancellationToken,
             Fate = inCallback ? null : new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
-            ExecuteHop = (i, work, errors) => ExecuteGoBackHopAsync(i, work, errors, window),
+            ExecuteHop = (i, w, work, errors) => ExecuteGoBackHopAsync(i, work, errors, w),
         };
 
         RegisterIntent(intent);
@@ -581,6 +597,11 @@ public sealed partial class NavigationService
                         window.ChainDepartures = 0;
                         window.ChainTrace.Clear();
                     }
+
+                    if (!restart && leftover is null && !_disposed)
+                    {
+                        RemoveWindowIfIdleLocked(window, regionName);
+                    }
                 }
             }
 
@@ -771,6 +792,7 @@ public sealed partial class NavigationService
                 window.PumpOwner = null;
                 window.ChainDepartures = 0;
                 window.ChainTrace.Clear();
+                RemoveWindowIfIdleLocked(window, regionName);
                 if (phase == WindowPhase.Open
                     && !window.CurrentPageSurfaced
                     && _regionStacks.TryGetValue(regionName, out var stack)
@@ -817,7 +839,7 @@ public sealed partial class NavigationService
             HopResult result;
             try
             {
-                result = await intent.ExecuteHop!(intent, work, errors).ConfigureAwait(false);
+                result = await intent.ExecuteHop!(intent, window, work, errors).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1658,7 +1680,7 @@ public sealed partial class NavigationService
             }
             else
             {
-                result = await final.ExecuteHop!(final, work, departureErrors).ConfigureAwait(false);
+                result = await final.ExecuteHop!(final, window, work, departureErrors).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
