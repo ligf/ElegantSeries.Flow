@@ -5074,6 +5074,42 @@ public class NavigationServiceTests
         NavigationEntry_CancelRetiredOutsideLocks(entry, cts3);
     }
 
+    [Fact]
+    public async Task PopToExisting_ReactivatedEntry_SettlesAndReclaimsRetiredCts()
+    {
+        // The pop-to-existing path reactivates the buried entry through
+        // BeginNewActivation and cancels the retired source through the
+        // settled path: the source must be reclaimable by the next
+        // activation instead of accumulating in the retired list.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncOnlyKeepAliveViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        Assert.True(await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>(
+            mode: NavigationMode.KeepAlive));
+        var entry = GetNavigationEntry(nav, "MainRegion", typeof(SyncOnlyKeepAliveViewModel));
+        Assert.NotNull(entry);
+        var lifecycleProperty = entry.GetType().GetProperty("LifecycleCts",
+            BindingFlags.Public | BindingFlags.Instance)!;
+        var cts1 = (CancellationTokenSource)lifecycleProperty.GetValue(entry)!;
+
+        // Cover the page, then navigate back to its type: pop-to-existing
+        // reactivates the buried entry and retires cts1.
+        Assert.True(await nav.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>(
+            mode: NavigationMode.KeepAlive));
+        Assert.True(cts1.IsCancellationRequested);
+
+        // The next activation (a refresh) reclaims the settled cts1.
+        Assert.True(await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>(
+            refreshIfActive: true));
+        Assert.True(IsCtsDisposed(cts1),
+            "Pop-to-existing retired CTS was not reclaimed after settling");
+    }
+
     private static int GetRetiredCtsCount(
         NavigationService nav, string regionName, Type viewModelType)
     {
