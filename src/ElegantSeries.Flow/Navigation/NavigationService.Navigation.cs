@@ -177,7 +177,7 @@ public sealed partial class NavigationService
         // Retired CTSs to cancel after the navigation lock is released.
         // Cancel() invokes user callbacks synchronously and must not run while
         // holding locks (deadlock risk).
-        List<CancellationTokenSource> retiredCtsList = [];
+        List<(NavigationEntry Entry, CancellationTokenSource Source)> retiredCtsList = [];
 
         try
         {
@@ -246,7 +246,7 @@ public sealed partial class NavigationService
                             // The retired CTS is cancelled after locks are released.
                             var target = stack.Peek();
                             target.Parameter = parameter;
-                            retiredCtsList.Add(target.BeginNewActivation());
+                            retiredCtsList.Add((target, target.BeginNewActivation()));
                             reactivatedEntry = target;
 
                             success = true;
@@ -390,9 +390,9 @@ public sealed partial class NavigationService
         // Cancel retired CTSs outside the lock: Cancel() invokes user callbacks
         // synchronously and must not run while holding locks (deadlock risk).
         // Exceptions are swallowed; the navigation state was already committed.
-        foreach (var cts in retiredCtsList)
+        foreach (var (entry, cts) in retiredCtsList)
         {
-            NavigationEntry.CancelOutsideLocks(cts);
+            entry.CancelRetiredOutsideLocks(cts);
         }
 
         // A scope resolved but never pushed is owned by nobody: release it best-effort

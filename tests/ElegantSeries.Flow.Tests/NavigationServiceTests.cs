@@ -4938,7 +4938,7 @@ public class NavigationServiceTests
             "BeginNewActivation disposed a CTS before its owner cancelled it");
 
         // After the owner cancels cts1, the next activation may dispose it.
-        NavigationEntry_CancelOutsideLocks(cts1);
+        NavigationEntry_CancelRetiredOutsideLocks(entry!, cts1);
         Assert.True(cts1.IsCancellationRequested);
 
         var cts3 = (CancellationTokenSource)beginMethod.Invoke(entry, null)!;
@@ -4947,14 +4947,14 @@ public class NavigationServiceTests
         Assert.False(IsCtsDisposed(cts2));
 
         // Cleanup.
-        NavigationEntry_CancelOutsideLocks(cts2);
-        NavigationEntry_CancelOutsideLocks(cts3);
+        NavigationEntry_CancelRetiredOutsideLocks(entry!, cts2);
+        NavigationEntry_CancelRetiredOutsideLocks(entry!, cts3);
     }
 
     [Fact]
     public async Task ExitInFlightLifecycle_DoesNotDisposeUncancelledCts()
     {
-        // ExitInFlightLifecycle must apply the same IsCancellationRequested
+        // ExitInFlightLifecycle must apply the same settled-cancellation
         // gate as BeginNewActivation: when the last in-flight callback exits,
         // it must not dispose a CTS whose owner has not yet cancelled it.
         var services = new ServiceCollection();
@@ -4992,11 +4992,86 @@ public class NavigationServiceTests
             "ExitInFlightLifecycle disposed a CTS before its owner cancelled it");
 
         // After the owner cancels, a later activation reclaims it.
-        NavigationEntry_CancelOutsideLocks(cts1);
+        NavigationEntry_CancelRetiredOutsideLocks(entry!, cts1);
         var cts2 = (CancellationTokenSource)beginMethod.Invoke(entry, null)!;
         Assert.True(IsCtsDisposed(cts1));
 
-        NavigationEntry_CancelOutsideLocks(cts2);
+        NavigationEntry_CancelRetiredOutsideLocks(entry!, cts2);
+    }
+
+    [Fact]
+    public async Task RetiredCts_IsNotDisposedWhileItsCancelIsStillRunningCallbacks()
+    {
+        // IsCancellationRequested turns true the moment Cancel() begins,
+        // while user callbacks are still executing inside it. A reclaim pass
+        // on another thread must not dispose the source in that window —
+        // disposal is gated on the cancellation having settled (Cancel()
+        // returned), not on it having been requested.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncOnlyKeepAliveViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        var result = await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>();
+        Assert.True(result);
+
+        var entry = GetNavigationEntry(nav, "MainRegion", typeof(SyncOnlyKeepAliveViewModel));
+        Assert.NotNull(entry);
+
+        var entryType = entry.GetType();
+        var beginMethod = entryType.GetMethod("BeginNewActivation",
+            BindingFlags.Public | BindingFlags.Instance)!;
+        var cancelRetiredMethod = entryType.GetMethod("CancelRetiredOutsideLocks",
+            BindingFlags.Public | BindingFlags.Instance)!;
+
+        // Retire the initial CTS; its owner cancels it below.
+        var cts1 = (CancellationTokenSource)beginMethod.Invoke(entry, null)!;
+
+        // A user callback that blocks inside Cancel() and then uses its
+        // token: disposing the source mid-callback surfaces as an
+        // ObjectDisposedException here.
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackFinished = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        cts1.Token.Register(() =>
+        {
+            callbackEntered.TrySetResult();
+            releaseCallback.Task.GetAwaiter().GetResult();
+            try
+            {
+                using var registration = cts1.Token.Register(static () => { });
+                callbackFinished.TrySetResult(null);
+            }
+            catch (Exception ex)
+            {
+                callbackFinished.TrySetResult(ex);
+            }
+        });
+
+        // The owner cancels on a background thread; Cancel() blocks in the
+        // callback above.
+        var cancelTask = Task.Run(() => cancelRetiredMethod.Invoke(entry, new object[] { cts1 }));
+        await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(cts1.IsCancellationRequested);
+
+        // While the cancel is in flight, another activation runs its reclaim
+        // pass: cts1 is requested but not settled, so it must survive.
+        var cts2 = (CancellationTokenSource)beginMethod.Invoke(entry, null)!;
+        Assert.False(IsCtsDisposed(cts1),
+            "Disposed a retired CTS while its Cancel() was still running callbacks");
+
+        releaseCallback.TrySetResult();
+        await cancelTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Null(await callbackFinished.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // Settled now: the next activation reclaims cts1.
+        var cts3 = (CancellationTokenSource)beginMethod.Invoke(entry, null)!;
+        Assert.True(IsCtsDisposed(cts1));
+
+        // Cleanup.
+        NavigationEntry_CancelRetiredOutsideLocks(entry, cts2);
+        NavigationEntry_CancelRetiredOutsideLocks(entry, cts3);
     }
 
     private static int GetRetiredCtsCount(
@@ -5063,12 +5138,11 @@ public class NavigationServiceTests
         }
     }
 
-    private static void NavigationEntry_CancelOutsideLocks(CancellationTokenSource cts)
+    private static void NavigationEntry_CancelRetiredOutsideLocks(object entry, CancellationTokenSource cts)
     {
-        var method = typeof(NavigationService).GetNestedType("NavigationEntry",
-            BindingFlags.NonPublic)!.GetMethod("CancelOutsideLocks",
-            BindingFlags.Public | BindingFlags.Static)!;
-        method.Invoke(null, new object[] { cts });
+        var method = entry.GetType().GetMethod("CancelRetiredOutsideLocks",
+            BindingFlags.Public | BindingFlags.Instance)!;
+        method.Invoke(entry, new object[] { cts });
     }
 
     private sealed class SyncOnlyKeepAliveViewModel : NavigationViewModelBase, INavigationAware
