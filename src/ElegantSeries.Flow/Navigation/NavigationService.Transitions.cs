@@ -733,6 +733,14 @@ public sealed partial class NavigationService
         private TaskCompletionSource? _inFlightGate;
         private List<CancellationTokenSource> _retiredCts = new();
 
+        // Retired sources whose cancellation has settled (their Cancel()
+        // call has returned). A retired source is disposed only once it is
+        // in this set: IsCancellationRequested turns true the moment Cancel()
+        // begins, while user callbacks are still executing inside it, and
+        // disposing the source underneath them would surface
+        // ObjectDisposedException in the callbacks.
+        private readonly HashSet<CancellationTokenSource> _settledRetiredCts = new();
+
         public NavigationEntry(string regionName, INavigationViewModel viewModel, object? parameter, NavigationMode mode, IServiceScope scope, Type? cacheKeyType = null)
         {
             RegionName = regionName;
@@ -791,11 +799,11 @@ public sealed partial class NavigationService
         /// callbacks which may reenter the navigation service; calling it while
         /// holding the navigation/state locks risks deadlock. The caller must
         /// cancel the returned source after releasing all locks via
-        /// <see cref="CancelOutsideLocks"/>.
+        /// <see cref="CancelRetiredOutsideLocks"/>.
         /// In-flight callbacks from the previous cycle keep running under their own
         /// token and remain tracked. Retired sources are disposed when the
         /// in-flight count drops to zero, or on a later activation (when the
-        /// count is zero) once they have been cancelled.
+        /// count is zero) once their cancellation has settled.
         /// </summary>
         /// <returns>The retired cancellation token source, to be cancelled by the
         /// caller after releasing locks.</returns>
@@ -809,26 +817,29 @@ public sealed partial class NavigationService
                 LifecycleCts = new CancellationTokenSource();
 
                 // When no callbacks are in flight, dispose previously
-                // retired sources that have already been cancelled. Without
+                // retired sources whose cancellation has settled. Without
                 // this, entries whose ViewModel has no lifecycle callbacks
                 // at all would accumulate retired sources unboundedly,
                 // because ExitInFlightLifecycle is never called for them.
-                // Only sources with IsCancellationRequested == true are
-                // disposed: the owning thread cancels the retired source
-                // outside locks via CancelOutsideLocks, and a concurrent
-                // activation must not dispose a source before its owner has
-                // cancelled it — that would lose the cancel signal via
-                // ObjectDisposedException. A not-yet-cancelled source is left
-                // in the list and picked up by a later activation.
+                // Only settled sources are disposed: the owning thread
+                // cancels the retired source outside locks via
+                // CancelRetiredOutsideLocks, and a concurrent activation
+                // must not dispose a source before its owner has cancelled
+                // it — that would lose the cancel signal via
+                // ObjectDisposedException — nor while that Cancel() is
+                // still executing user callbacks. An unsettled source is
+                // left in the list and picked up by a later activation.
                 if (_inFlightCount == 0 && _retiredCts.Count > 0)
                 {
                     for (int i = _retiredCts.Count - 1; i >= 0; i--)
                     {
-                        if (_retiredCts[i].IsCancellationRequested)
+                        var retiredCandidate = _retiredCts[i];
+                        if (retiredCandidate.IsCancellationRequested && _settledRetiredCts.Contains(retiredCandidate))
                         {
                             toDispose ??= new List<CancellationTokenSource>();
-                            toDispose.Add(_retiredCts[i]);
+                            toDispose.Add(retiredCandidate);
                             _retiredCts.RemoveAt(i);
+                            _settledRetiredCts.Remove(retiredCandidate);
                         }
                     }
                 }
@@ -847,6 +858,23 @@ public sealed partial class NavigationService
             }
 
             return oldCts;
+        }
+
+        /// <summary>
+        /// Cancels a source retired by <see cref="BeginNewActivation"/> outside
+        /// of any navigation locks, and records its cancellation as settled
+        /// once <c>Cancel()</c> has returned. Retired sources are reclaimed
+        /// (disposed) only after settling: <c>IsCancellationRequested</c>
+        /// alone does not show that the user callbacks <c>Cancel()</c> runs
+        /// synchronously have finished executing.
+        /// </summary>
+        public void CancelRetiredOutsideLocks(CancellationTokenSource retired)
+        {
+            CancelOutsideLocks(retired);
+            lock (_inFlightLock)
+            {
+                _settledRetiredCts.Add(retired);
+            }
         }
 
         /// <summary>
@@ -904,19 +932,22 @@ public sealed partial class NavigationService
                 }
                 if (_inFlightCount == 0 && _retiredCts.Count > 0)
                 {
-                    // Only reclaim sources that have already been cancelled.
+                    // Only reclaim sources whose cancellation has settled.
                     // A concurrent BeginNewActivation may have just retired a
                     // source whose owner has not yet cancelled it outside the
                     // locks; disposing it here would lose the cancel signal
-                    // via ObjectDisposedException. Leave uncancelled sources
-                    // in the list for a later activation to reclaim.
+                    // via ObjectDisposedException. A source whose Cancel() is
+                    // still executing user callbacks is likewise left in the
+                    // list for a later exit or activation to reclaim.
                     for (int i = _retiredCts.Count - 1; i >= 0; i--)
                     {
-                        if (_retiredCts[i].IsCancellationRequested)
+                        var retiredCandidate = _retiredCts[i];
+                        if (retiredCandidate.IsCancellationRequested && _settledRetiredCts.Contains(retiredCandidate))
                         {
                             retiredToDispose ??= new List<CancellationTokenSource>();
-                            retiredToDispose.Add(_retiredCts[i]);
+                            retiredToDispose.Add(retiredCandidate);
                             _retiredCts.RemoveAt(i);
+                            _settledRetiredCts.Remove(retiredCandidate);
                         }
                     }
                 }

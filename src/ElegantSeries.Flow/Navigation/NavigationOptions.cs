@@ -75,6 +75,11 @@ public sealed class NavigationOptions
     /// and the service remains usable.
     /// </para>
     /// <para>
+    /// The limit is judged after the leave guard: the guard is consulted for
+    /// the hop that trips the limit as for any other hop, and a hop the guard
+    /// vetoes neither consumes the budget nor triggers the stop.
+    /// </para>
+    /// <para>
     /// Default is 10. Legitimate redirect chains (parameter checks, auth gates) are
     /// short; raise this only for deep wizard-style flows.
     /// </para>

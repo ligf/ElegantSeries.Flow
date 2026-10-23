@@ -1247,7 +1247,7 @@ public sealed partial class NavigationService
         }
 
         var retired = entry.BeginNewActivation();
-        NavigationEntry.CancelOutsideLocks(retired);
+        entry.CancelRetiredOutsideLocks(retired);
 
         // A disposal that collected the entry's sources while the renewal
         // was swapping must not leave the fresh source live: cancel it too.
@@ -1379,7 +1379,11 @@ public sealed partial class NavigationService
         // actor in the loop. A hop whose candidate came from outside code
         // restarts the accounting instead. The hop that would exceed the budget
         // never starts, so the current page is not run through From (or through
-        // a refresh's To) and stays intact.
+        // a refresh's To) and stays intact. The judgment sits after the guard:
+        // the guard is consulted for the tripping hop as for any other, a
+        // vetoed hop neither consumes nor resets the budget, and a live
+        // outside request that arrives while the guard runs is still in the
+        // slot for the rescue below.
         int maxChain = _options.MaxNavigationChainLength;
         bool overLimit;
         using (_stateLock.EnterScope())
@@ -1950,7 +1954,7 @@ public sealed partial class NavigationService
 
         if (retiredCts is not null)
         {
-            NavigationEntry.CancelOutsideLocks(retiredCts);
+            current.CancelRetiredOutsideLocks(retiredCts);
         }
 
         var errors = new List<Exception>();
@@ -2034,7 +2038,7 @@ public sealed partial class NavigationService
 
         if (retiredCts is not null)
         {
-            NavigationEntry.CancelOutsideLocks(retiredCts);
+            current.CancelRetiredOutsideLocks(retiredCts);
         }
 
         await RunToCallbacksAsync(current, parameter, gate, errors).ConfigureAwait(false);
@@ -2149,7 +2153,7 @@ public sealed partial class NavigationService
 
         if (retiredCts is not null)
         {
-            NavigationEntry.CancelOutsideLocks(retiredCts);
+            previous.CancelRetiredOutsideLocks(retiredCts);
         }
 
         await RunDisposalActionsAsync(work).ConfigureAwait(false);

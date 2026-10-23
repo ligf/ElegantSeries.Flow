@@ -28,6 +28,16 @@ namespace ElegantSeries.Flow.Navigation;
 /// <see cref="INavigationAware.OnNavigatedFrom"/> or from the guard itself —
 /// supersedes the pending request but does not re-run the guard.
 /// </para>
+/// <para>
+/// The guard may wait indefinitely — for example on user confirmation — and
+/// the navigation service imposes no timeout on it. While a guard is
+/// running, the region's navigation is blocked: a later request supersedes
+/// the pending one but does not interrupt the running guard. The region
+/// unblocks when the guard returns, when the request that started the
+/// departure is cancelled, or when the service is disposed. A guard that
+/// waits on external events should therefore observe the supplied
+/// cancellation token and apply its own timeout where one is needed.
+/// </para>
 /// </remarks>
 public interface INavigationGuard
 {
@@ -60,6 +70,13 @@ public interface INavigationGuard
 /// lock to avoid deadlocks, making it safe to display confirmation dialogs or perform
 /// async I/O. Returning <see langword="false"/> cancels the navigation and the current
 /// page remains active. A thrown exception propagates to the navigation caller.
+/// </para>
+/// <para>
+/// Also like <see cref="INavigationGuard"/>, the guard may wait indefinitely:
+/// the service imposes no timeout, and a later request supersedes the pending
+/// one without interrupting the running guard. The region unblocks when the
+/// guard returns, when the starting request is cancelled, or when the
+/// service is disposed.
 /// </para>
 /// </remarks>
 public interface INavigationGuardWithContext
