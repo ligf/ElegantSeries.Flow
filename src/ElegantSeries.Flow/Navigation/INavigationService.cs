@@ -75,6 +75,14 @@ namespace ElegantSeries.Flow.Navigation;
 /// wrapped in <see cref="AggregateException"/>.
 /// </para>
 /// <para>
+/// <b>Region names:</b> every <c>regionName</c> parameter on this interface is
+/// normalized the same way — surrounding whitespace is trimmed, and names are
+/// compared ordinally (case-sensitive), as befits programmatic identifiers.
+/// <c>" MainRegion "</c> and <c>"MainRegion"</c> address the same region;
+/// <c>"mainregion"</c> is a different one. Null, empty, and whitespace-only
+/// names are rejected with <see cref="ArgumentException"/>.
+/// </para>
+/// <para>
 /// This interface does not extend <see cref="IDisposable"/> or
 /// <see cref="IAsyncDisposable"/>: the service is typically a singleton owned by the
 /// DI container, which disposes it. To dispose explicitly (e.g. in tests), cast to

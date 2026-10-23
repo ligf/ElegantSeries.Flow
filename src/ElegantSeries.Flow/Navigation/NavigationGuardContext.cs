@@ -31,7 +31,7 @@ public sealed class NavigationGuardContext
         bool isBack)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
-        RegionName = regionName;
+        RegionName = regionName.Trim();
         TargetViewModelType = targetViewModelType ?? throw new ArgumentNullException(nameof(targetViewModelType));
         Mode = mode;
         Parameter = parameter;

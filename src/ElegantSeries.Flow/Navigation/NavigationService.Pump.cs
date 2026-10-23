@@ -219,7 +219,7 @@ public sealed partial class NavigationService
         CancellationToken cancellationToken)
         where TViewModel : INavigationViewModel
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
+        regionName = NormalizeRegionName(regionName);
         bool inCallback = CurrentOwnLifecycleEntry is not null;
         if (_disposed)
         {
@@ -260,7 +260,7 @@ public sealed partial class NavigationService
     /// </summary>
     private async Task<bool> GoBackIntentAsync(string regionName, CancellationToken cancellationToken)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
+        regionName = NormalizeRegionName(regionName);
         bool inCallback = CurrentOwnLifecycleEntry is not null;
         if (_disposed)
         {

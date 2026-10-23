@@ -4129,6 +4129,73 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task RegionName_SurroundingWhitespace_AddressesSameRegionAcrossApis()
+    {
+        // Names are trimmed at the API boundary: every spelling of the
+        // same trimmed name addresses the same region.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>("  PaddedRegion  ")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel("PaddedRegion"));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel(" PaddedRegion "));
+
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel>("PaddedRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(_navigationService.CanGoBack("\tPaddedRegion "));
+        Assert.True(await _navigationService.GoBackAsync(" PaddedRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel("PaddedRegion"));
+    }
+
+    [Fact]
+    public async Task RegionName_PaddedClearCache_ClearsTheTrimmedRegionsCache()
+    {
+        string? clearedRegion = null;
+        using var subscription = _navigationService.SubscribeRegionCacheCleared(r => clearedRegion = r);
+
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>("CacheRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(
+            "CacheRegion", mode: NavigationMode.KeepAlive).WaitAsync(TimeSpan.FromSeconds(10)));
+        var first = _navigationService.GetCurrentViewModel("CacheRegion");
+
+        // Pop the KeepAlive page into the cache, then clear it through a
+        // padded spelling: the trimmed region's cache is cleared and the
+        // event reports the normalized name.
+        Assert.True(await _navigationService.GoBackAsync("CacheRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        _navigationService.ClearCache("  CacheRegion  ");
+        Assert.Equal("CacheRegion", clearedRegion);
+
+        // The cached instance is gone: navigating there again creates a
+        // new one instead of reusing the KeepAlive entry.
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(
+            "CacheRegion", mode: NavigationMode.KeepAlive).WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.NotSame(first, _navigationService.GetCurrentViewModel("CacheRegion"));
+    }
+
+    [Fact]
+    public async Task RegionName_ComparisonIsOrdinalCaseSensitive()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>("CaseRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel("CaseRegion"));
+        Assert.Null(_navigationService.GetCurrentViewModel("caseregion"));
+        Assert.Null(_navigationService.GetCurrentViewModel("CASEREGION"));
+    }
+
+    [Fact]
+    public async Task RegionName_WhitespaceOnly_StillRejected()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await _navigationService.NavigateToAsync<TestHomeViewModel>("   "));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await _navigationService.GoBackAsync(" "));
+        Assert.Throws<ArgumentException>(() => _navigationService.GetCurrentViewModel("\t"));
+        Assert.Throws<ArgumentException>(() => _navigationService.ClearCache("  "));
+    }
+
+    [Fact]
     public async Task Window_GoBackOnUnusedRegion_WindowIsReclaimed()
     {
         var nav = (NavigationService)_navigationService;
