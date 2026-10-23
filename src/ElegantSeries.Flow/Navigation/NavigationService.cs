@@ -322,12 +322,28 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     public Task<bool> GoBackAsync(string regionName = DefaultRegionName, CancellationToken cancellationToken = default)
         => GoBackIntentAsync(regionName, cancellationToken);
 
+    /// <summary>
+    /// Normalizes a caller-supplied region name at the API boundary:
+    /// surrounding whitespace is trimmed, and the name is then compared
+    /// ordinally (case-sensitive) everywhere — region names are
+    /// programmatic identifiers, following the .NET convention for
+    /// identifier strings. Null, empty, and whitespace-only names are
+    /// rejected. Every public entry point that accepts a region name
+    /// funnels through here, so all spellings of the same trimmed name
+    /// address the same region.
+    /// </summary>
+    private static string NormalizeRegionName(string regionName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
+        return regionName.Trim();
+    }
+
     // ───────────────────────── Queries (sync) ─────────────────────────
 
     /// <inheritdoc />
     public bool CanGoBack(string regionName = DefaultRegionName)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
+        regionName = NormalizeRegionName(regionName);
         using (_stateLock.EnterScope())
         {
             return _regionStacks.TryGetValue(regionName, out var stack) && stack.Count > 1;
@@ -337,7 +353,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <inheritdoc />
     public INavigationViewModel? GetCurrentViewModel(string regionName = DefaultRegionName)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
+        regionName = NormalizeRegionName(regionName);
         using (_stateLock.EnterScope())
         {
             return _regionStacks.TryGetValue(regionName, out var stack) && stack.Count > 0
@@ -349,14 +365,14 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <inheritdoc />
     public bool IsActive<TViewModel>(string regionName = DefaultRegionName) where TViewModel : INavigationViewModel
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
+        regionName = NormalizeRegionName(regionName);
         return GetCurrentViewModel(regionName) is TViewModel;
     }
 
     /// <inheritdoc />
     public NavigationMode? GetCurrentMode(string regionName = DefaultRegionName)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
+        regionName = NormalizeRegionName(regionName);
         using (_stateLock.EnterScope())
         {
             return _regionStacks.TryGetValue(regionName, out var stack) && stack.Count > 0
@@ -370,7 +386,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <inheritdoc />
     public void ClearCache(string regionName)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
+        regionName = NormalizeRegionName(regionName);
         if (_disposed) return;
         if (CurrentOwnLifecycleEntry is not null)
             throw new InvalidOperationException(
@@ -489,7 +505,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <inheritdoc />
     public async ValueTask ClearCacheAsync(string regionName)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(regionName);
+        regionName = NormalizeRegionName(regionName);
         if (_disposed) return;
         if (CurrentOwnLifecycleEntry is not null)
             throw new InvalidOperationException(

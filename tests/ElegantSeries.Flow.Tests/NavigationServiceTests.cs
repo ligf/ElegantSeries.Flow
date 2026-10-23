@@ -4107,6 +4107,46 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task RegionName_SurroundingWhitespace_AddressesSameRegionAcrossApis()
+    {
+        // Names are trimmed at the API boundary: every spelling of the
+        // same trimmed name addresses the same region.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>("  PaddedRegion  ")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel("PaddedRegion"));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel(" PaddedRegion "));
+
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel>("PaddedRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(_navigationService.CanGoBack("\tPaddedRegion "));
+        Assert.True(await _navigationService.GoBackAsync(" PaddedRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel("PaddedRegion"));
+    }
+
+    [Fact]
+    public async Task RegionName_ComparisonIsOrdinalCaseSensitive()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>("CaseRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel("CaseRegion"));
+        Assert.Null(_navigationService.GetCurrentViewModel("caseregion"));
+        Assert.Null(_navigationService.GetCurrentViewModel("CASEREGION"));
+    }
+
+    [Fact]
+    public async Task RegionName_WhitespaceOnly_StillRejected()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await _navigationService.NavigateToAsync<TestHomeViewModel>("   "));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await _navigationService.GoBackAsync(" "));
+        Assert.Throws<ArgumentException>(() => _navigationService.GetCurrentViewModel("\t"));
+        Assert.Throws<ArgumentException>(() => _navigationService.ClearCache("  "));
+    }
+
+    [Fact]
     public async Task Window_GoBackOnUnusedRegion_WindowIsReclaimed()
     {
         var nav = (NavigationService)_navigationService;

@@ -126,7 +126,7 @@ public class NavigationHost : ContentControl, IDisposable
     /// <exception cref="ObjectDisposedException">The host has been disposed.</exception>
     public string RegionName
     {
-        get => (string?)GetValue(RegionNameProperty) ?? DefaultRegionName;
+        get => ((string?)GetValue(RegionNameProperty) ?? DefaultRegionName).Trim();
         set
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -225,7 +225,9 @@ public class NavigationHost : ContentControl, IDisposable
     {
         // Runs on the UI thread (dependency properties have thread affinity).
         var host = (NavigationHost)d;
-        host._regionName = (string?)e.NewValue ?? DefaultRegionName;
+        // Mirror the service's region-name normalization (trimmed, ordinal)
+        // so the event filter compares the same spelling the service uses.
+        host._regionName = ((string?)e.NewValue ?? DefaultRegionName).Trim();
         host._controller.Refresh();
     }
 
