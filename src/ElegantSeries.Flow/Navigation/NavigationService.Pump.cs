@@ -904,6 +904,7 @@ public sealed partial class NavigationService
 
         var toErrors = new List<Exception>();
         var toTask = RunToCallbacksAsync(entry, entry.Parameter, gate, toErrors);
+        NavigationIntent? enteringClaimedIntent = null;
         if (!toTask.IsCompleted)
         {
             // Close-request interrupt: a request registered while this page is
@@ -921,6 +922,18 @@ public sealed partial class NavigationService
             // Falling through with the activation still in flight would raise
             // RegionNavigated early and read the runner's error list while the
             // runner is still appending to it.
+            //
+            // The wake is judged and claimed in one critical section, before
+            // anything is cancelled: a withdrawn or absent intent voids the
+            // wake; a self no-op intent is consumed in place (its fate
+            // completes true) without touching the activation token — the page
+            // is not leaving, so its activation must not observe a
+            // cancellation; any other intent is claimed out of the slot and
+            // becomes this window's committed departure candidate. Only a
+            // claimed candidate cancels the token: from the claim on, slot
+            // withdrawal can no longer remove it, so a cancellation of the
+            // page can never be left behind by a request that went away.
+            NavigationIntent? claimedIntent = null;
             while (!toTask.IsCompleted)
             {
                 Task? signal;
@@ -958,7 +971,31 @@ public sealed partial class NavigationService
                     break;
                 }
 
-                if (!HasLivePendingIntent(window))
+                NavigationIntent? consumedNoOp = null;
+                using (_stateLock.EnterScope())
+                {
+                    var pending = window.PendingIntent;
+                    if (pending is { IsWithdrawn: false })
+                    {
+                        window.PendingIntent = null;
+                        if (IsSelfNoOp(pending, entry))
+                        {
+                            consumedNoOp = pending;
+                        }
+                        else
+                        {
+                            claimedIntent = pending;
+                        }
+                    }
+                }
+
+                if (consumedNoOp is not null)
+                {
+                    CompleteIntent(consumedNoOp, result: true);
+                    continue;
+                }
+
+                if (claimedIntent is null)
                 {
                     continue;
                 }
@@ -973,6 +1010,10 @@ public sealed partial class NavigationService
 
                 break;
             }
+
+            // A claimed departure candidate is run by the departure step
+            // below; on the disposal exit its fate is completed there.
+            enteringClaimedIntent = claimedIntent;
         }
 
         if (toTask.IsCompleted)
@@ -1024,8 +1065,19 @@ public sealed partial class NavigationService
 
         if (_disposed)
         {
+            if (enteringClaimedIntent is not null)
+            {
+                CompleteIntent(enteringClaimedIntent, result: false);
+            }
+
             CompleteEnteredIntent();
             return false;
+        }
+
+        if (enteringClaimedIntent is not null)
+        {
+            CompleteEnteredIntent();
+            return await RunDepartureAsync(window, regionName, enteringClaimedIntent).ConfigureAwait(false);
         }
 
         bool hasPending;
@@ -1178,6 +1230,26 @@ public sealed partial class NavigationService
         }
     }
 
+    /// <summary>
+    /// Repairs the activation of a page that is staying after all: when the
+    /// departure was chained from an interrupted entering step, the page's
+    /// lifecycle source was already cancelled to close its window. Renew it
+    /// so the page's later callbacks receive a live token. (A token the page
+    /// itself captured stays cancelled — cancellation cannot be undone.)
+    /// For departures that start from a resting page the source has not been
+    /// cancelled when the page-stays exits run, so this is a no-op there.
+    /// </summary>
+    private void RenewActivationIfCancelled(NavigationEntry entry)
+    {
+        if (!entry.LifecycleCts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        var retired = entry.BeginNewActivation();
+        NavigationEntry.CancelOutsideLocks(retired);
+    }
+
     private async Task<bool> RunDepartureCoreAsync(RegionWindow window, string regionName, NavigationIntent candidate)
     {
         NavigationEntry? current;
@@ -1201,6 +1273,7 @@ public sealed partial class NavigationService
         if (IsSelfNoOp(candidate, current))
         {
             CompleteIntent(candidate, result: true);
+            RenewActivationIfCancelled(current);
             using (_stateLock.EnterScope())
             {
                 window.Phase = WindowPhase.Open;
@@ -1212,6 +1285,7 @@ public sealed partial class NavigationService
         if (candidate.Kind == NavigationIntentKind.GoBack && !CanGoBack(regionName))
         {
             CompleteIntent(candidate, result: false);
+            RenewActivationIfCancelled(current);
             using (_stateLock.EnterScope())
             {
                 window.Phase = WindowPhase.Open;
@@ -1238,6 +1312,7 @@ public sealed partial class NavigationService
         catch (Exception ex)
         {
             FaultOrReport(candidate, ex);
+            RenewActivationIfCancelled(current);
             EndChain(window);
             DrainSlot(window, result: false);
             return true;
@@ -1256,6 +1331,7 @@ public sealed partial class NavigationService
         if (guardOutcome == GuardOutcome.Cancelled)
         {
             CancelIntent(candidate);
+            RenewActivationIfCancelled(current);
             using (_stateLock.EnterScope())
             {
                 window.Phase = WindowPhase.Open;
@@ -1268,6 +1344,7 @@ public sealed partial class NavigationService
         {
             // The page refuses to leave: every pending leave request is moot.
             CompleteIntent(candidate, result: false);
+            RenewActivationIfCancelled(current);
             EndChain(window);
             DrainSlot(window, result: false);
             return true;
@@ -1278,6 +1355,7 @@ public sealed partial class NavigationService
             // Withdrawn before its From phase started: the departure is aborted
             // and the page was never run through From. Pending intents stand.
             CancelIntent(candidate);
+            RenewActivationIfCancelled(current);
             using (_stateLock.EnterScope())
             {
                 window.Phase = WindowPhase.Open;
@@ -1361,6 +1439,7 @@ public sealed partial class NavigationService
                 CompleteIntent(toDrain, result: false);
             }
 
+            RenewActivationIfCancelled(current);
             return true;
         }
 
