@@ -32,8 +32,12 @@ internal sealed class HostBetaView : FrameworkElement
 /// harness therefore awaits a barrier posted at Render priority
 /// (<see cref="RunRenderBarrierAsync"/>): same-priority items run
 /// FIFO, so when the barrier completes, every apply queued before it
-/// (the navigation's event is raised before its task completes, and
-/// the barrier is queued only after that) has executed.
+/// has executed. This covers the scenarios here, whose pages come to
+/// rest: a resting page's event is raised before its navigation task
+/// completes, and the barrier is queued only after that. (A page
+/// whose lifecycle callback immediately registers a follow-up
+/// navigation is surfaced by a later raise instead; a scenario with
+/// such pages would need a stronger drain than this barrier.)
 /// </summary>
 internal sealed class StaDispatcherThread : IDisposable
 {
