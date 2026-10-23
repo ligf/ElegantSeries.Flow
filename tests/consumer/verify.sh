@@ -33,7 +33,7 @@ done
 # The packed version (MinVer, derived from the git tags) is read back
 # from the core package file name so the consumer references exactly
 # what was packed.
-CORE_PACKAGE="$(ls "$FEED"/ElegantSeries.Flow.*.nupkg | grep -v snupkg | head -1)"
+CORE_PACKAGE="$(ls "$FEED"/ElegantSeries.Flow.[0-9]*.nupkg | head -1)"
 VERSION="$(basename "$CORE_PACKAGE" .nupkg)"
 VERSION="${VERSION#ElegantSeries.Flow.}"
 echo "==> Packed version: $VERSION"
