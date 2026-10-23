@@ -193,6 +193,12 @@ public static class HostIntegrationScenarios
         var host = harness.CreateHost();
         harness.SetService(host, service);
         harness.SetRegion(host, "  " + MainRegion + "  ");
+
+        // Consistency only: the refresh re-shows the page even for an
+        // untrimmed host, because the service normalizes the name in
+        // its own lookups. The discriminating step is the navigation
+        // below — its event is filtered against the host's region
+        // spelling, which only matches when the host trimmed.
         Assert.Same(service.GetCurrentViewModel(MainRegion), harness.ContentViewModel(host));
 
         await harness.NavigateAsync(service, HostPage.Beta, MainRegion);
