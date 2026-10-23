@@ -4130,21 +4130,24 @@ public class NavigationServiceTests
         string? clearedRegion = null;
         using var subscription = _navigationService.SubscribeRegionCacheCleared(r => clearedRegion = r);
 
-        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>(
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>("CacheRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(
             "CacheRegion", mode: NavigationMode.KeepAlive).WaitAsync(TimeSpan.FromSeconds(10)));
         var first = _navigationService.GetCurrentViewModel("CacheRegion");
-        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel>("CacheRegion")
-            .WaitAsync(TimeSpan.FromSeconds(10)));
 
-        // The padded spelling clears the trimmed region's cache, and the
+        // Pop the KeepAlive page into the cache, then clear it through a
+        // padded spelling: the trimmed region's cache is cleared and the
         // event reports the normalized name.
+        Assert.True(await _navigationService.GoBackAsync("CacheRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
         _navigationService.ClearCache("  CacheRegion  ");
         Assert.Equal("CacheRegion", clearedRegion);
 
-        // The cached instance is gone: going back to Home creates a new one
-        // instead of reusing the KeepAlive entry.
-        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>("CacheRegion")
-            .WaitAsync(TimeSpan.FromSeconds(10)));
+        // The cached instance is gone: navigating there again creates a
+        // new one instead of reusing the KeepAlive entry.
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(
+            "CacheRegion", mode: NavigationMode.KeepAlive).WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.NotSame(first, _navigationService.GetCurrentViewModel("CacheRegion"));
     }
 
