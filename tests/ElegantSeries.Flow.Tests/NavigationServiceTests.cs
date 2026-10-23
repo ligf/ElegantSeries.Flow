@@ -4107,6 +4107,52 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task Window_GoBackOnUnusedRegion_WindowIsReclaimed()
+    {
+        var nav = (NavigationService)_navigationService;
+
+        // A GoBack against a region that was never used creates a window
+        // for the request; once the request settles (false — empty stack),
+        // the idle window is reclaimed instead of accumulating per name.
+        Assert.False(await _navigationService.GoBackAsync("DynUnusedRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        await WaitUntilAsync(() => !WindowsContain(nav, "DynUnusedRegion"));
+    }
+
+    [Fact]
+    public async Task Window_ProbedRegion_WindowIsReclaimed_AndRegionReusable()
+    {
+        var nav = (NavigationService)_navigationService;
+
+        // Probe a fresh region name (a GoBack that can only fail), let the
+        // window be reclaimed, then use the name for real: the recreated
+        // window must execute the hop normally.
+        Assert.False(await _navigationService.GoBackAsync("DynProbeRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        await WaitUntilAsync(() => !WindowsContain(nav, "DynProbeRegion"));
+
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>("DynProbeRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel("DynProbeRegion"));
+        Assert.True(WindowsContain(nav, "DynProbeRegion"));
+    }
+
+    [Fact]
+    public async Task Window_RestingRegionWithPage_WindowIsKept()
+    {
+        var nav = (NavigationService)_navigationService;
+
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>("DynRestingRegion")
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // Give the pump its chance to settle: with a live page on the
+        // stack the window must NOT be reclaimed — its surfacing state
+        // belongs to the resting page.
+        await Task.Delay(300);
+        Assert.True(WindowsContain(nav, "DynRestingRegion"));
+    }
+
+    [Fact]
     public async Task Window_WithdrawnRegistrationDuringSlowTo_DoesNotCloseWindowEarly()
     {
         var navigated = new List<object>();
@@ -5108,6 +5154,14 @@ public class NavigationServiceTests
             refreshIfActive: true));
         Assert.True(IsCtsDisposed(cts1),
             "Pop-to-existing retired CTS was not reclaimed after settling");
+    }
+
+    private static bool WindowsContain(NavigationService nav, string regionName)
+    {
+        var field = typeof(NavigationService).GetField("_windows",
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var windows = (System.Collections.IDictionary)field.GetValue(nav)!;
+        return windows.Contains(regionName);
     }
 
     private static int GetRetiredCtsCount(
