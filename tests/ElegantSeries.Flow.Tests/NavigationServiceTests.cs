@@ -4283,7 +4283,8 @@ public class NavigationServiceTests
 
         await page.GuardStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
         cts.Cancel();
-        await Assert.ThrowsAsync<OperationCanceledException>(async () => await nav2);
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            async () => await nav2.WaitAsync(TimeSpan.FromSeconds(10)));
         page.ReleaseGuard();
 
         Assert.True(await navTask.WaitAsync(TimeSpan.FromSeconds(10)));
