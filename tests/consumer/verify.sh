@@ -25,6 +25,16 @@ RID="${FLOW_VERIFY_RID:-linux-x64}"
 rm -rf "$FEED" "$WORK"
 mkdir -p "$FEED" "$WORK"
 
+# Restore into an isolated global packages folder. A warm
+# ~/.nuget/packages may already hold an ElegantSeries.Flow package with
+# the exact version being packed (MinVer versions repeat across runs
+# of the same commit), and NuGet serves a restored package from that
+# cache without ever consulting the feed — the consumer would silently
+# test stale bits instead of the packages packed below. The isolated
+# folder lives under WORK, so it starts empty on every run and the
+# consumer always resolves from the feed.
+export NUGET_PACKAGES="$WORK/nuget-packages"
+
 echo "==> Packing packages"
 for project in ElegantSeries.Flow ElegantSeries.Flow.Mvvm ElegantSeries.Flow.Avalonia ElegantSeries.Flow.WPF; do
     "$DOTNET" pack "$REPO_ROOT/src/$project" -c Release -o "$FEED" --nologo -v q > /dev/null
