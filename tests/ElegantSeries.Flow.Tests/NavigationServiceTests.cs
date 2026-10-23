@@ -817,6 +817,30 @@ public class SecondAttachThrowingViewModel : INavigationViewModel
     void INavigationViewModel.RaiseNavigationChanged() { }
 }
 
+/// <summary>Second service type whose registration resolves to
+/// <see cref="ThrowawayCountingViewModel"/> itself: navigating it creates
+/// entries whose runtime type equals the other service type exactly.</summary>
+public interface IThrowawayCountingTarget : INavigationViewModel
+{
+}
+
+/// <summary>ViewModel that counts its own constructions (static, reset per test).</summary>
+public class ThrowawayCountingViewModel : NavigationViewModelBase, IThrowawayCountingTarget
+{
+    public static int ConstructionCount;
+
+    public ThrowawayCountingViewModel() => Interlocked.Increment(ref ConstructionCount);
+
+    public static void Reset() => ConstructionCount = 0;
+}
+
+/// <summary>Derived implementation registered for the base type: resolution
+/// produces this runtime type, which the exact-type pop-to-existing
+/// pre-check must not anticipate.</summary>
+public class DerivedThrowawayCountingViewModel : ThrowawayCountingViewModel
+{
+}
+
 /// <summary>Page whose async To blocks until released and then throws.</summary>
 public class SlowThrowingToViewModel : NavigationViewModelBase, INavigationAwareAsync
 {
@@ -4193,6 +4217,90 @@ public class NavigationServiceTests
 
         Assert.Equal(0, ButtonTargetViewModel.ConstructionCount);
         Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task PopToExisting_DerivedRegistration_StillResolvesAndReactivates()
+    {
+        ThrowawayCountingViewModel.Reset();
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ThrowawayCountingViewModel, DerivedThrowawayCountingViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        Assert.True(await nav.NavigateToAsync<ThrowawayCountingViewModel>(
+            retention: NavigationRetention.KeepAlive));
+        var first = nav.GetCurrentViewModel();
+        Assert.IsType<DerivedThrowawayCountingViewModel>(first);
+        Assert.True(await nav.NavigateToAsync<TestHomeViewModel>()); // cover it
+
+        // The pre-check keys on the exact runtime type, which only
+        // resolution can know for a derived registration: the navigation
+        // still resolves (and discards) an instance, and still reactivates
+        // the covered entry.
+        Assert.True(await nav.NavigateToAsync<ThrowawayCountingViewModel>(
+            retention: NavigationRetention.KeepAlive));
+        Assert.Equal(2, ThrowawayCountingViewModel.ConstructionCount);
+        Assert.Same(first, nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task PopToExisting_MixedRegistrations_ExactTypeEntryFromOtherServiceTypeIsNotReused()
+    {
+        // The base type's own registration resolves to the derived type,
+        // while a second service type resolves to the base type exactly.
+        // The covered KeepAlive entry (exact base runtime type, created by
+        // the interface navigation) must NOT satisfy a navigation to the
+        // base service type: that navigation resolves the derived type,
+        // whose stack scan matches neither the entry's instance nor type.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ThrowawayCountingViewModel, DerivedThrowawayCountingViewModel>();
+        services.AddTransient<IThrowawayCountingTarget, ThrowawayCountingViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        Assert.True(await nav.NavigateToAsync<IThrowawayCountingTarget>(
+            retention: NavigationRetention.KeepAlive));
+        var viaInterface = nav.GetCurrentViewModel();
+        Assert.IsType<ThrowawayCountingViewModel>(viaInterface);
+        Assert.True(await nav.NavigateToAsync<TestHomeViewModel>()); // cover it
+
+        Assert.True(await nav.NavigateToAsync<ThrowawayCountingViewModel>());
+        Assert.IsType<DerivedThrowawayCountingViewModel>(nav.GetCurrentViewModel());
+        Assert.NotSame(viaInterface, nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task PopToExisting_MixedRegistrations_SingletonEntryIsNotPoppedByInterfaceEntry()
+    {
+        // The base service type is a singleton resolving to the derived
+        // type; the interface service type resolves to the exact base.
+        // Re-navigating to the base type must reactivate the singleton's
+        // own entry by instance — not pop past it to the covered
+        // interface entry (which would also dispose the singleton's
+        // stack entry).
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddSingleton<ThrowawayCountingViewModel, DerivedThrowawayCountingViewModel>();
+        services.AddTransient<IThrowawayCountingTarget, ThrowawayCountingViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        Assert.True(await nav.NavigateToAsync<IThrowawayCountingTarget>(
+            retention: NavigationRetention.KeepAlive));
+        Assert.True(await nav.NavigateToAsync<TestHomeViewModel>()); // cover it
+        Assert.True(await nav.NavigateToAsync<ThrowawayCountingViewModel>());
+        var singleton = nav.GetCurrentViewModel();
+        Assert.IsType<DerivedThrowawayCountingViewModel>(singleton);
+
+        Assert.True(await nav.NavigateToAsync<ThrowawayCountingViewModel>());
+        Assert.Same(singleton, nav.GetCurrentViewModel());
+        Assert.True(nav.CanGoBack()); // the stack was not popped past the singleton
     }
 
     [Fact]
