@@ -84,6 +84,26 @@ public sealed class NavigationHostTests
     }
 
     [Fact]
+    public void RegionName_Padded_MatchesTheTrimmedServiceSpelling()
+    {
+        StaHelper.Run(() =>
+        {
+            var (host, _, service) = CreateHost();
+            host.RegionName = "  MainRegion  ";
+            var vm = new StubViewModel();
+
+            // The getter reports the normalized spelling, and the host
+            // reacts to the service's (normalized) region events: without
+            // the mirror trim the ordinal filter would drop every event.
+            Assert.Equal("MainRegion", host.RegionName);
+            service.RaiseNavigated("MainRegion", vm);
+
+            var view = Assert.IsType<TestView>(host.Content);
+            Assert.Same(vm, view.DataContext);
+        });
+    }
+
+    [Fact]
     public void RegionNavigated_OtherRegion_Ignored()
     {
         StaHelper.Run(() =>

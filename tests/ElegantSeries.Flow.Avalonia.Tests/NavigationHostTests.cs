@@ -47,6 +47,24 @@ public sealed class NavigationHostTests
     }
 
     [Fact]
+    public void RegionName_Padded_MatchesTheTrimmedServiceSpelling()
+    {
+        var dispatcher = new FakeDispatcher();
+        var service = new FakeNavigationService();
+        using var host = CreateHost(dispatcher, service, CreateLocator(), regionName: "  MainRegion  ");
+        var vm = new TestViewModel();
+
+        // The getter reports the normalized spelling, and the host reacts
+        // to the service's (normalized) region events: without the mirror
+        // trim the ordinal filter would drop every event.
+        Assert.Equal("MainRegion", host.RegionName);
+        service.RaiseRegionNavigated("MainRegion", vm);
+
+        var view = Assert.IsType<TestView>(host.Content);
+        Assert.Same(vm, view.DataContext);
+    }
+
+    [Fact]
     public void RegionNavigated_MatchingRegion_SetsContentWithDataContext()
     {
         var dispatcher = new FakeDispatcher();
