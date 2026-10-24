@@ -17,6 +17,8 @@ ElegantSeries.Flow 提供基于 region 的导航栈、可选的 KeepAlive ViewMo
 - **基于 Region 的导航**——每个 region 拥有独立的导航栈（默认 `"MainRegion"`）
 - **导航操作与保留策略**——`Push` / `Replace` / `Reset`，与 `Destroy` / `KeepAlive` 保留策略正交组合
 - **KeepAlive 缓存**——按需复用 ViewModel，跨导航保持状态
+- **多实例认人**——同一页面类型的多个实例可以共存；前进导航按参数、或由实例本身
+  （`INavigationTargetAware`）认出正确的那一个
 - **强类型参数**——`NavigateToAsync<TViewModel, TParam>(param)`，编译期类型安全
 - **生命周期回调**——`INavigationAware`（`OnNavigatedTo` / `OnNavigatedFrom`），
   需要 `await` 时用异步版 `INavigationAwareAsync`
@@ -211,7 +213,7 @@ KeepAlive、单例 ViewModel）。
 | 保留策略 | 行为 |
 |------|----------|
 | `Destroy` | 页面离开时销毁（释放其页面作用域）。 |
-| `KeepAlive` | 页面离开时进缓存；之后以 `KeepAlive` 导航到同类型时复用缓存的 ViewModel，而不是新建。 |
+| `KeepAlive` | 页面离开时进缓存；之后以 `KeepAlive` 导航到同类型、且该导航被认出是发给缓存实例的（见「认出已有的页面」）时复用缓存的 ViewModel，而不是新建。 |
 
 ## Region
 
@@ -261,6 +263,11 @@ public interface INavigationGuardWithContext  // 决策需要上下文时用这�
     Task<bool> CanNavigateFromAsync(NavigationGuardContext context);
     // context: RegionName, TargetViewModelType, Mode（返回时为 null）, Parameter, IsBack
 }
+
+public interface INavigationTargetAware  // 可选：认领或拒绝一次发给本页面类型的导航
+{
+    bool IsNavigationTarget(object? parameter);
+}
 ```
 
 生命周期回调和页面作用域的释放永远在**内部锁之外**执行，所以可以安全地
@@ -274,6 +281,36 @@ UI 层应在 `RegionNavigated` 里换 view；`OnNavigatedTo` 执行时 view 还�
 会在页面离开活动位置（被覆盖、弹出、替换或清空）时取消——即使回调仍在
 运行。应响应该 token：一旦它触发，就不要再触碰页面的依赖。因该生命周期
 取消引发的 `OperationCanceledException` 视为正常控制流，不是错误。
+
+### 认出已有的页面
+
+同一页面类型的多个实例可以共存——两个订单详情、两份文档。当一次前进
+导航的目标类型已经有 `KeepAlive` 实例（被盖在栈里，或存在 KeepAlive
+缓存中）时，这次导航只会发给其中一个。候选按离栈顶最近优先逐个判定，
+认人方式有两种：
+
+- **按参数认**。候选条目上次激活时存的参数与本次参数做 `object.Equals`
+  比较。参数是值类型、`string` 或 `record` 时零代码自动成立——直接传 id
+  本身，或传一个小 record：
+
+  ```csharp
+  await navigation.NavigateToAsync<OrderDetailViewModel, int>(42, retention: NavigationRetention.KeepAlive);
+  await navigation.NavigateToAsync<OrderDetailViewModel, int>(43, retention: NavigationRetention.KeepAlive); // 第二个实例
+  await navigation.NavigateToAsync<OrderDetailViewModel, int>(42, retention: NavigationRetention.KeepAlive); // 弹栈回到第一个
+  ```
+
+- **由实例自己认**。ViewModel 实现
+  `INavigationTargetAware.IsNavigationTarget(parameter)` 即可认领——或
+  拒绝——一次导航，它的回答对该候选是最终裁决。适用于身份在实例的当前
+  状态里、而不在存着的参数里的页面，例如打开后被「另存为」改了名的文档。
+
+没有任何候选被认出时就新建实例。已有的实例绝不会只因为类型相同就被
+复用——正是这一点保证了订单 43 不会被递到订单 42 的页面上。参数类型
+没有值相等（普通 class 且未重写 `Equals`）时按参数永远认不出；第一次
+因此失去复用时，服务会经 `SubscriberError` 按参数类型报告一次，不会
+静默退化。补救由便宜到贵：直接传 id、把参数改成 `record`、或在
+ViewModel 上实现 `INavigationTargetAware`（最后一种连参数类型本身都不
+用改）。
 
 ### 从回调里发起导航
 
@@ -350,8 +387,9 @@ ViewModel 自身的 DI 生命周期——即你的 `services.AddXxx<MyViewModel>
 ## KeepAlive 缓存
 
 `NavigationRetention.KeepAlive` 把页面（ViewModel + 它的页面作用域）按
-`(region, ViewModel 类型)` 缓存在每个 region 里。导航到同类型时复用缓存页
-及其作用域——不建新作用域。
+`(region, ViewModel 类型)` 缓存在每个 region 里。导航到同类型、且缓存页被
+本次导航认出（参数相等或实例认领，见上文「认出已有的页面」）时复用缓存页
+及其作用域——不建新作用域；认不出则新建，缓存页留待之后被逐出回收。
 
 ```csharp
 await navigation.NavigateToAsync<SettingsViewModel>(retention: NavigationRetention.KeepAlive);

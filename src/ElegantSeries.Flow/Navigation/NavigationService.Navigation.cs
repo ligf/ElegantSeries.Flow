@@ -60,6 +60,32 @@ public sealed partial class NavigationService
         INavigationViewModel targetVm = null!;
         NavigationEntry? cachedEntry = null;
 
+        // Recognition bookkeeping for this hop: classification invokes user
+        // code (recognition votes, parameter equality), so its failures and
+        // the unmatchable-parameter diagnostic are accumulated here and
+        // reported at points where no state lock is held.
+        List<Exception> classificationErrors = [];
+        bool unmatchableRejection = false;
+        NavigationEntry? recognizedCacheEntry = null;
+        NavigationEntry? existingEntry = null;
+        var parameterType = parameter?.GetType();
+
+        // Reports the classification failures accumulated so far. Called
+        // only at points where _navigationLock is not held: error handlers
+        // are user code and may call back into the service (one calling
+        // ClearCache would deadlock against the navigation lock). The
+        // unmatchable-parameter diagnostic is delivered separately, from
+        // the commit's finally, where the hop's outcome is known.
+        void FlushRecognitionReports()
+        {
+            foreach (var error in classificationErrors)
+            {
+                ReportSubscriberError(error);
+            }
+
+            classificationErrors.Clear();
+        }
+
         for (int attempt = 0; ; attempt++)
         {
             if (cancellationToken.IsCancellationRequested)
@@ -73,6 +99,7 @@ public sealed partial class NavigationService
                     ownedScope = null;
                 }
 
+                FlushRecognitionReports();
                 CancelIntent(intent);
                 if (departing is not null)
                 {
@@ -85,11 +112,37 @@ public sealed partial class NavigationService
             // After repeated races, stop consulting the cache and resolve a fresh page.
             // (Practically unreachable; guards against a pathological ClearCache loop.)
             bool consultCache = useKeepAlive && attempt < 4;
+            recognizedCacheEntry = null;
             if (consultCache)
             {
                 using (_stateLock.EnterScope())
                 {
                     _keepAliveCache.TryGetValue(cacheKey, out cachedEntry);
+                }
+
+                if (cachedEntry is not null)
+                {
+                    // Recognition gate (outside the lock: classification
+                    // invokes user code): the cached entry is reused only
+                    // when it is this navigation's target. An unrecognized
+                    // entry is bypassed — left in the cache, where a later
+                    // cache write of the new entry evicts it through the
+                    // standard deactivation plan — and a fresh page is
+                    // resolved below instead of silently re-purposing it.
+                    var verdict = ClassifyCandidate(cachedEntry, parameter, classificationErrors);
+                    if (verdict == RecognitionVerdict.Recognized)
+                    {
+                        recognizedCacheEntry = cachedEntry;
+                    }
+                    else
+                    {
+                        if (verdict == RecognitionVerdict.RejectedByUnmatchableParameter)
+                        {
+                            unmatchableRejection = true;
+                        }
+
+                        cachedEntry = null;
+                    }
                 }
             }
             else
@@ -113,6 +166,7 @@ public sealed partial class NavigationService
                     // Resolution failed: the scope never produced a page; drop it quietly.
                     await DisposeScopeBestEffortAsync(ownedScope).ConfigureAwait(false);
                     ownedScope = null;
+                    FlushRecognitionReports();
                     FaultOrReport(intent, ex);
                     if (departing is not null)
                     {
@@ -122,6 +176,30 @@ public sealed partial class NavigationService
                     return new HopResult(null, null, null);
                 }
             }
+
+            // Stack classification for this attempt, before the navigation
+            // lock is taken: snapshot the region's stack, then find the entry
+            // this navigation is addressed to. Classification invokes user
+            // code (recognition votes, parameter equality), so it must run
+            // with no locks held. The pump serializes this region's hops, so
+            // the snapshot can only go stale through a concurrent disposal;
+            // the commit below re-validates before it operates. (On a
+            // staleness retry the classification simply runs again for the
+            // new resolution; votes are documented as repeatable.)
+            existingEntry = null;
+            if (operation is not (NavigationOperation.Reset or NavigationOperation.Replace))
+            {
+                List<NavigationEntry> snapshot;
+                using (_stateLock.EnterScope())
+                {
+                    snapshot = _regionStacks.TryGetValue(regionName, out var s) ? [.. s] : [];
+                }
+
+                existingEntry = ClassifyExistingEntry(
+                    snapshot, targetVm, parameter, classificationErrors, ref unmatchableRejection);
+            }
+
+            FlushRecognitionReports();
 
             try
             {
@@ -136,6 +214,7 @@ public sealed partial class NavigationService
                     ownedScope = null;
                 }
 
+                FlushRecognitionReports();
                 CancelIntent(intent);
                 if (departing is not null)
                 {
@@ -172,6 +251,7 @@ public sealed partial class NavigationService
         IServiceScope? scopeToRelease = null;
         Exception? duplicateException = null;
         List<(NavigationEntry Entry, bool Destroy)> deactivations = [];
+        bool adoptedExistingEntry = false;
         NavigationEntry? pushedEntry = null;
         NavigationEntry? reactivatedEntry = null;
         Task? toGate = null;
@@ -221,10 +301,16 @@ public sealed partial class NavigationService
                         // An explicit operation takes precedence over instance reuse:
                         // Reset/Replace express stack surgery or reuse
                         // intent that must not be silently swallowed when the target type is
-                        // already the active page.
-                        var existingEntry = (operation is NavigationOperation.Reset or NavigationOperation.Replace)
-                            ? null
-                            : FindEntryOnStackLocked(stack, targetVm);
+                        // already the active page. For the other operations the
+                        // classification phase already chose the target entry;
+                        // re-validate that it is still on the stack (a disposal
+                        // may have cleared it while user code ran) and fall back
+                        // to pushing the resolved instance when it is gone.
+                        if (existingEntry is not null && !ContainsEntryLocked(stack, existingEntry))
+                        {
+                            existingEntry = null;
+                        }
+
                         if (existingEntry is not null)
                         {
                             // Pop back to the existing instance (mainstream behavior):
@@ -275,6 +361,7 @@ public sealed partial class NavigationService
                                 // under the same key.
                                 _keepAliveCache.Remove(cacheKey);
                                 pushedEntry = new NavigationEntry(regionName, cachedEntry.ViewModel, parameter, entryRetention, cachedEntry.Scope, cachedEntry.CacheKeyType) { OwnerService = this };
+                                adoptedExistingEntry = true;
                             }
                             else
                             {
@@ -290,13 +377,24 @@ public sealed partial class NavigationService
                                     _keepAliveCache.TryGetValue(cacheKey, out winner);
                                 }
 
-                                if (winner is not null)
+                                // Adopt the winner only when it is this navigation's own
+                                // resolution (a singleton resolved a second time) or the
+                                // cache entry this hop already recognized. An entry that
+                                // was cached concurrently and never classified — in
+                                // particular the entry this hop bypassed as unrecognized —
+                                // is left in the cache: pushing the fresh entry cannot leak
+                                // its scope, because the entry's eventual cache write evicts
+                                // the leftover through the standard deactivation plan.
+                                if (winner is not null
+                                    && (ReferenceEquals(winner.ViewModel, targetVm)
+                                        || ReferenceEquals(winner, recognizedCacheEntry)))
                                 {
                                     scopeToRelease = ownedScope;
                                     ownedScope = null;
                                     // Mutual exclusion: winner moves from cache to stack.
                                     _keepAliveCache.Remove(cacheKey);
                                     pushedEntry = new NavigationEntry(regionName, winner.ViewModel, parameter, entryRetention, winner.Scope, winner.CacheKeyType) { OwnerService = this };
+                                    adoptedExistingEntry = true;
                                 }
                                 else
                                 {
@@ -325,7 +423,7 @@ public sealed partial class NavigationService
                                     // so no lifecycle notification, just disposal bookkeeping.
                                     // Instance match only: a different instance of the same
                                     // type deeper on the stack is a distinct page, not a duplicate.
-                                    var duplicate = FindEntryOnStackLocked(stack, targetVm, allowTypeMatch: false);
+                                    var duplicate = FindEntryOnStackLocked(stack, targetVm);
                                     if (duplicate is not null && !ReferenceEquals(stack.Peek(), duplicate))
                                     {
                                         RemoveEntryLocked(stack, duplicate, deactivations);
@@ -406,6 +504,17 @@ public sealed partial class NavigationService
             if (scopeToRelease is not null)
             {
                 await DisposeScopeBestEffortAsync(scopeToRelease).ConfigureAwait(false);
+            }
+
+            // Deliver the unmatchable-parameter diagnostic last, with every
+            // lock released (error handlers are user code; one calling
+            // ClearCache would deadlock against _navigationLock above). It
+            // fires only when the hop actually landed a new instance because
+            // recognition failed — not for hops that were withdrawn, and
+            // not when an instance was recognized after all.
+            if (success && !adoptedExistingEntry && existingEntry is null && unmatchableRejection)
+            {
+                ReportUnmatchableParameterOnce(parameterType, typeof(TViewModel));
             }
         }
 
@@ -579,30 +688,33 @@ public sealed partial class NavigationService
     /// The caller must hold <see cref="_stateLock"/>.
     /// </summary>
     private static NavigationEntry? FindEntryOnStackLocked(
-        Stack<NavigationEntry> stack, INavigationViewModel viewModel, bool allowTypeMatch = true)
+        Stack<NavigationEntry> stack, INavigationViewModel viewModel)
     {
-        // Match by instance (Singleton / cache-hit) first. If allowTypeMatch,
-        // fall back to a type match only for KeepAlive entries: with mutual
-        // exclusion a covered KeepAlive page lives on the stack but not in the
-        // cache, so the resolved viewModel may be a fresh instance of the same
-        // type. Non-KeepAlive entries of the same type are distinct pages and
-        // must not be treated as pop-to-existing targets.
-        var targetType = viewModel.GetType();
         foreach (var entry in stack)
         {
             if (ReferenceEquals(entry.ViewModel, viewModel))
             {
                 return entry;
             }
-
-            if (allowTypeMatch
-                && entry.Retention == NavigationRetention.KeepAlive
-                && entry.ViewModel.GetType() == targetType)
-            {
-                return entry;
-            }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether the stack still holds the given entry.
+    /// The caller must hold <see cref="_stateLock"/>.
+    /// </summary>
+    private static bool ContainsEntryLocked(Stack<NavigationEntry> stack, NavigationEntry entry)
+    {
+        foreach (var candidate in stack)
+        {
+            if (ReferenceEquals(candidate, entry))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

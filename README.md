@@ -18,6 +18,8 @@ thread-safe by design.
 - **Region-based navigation** — independent navigation stacks per region (`"MainRegion"` by default)
 - **Navigation operations & retention** — `Push` / `Replace` / `Reset`, composed with `Destroy` / `KeepAlive` retention
 - **KeepAlive cache** — opt-in ViewModel reuse across navigations
+- **Multi-instance recognition** — several instances of one page type coexist; a forward
+  navigation finds the right one by parameter, or by the instance itself (`INavigationTargetAware`)
 - **Typed parameters** — `NavigateToAsync<TViewModel, TParam>(param)` with compile-time type safety
 - **Lifecycle callbacks** — `INavigationAware` (`OnNavigatedTo` / `OnNavigatedFrom`),
   or the async `INavigationAwareAsync` when the transition needs `await`
@@ -221,7 +223,7 @@ new page when it later leaves).
 | Retention | Behavior |
 |------|----------|
 | `Destroy` | The page is destroyed when it leaves (its page scope is disposed). |
-| `KeepAlive` | The page is cached when it leaves; a later `KeepAlive` navigation to the same type reuses the cached ViewModel instead of creating a new one. |
+| `KeepAlive` | The page is cached when it leaves; a later `KeepAlive` navigation to the same type reuses the cached ViewModel when the navigation is recognized as addressed to it (see *Recognizing an existing page*), instead of creating a new one. |
 
 ## Regions
 
@@ -272,6 +274,11 @@ public interface INavigationGuardWithContext  // instead of INavigationGuard, wh
     Task<bool> CanNavigateFromAsync(NavigationGuardContext context);
     // context: RegionName, TargetViewModelType, Mode (null for back), Parameter, IsBack
 }
+
+public interface INavigationTargetAware  // optional: claim or refuse a navigation addressed to your page type
+{
+    bool IsNavigationTarget(object? parameter);
+}
 ```
 
 Lifecycle callbacks and page-scope disposals always run **outside** internal locks, so they may
@@ -286,6 +293,43 @@ rethrown afterwards (single as-is, several as `AggregateException`). The token p
 (covered, popped, replaced, or cleared) — even if the callback is still running. Honor
 the token: stop touching the page's dependencies once it fires. An `OperationCanceledException`
 caused by this lifecycle cancellation is treated as normal control flow, not an error.
+
+### Recognizing an existing page
+
+Several instances of the same page type can coexist — two order details, two
+documents. When a forward navigation's target type already has `KeepAlive`
+instances (covered on the stack, or held in the KeepAlive cache), the
+navigation is addressed to exactly one of them. Candidates are considered
+nearest to the stack top first, and each candidate is recognized in one of
+two ways:
+
+- **By parameter.** The parameter the candidate was last activated with is
+  compared to the incoming parameter with `object.Equals`. Recognition
+  therefore works with no code at all when the parameter is a value type, a
+  `string`, or a `record` — pass the id itself, or a small record:
+
+  ```csharp
+  await navigation.NavigateToAsync<OrderDetailViewModel, int>(42, retention: NavigationRetention.KeepAlive);
+  await navigation.NavigateToAsync<OrderDetailViewModel, int>(43, retention: NavigationRetention.KeepAlive); // a second instance
+  await navigation.NavigateToAsync<OrderDetailViewModel, int>(42, retention: NavigationRetention.KeepAlive); // pops back to the first one
+  ```
+
+- **By the instance itself.** A ViewModel can implement
+  `INavigationTargetAware.IsNavigationTarget(parameter)` to claim — or
+  refuse — a navigation. Its verdict is final for that candidate. Use it
+  when identity lives in the instance's current state rather than in the
+  stored parameter, e.g. a document whose file was renamed through Save As
+  after it was opened.
+
+If no candidate is recognized, a new instance is created. An existing
+instance is never reused just because it has the right type — that is what
+keeps order 43 from being delivered to order 42's page. A parameter whose
+type has no value equality (a plain class without an `Equals` override)
+can never be recognized by parameter; the first time that costs a reuse,
+the service reports it once per parameter type via `SubscriberError`.
+Remedies, cheapest first: pass the id itself, make the parameter a
+`record`, or implement `INavigationTargetAware` on the ViewModel (the
+parameter type itself does not need to change for the last one).
 
 ### Navigation requests issued from callbacks
 
@@ -376,7 +420,10 @@ shared instance itself survives because it is owned by the root container.
 
 `NavigationRetention.KeepAlive` keeps the page (ViewModel + its page scope) in a per-region
 cache keyed by `(region, ViewModel type)`. Navigating to the same type reuses the cached
-page and its scope — no new scope is created.
+page and its scope — no new scope is created — when the navigation is recognized as
+addressed to the cached instance (by parameter equality or by the instance itself, see
+*Recognizing an existing page* above); an unrecognized cached page is bypassed and a new
+instance is created instead.
 
 ```csharp
 await navigation.NavigateToAsync<SettingsViewModel>(retention: NavigationRetention.KeepAlive);

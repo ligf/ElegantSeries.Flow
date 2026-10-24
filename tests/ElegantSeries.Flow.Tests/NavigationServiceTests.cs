@@ -1257,19 +1257,52 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task NavigateToAsync_PopToExisting_DeliversNewParameter()
+    public async Task NavigateToAsync_PopToExisting_WithSameParameter_ReusesInstance()
     {
         await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
             "first", retention: NavigationRetention.KeepAlive);
         var vm = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
         await _navigationService.NavigateToAsync<TestHomeViewModel>();
 
+        // The covered instance is recognized by its parameter and popped back
+        // to — the same instance is reactivated rather than a new one created.
+        var result = await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "first", retention: NavigationRetention.KeepAlive);
+
+        Assert.True(result);
+        Assert.Same(vm, _navigationService.GetCurrentViewModel());
+        Assert.Equal("first", vm.LastParameter);
+        Assert.False(_navigationService.CanGoBack());
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_PopToExisting_WithDifferentParameter_DoesNotReuseInstance()
+    {
+        await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "first", retention: NavigationRetention.KeepAlive);
+        var first = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+
+        // A different parameter addresses a different page: the existing
+        // instance is NOT re-purposed with the new parameter (the former
+        // type-match behavior); a new instance is pushed above it.
         var result = await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
             "second", retention: NavigationRetention.KeepAlive);
 
         Assert.True(result);
-        Assert.Same(vm, _navigationService.GetCurrentViewModel());
-        Assert.Equal("second", vm.LastParameter);
+        var second = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.NotSame(first, second);
+        Assert.Equal("second", second.LastParameter);
+        Assert.Equal("first", first.LastParameter);
+
+        // Navigating back to the first parameter recognizes the original
+        // instance below and pops to it.
+        var back = await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "first", retention: NavigationRetention.KeepAlive);
+
+        Assert.True(back);
+        Assert.Same(first, _navigationService.GetCurrentViewModel());
+        Assert.False(_navigationService.CanGoBack());
     }
 
     [Fact]
@@ -2600,23 +2633,49 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task NavigateToAsync_KeepAlive_ToActiveType_ReactivatesWithNewParameter()
+    public async Task NavigateToAsync_KeepAlive_ToActiveType_WithSameParameter_ReactivatesInPlace()
     {
         await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
             "first", retention: NavigationRetention.KeepAlive);
         var vm = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
         Assert.Equal("first", vm.LastParameter);
 
-        // Explicit KeepAlive takes precedence over the same-type no-op: the
-        // cached (active) instance is re-activated with the new parameter.
+        // The active instance is recognized by its parameter and reactivated
+        // in place — no new instance, no stack growth.
+        var result = await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "first", retention: NavigationRetention.KeepAlive);
+
+        Assert.True(result);
+        Assert.Same(vm, _navigationService.GetCurrentViewModel());
+        Assert.Equal("first", vm.LastParameter);
+        Assert.False(vm.Disposed);
+        Assert.False(_navigationService.CanGoBack());
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_KeepAlive_ToActiveType_WithDifferentParameter_PushesNewInstance()
+    {
+        await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "first", retention: NavigationRetention.KeepAlive);
+        var first = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.Equal("first", first.LastParameter);
+
+        // The active instance represents a different parameter than the one
+        // addressed, so it is not re-purposed: a new instance is pushed and
+        // the first one stays alive underneath.
         var result = await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
             "second", retention: NavigationRetention.KeepAlive);
 
         Assert.True(result);
-        Assert.Same(vm, _navigationService.GetCurrentViewModel());
-        Assert.Equal("second", vm.LastParameter);
-        Assert.False(vm.Disposed);
-        Assert.False(_navigationService.CanGoBack());
+        var second = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.NotSame(first, second);
+        Assert.Equal("second", second.LastParameter);
+        Assert.Equal("first", first.LastParameter);
+        Assert.False(first.Disposed);
+        Assert.True(_navigationService.CanGoBack());
+
+        Assert.True(await _navigationService.GoBackAsync());
+        Assert.Same(first, _navigationService.GetCurrentViewModel());
     }
 
     [Fact]
