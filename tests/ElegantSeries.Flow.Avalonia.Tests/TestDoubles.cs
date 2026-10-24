@@ -153,6 +153,24 @@ internal sealed class FakeNavigationService : INavigationService
         => throw new NotImplementedException();
 
     public Task<bool> GoBackAsync(string regionName = "MainRegion", CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<bool> GoBackToAsync<TViewModel>(string regionName = "MainRegion", CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel
+        => throw new NotImplementedException();
+    public Task<bool> GoBackToAsync<TViewModel, TParam>(TParam parameter, string regionName = "MainRegion", CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel
+        => throw new NotImplementedException();
+    public Task<bool> SetRootAsync<TViewModel>(string regionName = "MainRegion", NavigationRetention retention = NavigationRetention.Destroy, CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel
+        => throw new NotImplementedException();
+    public Task<bool> SetRootAsync<TViewModel, TParam>(TParam parameter, string regionName = "MainRegion", NavigationRetention retention = NavigationRetention.Destroy, CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel
+        => throw new NotImplementedException();
+    public int Remove<TViewModel>(string regionName = "MainRegion")
+        where TViewModel : INavigationViewModel
+        => throw new NotImplementedException();
+    public int Remove<TViewModel, TParam>(TParam parameter, string regionName = "MainRegion")
+        where TViewModel : INavigationViewModel
+        => throw new NotImplementedException();
 
     public void ClearCache(string regionName) => throw new NotImplementedException();
 

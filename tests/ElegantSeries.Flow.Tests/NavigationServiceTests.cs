@@ -87,6 +87,26 @@ public class TrackedDisposeViewModel : NavigationViewModelBase, IDisposable
     public void Dispose() => DisposeCount++;
 }
 
+/// <summary>Calls Remove from inside its own OnNavigatedTo and captures the outcome.</summary>
+public class RemoveInCallbackViewModel : NavigationViewModelBase, INavigationAware
+{
+    public static Exception? Caught;
+
+    public void OnNavigatedTo(object? parameter)
+    {
+        try
+        {
+            Navigation!.Remove<TestHomeViewModel>();
+        }
+        catch (Exception ex)
+        {
+            Caught = ex;
+        }
+    }
+
+    public void OnNavigatedFrom() { }
+}
+
 public class TestDetailViewModel : NavigationViewModelBase, INavigationAware<string>, IAsyncDisposable
 {
     public string? ReceivedParam { get; private set; }
@@ -233,6 +253,61 @@ public class FromGoBackViewModel : NavigationViewModelBase, INavigationAware
             _redirected = true;
             _ = Navigation!.GoBackAsync();
         }
+    }
+}
+
+/// <summary>Registers a GoBackTo from inside its own OnNavigatedFrom (once).</summary>
+public class FromGoBackToViewModel : NavigationViewModelBase, INavigationAware
+{
+    private bool _redirected;
+
+    public void OnNavigatedTo(object? parameter) { }
+
+    public void OnNavigatedFrom()
+    {
+        if (!_redirected)
+        {
+            _redirected = true;
+            _ = Navigation!.GoBackToAsync<TestHomeViewModel>();
+        }
+    }
+}
+
+/// <summary>
+/// Claims any navigation whose parameter is "claimed", regardless of the
+/// parameter it was last activated with.
+/// </summary>
+public class VoteClaimViewModel : NavigationViewModelBase, INavigationAware, INavigationTargetAware
+{
+    public object? LastParameter { get; private set; }
+
+    public void OnNavigatedTo(object? parameter) => LastParameter = parameter;
+
+    public void OnNavigatedFrom() { }
+
+    public bool IsNavigationTarget(object? parameter) => Equals(parameter, "claimed");
+}
+
+/// <summary>
+/// A recognition voter whose vote throws when the instance was activated
+/// with the parameter "thrower", and claims the parameter "seek" otherwise.
+/// </summary>
+public class ConditionalThrowVoteViewModel : NavigationViewModelBase, INavigationAware, INavigationTargetAware
+{
+    private string? _stored;
+
+    public void OnNavigatedTo(object? parameter) => _stored = parameter as string;
+
+    public void OnNavigatedFrom() { }
+
+    public bool IsNavigationTarget(object? parameter)
+    {
+        if (_stored == "thrower")
+        {
+            throw new InvalidOperationException("vote failed");
+        }
+
+        return Equals(parameter, "seek");
     }
 }
 
@@ -1038,6 +1113,7 @@ public class NavigationServiceTests
         services.AddTransient<ReentrantNavigatedToViewModel>();
         services.AddTransient<StateMismatchGuardViewModel>();
         services.AddTransient<TrackedDisposeViewModel>();
+        services.AddTransient<RemoveInCallbackViewModel>();
         services.AddTransient<KeepAliveViewModel>();
         services.AddTransient<ThrowingKeepAliveViewModel>();
         services.AddTransient<ParamAwareKeepAliveViewModel>();
@@ -1063,6 +1139,9 @@ public class NavigationServiceTests
         services.AddTransient<ToRedirectViewModel>();
         services.AddTransient<FromRedirectViewModel>();
         services.AddTransient<FromGoBackViewModel>();
+        services.AddTransient<FromGoBackToViewModel>();
+        services.AddTransient<VoteClaimViewModel>();
+        services.AddTransient<ConditionalThrowVoteViewModel>();
         services.AddTransient<ChainFirstViewModel>();
         services.AddTransient<ChainSecondViewModel>();
         services.AddTransient<ChainThirdViewModel>();
@@ -3376,11 +3455,13 @@ public class NavigationServiceTests
     private sealed class ContextGuardViewModel : NavigationViewModelBase, INavigationGuardWithContext
     {
         public NavigationGuardContext? LastContext { get; private set; }
+        public int CallCount { get; private set; }
         public bool Allow { get; set; } = true;
 
         public Task<bool> CanNavigateFromAsync(NavigationGuardContext context, CancellationToken cancellationToken)
         {
             LastContext = context;
+            CallCount++;
             return Task.FromResult(Allow);
         }
     }
@@ -4775,6 +4856,368 @@ public class NavigationServiceTests
         await ((IAsyncDisposable)_navigationService).DisposeAsync();
 
         Assert.Null(_navigationService.GetCurrentParameter(detail));
+    }
+
+    // ───────────────────── GoBackTo / SetRoot / Remove ─────────────────────
+
+    [Fact]
+    public async Task GoBackTo_PopsIntermediatePages_AndReactivatesTarget()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        var home = _navigationService.GetCurrentViewModel();
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel, string>("first"));
+        var detail = (TestDetailViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        Assert.True(await _navigationService.GoBackToAsync<TestHomeViewModel>());
+
+        Assert.Same(home, _navigationService.GetCurrentViewModel());
+        Assert.True(detail.Disposed);
+        Assert.Single(_navigationService.GetNavigationStack());
+    }
+
+    [Fact]
+    public async Task GoBackTo_TargetNotOnStack_ReturnsFalseAndKeepsStack()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel, string>("first"));
+        var detail = (TestDetailViewModel)_navigationService.GetCurrentViewModel()!;
+
+        Assert.False(await _navigationService.GoBackToAsync<SimpleAwareViewModel>());
+
+        Assert.Same(detail, _navigationService.GetCurrentViewModel());
+        Assert.False(detail.Disposed);
+        Assert.Equal(2, _navigationService.GetNavigationStack().Count);
+    }
+
+    [Fact]
+    public async Task GoBackTo_TargetIsActivePage_ReturnsFalse()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel, string>("first"));
+        var detail = (TestDetailViewModel)_navigationService.GetCurrentViewModel()!;
+
+        Assert.False(await _navigationService.GoBackToAsync<TestDetailViewModel>());
+
+        Assert.Same(detail, _navigationService.GetCurrentViewModel());
+        Assert.Equal(2, _navigationService.GetNavigationStack().Count);
+    }
+
+    [Fact]
+    public async Task GoBackTo_Parameterized_SelectsTheClaimedInstance()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel, string>("a"));
+        var detailA = (TestDetailViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel, string>("b"));
+        var detailB = (TestDetailViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        // An unclaimed parameter goes nowhere.
+        Assert.False(await _navigationService.GoBackToAsync<TestDetailViewModel, string>("nope"));
+        Assert.Equal(5, _navigationService.GetNavigationStack().Count);
+
+        Assert.True(await _navigationService.GoBackToAsync<TestDetailViewModel, string>("a"));
+
+        Assert.Same(detailA, _navigationService.GetCurrentViewModel());
+        Assert.Equal("a", detailA.ReceivedParam);
+        Assert.True(detailB.Disposed);
+        Assert.Equal(2, _navigationService.GetNavigationStack().Count);
+    }
+
+    [Fact]
+    public async Task GoBackTo_GuardRunsOnce_WithTargetContext()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel, string>("first"));
+        // An intermediate page sits between the target and the departing
+        // page, so the context cannot be confused with the page directly
+        // below the departing one.
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<ContextGuardViewModel>());
+        var guard = (ContextGuardViewModel)_navigationService.GetCurrentViewModel()!;
+
+        Assert.True(await _navigationService.GoBackToAsync<TestDetailViewModel>());
+
+        // The departing page's guard ran exactly once, and its context
+        // describes the target page: its type and its stored parameter.
+        Assert.Equal(1, guard.CallCount);
+        Assert.NotNull(guard.LastContext);
+        Assert.True(guard.LastContext!.IsBack);
+        Assert.Equal(typeof(TestDetailViewModel), guard.LastContext.TargetViewModelType);
+        Assert.Equal("first", guard.LastContext.Parameter);
+        Assert.Null(guard.LastContext.Operation);
+        Assert.Null(guard.LastContext.Retention);
+    }
+
+    [Fact]
+    public async Task GoBackTo_VetoedByGuard_ReturnsFalse()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<VetoGuardViewModel>());
+        var veto = (VetoGuardViewModel)_navigationService.GetCurrentViewModel()!;
+        veto.Veto = true;
+
+        Assert.False(await _navigationService.GoBackToAsync<TestHomeViewModel>());
+
+        Assert.Same(veto, _navigationService.GetCurrentViewModel());
+        Assert.Equal(2, _navigationService.GetNavigationStack().Count);
+    }
+
+    [Fact]
+    public async Task GoBackTo_KeepAliveIntermediate_MovesToCacheNotDisposed()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(retention: NavigationRetention.KeepAlive));
+        var keepAlive = (KeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        Assert.True(await _navigationService.GoBackToAsync<TestHomeViewModel>());
+
+        Assert.False(keepAlive.Disposed);
+        // The instance waits in the cache and is adopted on the next navigation.
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(retention: NavigationRetention.KeepAlive));
+        Assert.Same(keepAlive, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task SetRoot_ReplacesWholeStack_WithFreshInstance()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        var home = _navigationService.GetCurrentViewModel();
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel, string>("first"));
+        var detail = (TestDetailViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        Assert.True(await _navigationService.SetRootAsync<TestHomeViewModel>());
+
+        var stack = _navigationService.GetNavigationStack();
+        Assert.Single(stack);
+        Assert.IsType<TestHomeViewModel>(stack[0]);
+        Assert.NotSame(home, stack[0]);
+        Assert.True(detail.Disposed);
+    }
+
+    [Fact]
+    public async Task SetRoot_Parameterized_AdoptsRecognizedCacheEntry()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "p", retention: NavigationRetention.KeepAlive));
+        var cached = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        // Pop it into the cache, then cover the stack with other pages.
+        Assert.True(await _navigationService.GoBackAsync());
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        Assert.True(await _navigationService.SetRootAsync<ParamAwareKeepAliveViewModel, string>(
+            "p", retention: NavigationRetention.KeepAlive));
+
+        Assert.Same(cached, _navigationService.GetCurrentViewModel());
+        Assert.Single(_navigationService.GetNavigationStack());
+        Assert.False(cached.Disposed);
+    }
+
+    [Fact]
+    public async Task SetRoot_VetoedByGuard_ReturnsFalse()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<VetoGuardViewModel>());
+        var veto = (VetoGuardViewModel)_navigationService.GetCurrentViewModel()!;
+        veto.Veto = true;
+
+        Assert.False(await _navigationService.SetRootAsync<SimpleAwareViewModel>());
+
+        Assert.Same(veto, _navigationService.GetCurrentViewModel());
+        Assert.Equal(2, _navigationService.GetNavigationStack().Count);
+    }
+
+    [Fact]
+    public async Task Remove_CoveredPagesOnly_ActivePageKept()
+    {
+        TrackedDisposeViewModel.DisposeCount = 0;
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<TrackedDisposeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        // The covered Destroy page is removed and its scope disposed.
+        Assert.Equal(1, _navigationService.Remove<TrackedDisposeViewModel>());
+        Assert.Equal(1, TrackedDisposeViewModel.DisposeCount);
+        Assert.Equal(2, _navigationService.GetNavigationStack().Count);
+
+        // The active page is never removed, even when it matches.
+        Assert.Equal(0, _navigationService.Remove<SimpleAwareViewModel>());
+        Assert.Equal(2, _navigationService.GetNavigationStack().Count);
+
+        // The covered bottom page can be removed too.
+        Assert.Equal(1, _navigationService.Remove<TestHomeViewModel>());
+        Assert.Single(_navigationService.GetNavigationStack());
+    }
+
+    [Fact]
+    public async Task Remove_NoMatch_ReturnsZero()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+
+        Assert.Equal(0, _navigationService.Remove<TestDetailViewModel>());
+        Assert.Single(_navigationService.GetNavigationStack());
+    }
+
+    [Fact]
+    public async Task Remove_KeepAlivePage_MovesToCache()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(retention: NavigationRetention.KeepAlive));
+        var keepAlive = (KeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        Assert.Equal(1, _navigationService.Remove<KeepAliveViewModel>());
+
+        Assert.False(keepAlive.Disposed);
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(retention: NavigationRetention.KeepAlive));
+        Assert.Same(keepAlive, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Remove_Parameterized_RemovesClaimedOnly()
+    {
+        // ParamAwareKeepAliveViewModel is synchronously disposable: Remove is
+        // a synchronous API and cannot tear down IAsyncDisposable-only pages
+        // (the same documented limit as ClearCache).
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>("a"));
+        var pageA = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        // Cover page A before pushing page B: pushing the same type while it
+        // is active is a self no-op, not a second instance.
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>("b"));
+        var pageB = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.NotSame(pageA, pageB);
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        Assert.Equal(1, _navigationService.Remove<ParamAwareKeepAliveViewModel, string>("a"));
+        Assert.True(pageA.Disposed);
+        Assert.False(pageB.Disposed);
+        Assert.Equal(4, _navigationService.GetNavigationStack().Count);
+
+        Assert.Equal(1, _navigationService.Remove<ParamAwareKeepAliveViewModel, string>("b"));
+        Assert.True(pageB.Disposed);
+        Assert.Equal(3, _navigationService.GetNavigationStack().Count);
+    }
+
+    [Fact]
+    public async Task Remove_KeepAlivePage_EvictsCachedInstance_AndDisposesIt()
+    {
+        // First instance ends up in the cache (stored parameter "a").
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "a", retention: NavigationRetention.KeepAlive));
+        var first = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.True(await _navigationService.GoBackAsync());
+
+        // A second instance: the cached one is not claimed for "b", so it is
+        // bypassed and a fresh KeepAlive page is pushed.
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "b", retention: NavigationRetention.KeepAlive));
+        var second = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.NotSame(first, second);
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        // Removing the covered KeepAlive page moves it into the cache slot:
+        // the previously cached instance is evicted and disposed.
+        Assert.Equal(1, _navigationService.Remove<ParamAwareKeepAliveViewModel>());
+        Assert.True(first.Disposed);
+        Assert.False(second.Disposed);
+
+        // The cache now holds the second instance.
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "b", retention: NavigationRetention.KeepAlive));
+        Assert.Same(second, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task GoBackTo_RegisteredInCallback_ExecutesAfterWindowCloses()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        var home = _navigationService.GetCurrentViewModel();
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel, string>("x"));
+        Assert.True(await _navigationService.NavigateToAsync<FromGoBackToViewModel>());
+
+        // Leaving the redirect page runs its From, whose registered
+        // GoBackTo supersedes the GoBack that started the departure: the
+        // outer request completes as superseded (false) while the
+        // registered GoBackTo executes and lands on Home.
+        var rest = RestSignalFor<TestHomeViewModel>();
+        Assert.False(await _navigationService.GoBackAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+        await rest.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Same(home, _navigationService.GetCurrentViewModel());
+        Assert.Single(_navigationService.GetNavigationStack());
+    }
+
+    [Fact]
+    public async Task GoBackTo_ThrowingVote_ReportedExactlyOnce_WhenGuardVetoes()
+    {
+        var errors = new List<Exception>();
+        _navigationService.SubscriberError += errors.Add;
+
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<ConditionalThrowVoteViewModel, string>("buddy"));
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<ConditionalThrowVoteViewModel, string>("thrower"));
+        Assert.True(await _navigationService.NavigateToAsync<VetoGuardViewModel>());
+        var veto = (VetoGuardViewModel)_navigationService.GetCurrentViewModel()!;
+        veto.Veto = true;
+
+        // The search examines the "thrower" instance first (its vote throws,
+        // collected), then claims the "buddy" instance — the departure
+        // proceeds, but the guard vetoes it, so the hop never runs. The
+        // vote failure must still be reported, exactly once.
+        Assert.False(await _navigationService.GoBackToAsync<ConditionalThrowVoteViewModel, string>("seek"));
+
+        var error = Assert.Single(errors);
+        Assert.IsType<InvalidOperationException>(error);
+        Assert.Equal("vote failed", error.Message);
+        Assert.Same(veto, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task GoBackTo_VoteClaimed_OverwritesStoredParameter()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<VoteClaimViewModel, string>("stored"));
+        var vote = (VoteClaimViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        // The vote claims the page for "claimed", a parameter different from
+        // the stored one: the page is re-activated with the intent's
+        // parameter, which becomes its stored parameter.
+        Assert.True(await _navigationService.GoBackToAsync<VoteClaimViewModel, string>("claimed"));
+
+        Assert.Same(vote, _navigationService.GetCurrentViewModel());
+        Assert.Equal("claimed", vote.LastParameter);
+        Assert.Equal("claimed", _navigationService.GetCurrentParameter(vote));
+    }
+
+    [Fact]
+    public async Task Remove_AfterDispose_ReturnsZero()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<TrackedDisposeViewModel>());
+
+        await ((IAsyncDisposable)_navigationService).DisposeAsync();
+
+        Assert.Equal(0, _navigationService.Remove<TestHomeViewModel>());
+    }
+
+    [Fact]
+    public async Task Remove_FromLifecycleCallback_ThrowsInvalidOperationException()
+    {
+        RemoveInCallbackViewModel.Caught = null;
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<RemoveInCallbackViewModel>());
+
+        Assert.IsType<InvalidOperationException>(RemoveInCallbackViewModel.Caught);
     }
 
     [Fact]
@@ -6204,3 +6647,4 @@ public class NavigationServiceTests
 
     #endregion
 }
+

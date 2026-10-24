@@ -67,7 +67,7 @@ namespace ElegantSeries.Flow.Navigation;
 /// two regions at once.
 /// </para>
 /// <para>
-/// <b>Cancellation:</b> <c>NavigateToAsync</c> / <c>GoBackAsync</c> accept a
+/// <b>Cancellation:</b> <c>NavigateToAsync</c> / <c>GoBackAsync</c> / <c>GoBackToAsync</c> / <c>SetRootAsync</c> accept a
 /// <see cref="CancellationToken"/> that is honored while the request is still
 /// pending: cancellation withdraws the request — it never executes — and the
 /// awaiting caller throws <see cref="OperationCanceledException"/>. Cancellation
@@ -79,7 +79,7 @@ namespace ElegantSeries.Flow.Navigation;
 /// the commit); withdrawing there re-activates the departing page — its
 /// <c>OnNavigatedTo</c> runs again — instead of completing the departure.
 /// (Those checkpoints exist on the <c>NavigateToAsync</c> hop only;
-/// <c>GoBackAsync</c> has none — see its parameter documentation.)
+/// <c>GoBackAsync</c> and <c>GoBackToAsync</c> have none — see their parameter documentation.)
 /// A target page is constructed only when its request is executed, so a withdrawn
 /// request never leaves a page scope behind.
 /// </para>
@@ -106,8 +106,8 @@ namespace ElegantSeries.Flow.Navigation;
 /// names are rejected with <see cref="ArgumentException"/>.
 /// </para>
 /// <para>
-/// <b>After disposal:</b> navigation requests fail — <c>NavigateToAsync</c> and
-/// <c>GoBackAsync</c> throw <see cref="ObjectDisposedException"/>, except a
+/// <b>After disposal:</b> navigation requests fail — <c>NavigateToAsync</c>,
+/// <c>GoBackAsync</c>, <c>GoBackToAsync</c> and <c>SetRootAsync</c> throw <see cref="ObjectDisposedException"/>, except a
 /// request registered from within a lifecycle callback after disposal, which
 /// completes with <see langword="false"/> instead (see the methods' return
 /// documentation). A callback-registered request that was already registered
@@ -119,7 +119,7 @@ namespace ElegantSeries.Flow.Navigation;
 /// <c>GetCurrentRetention</c> and <c>GetCurrentParameter</c> return
 /// <see langword="null"/>, and
 /// <c>GetNavigationStack</c> returns an empty list. The cache-clearing methods
-/// are silent no-ops. Event subscriptions remain valid and no new navigation
+/// are silent no-ops, and <c>Remove</c> returns 0. Event subscriptions remain valid and no new navigation
 /// activity is raised, but work already in flight at disposal — a deferred
 /// scope disposal, or a guard fault the pump had abandoned — can still
 /// deliver its <c>ViewModelReleased</c> or <c>SubscriberError</c>
@@ -486,6 +486,255 @@ public interface INavigationService
     /// <c>OnNavigatedFrom</c> supersedes the request that started the departure.
     /// </remarks>
     Task<bool> GoBackAsync(string regionName = DefaultRegionName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Navigates back to the nearest page of the specified type on the
+    /// region's stack, removing every page above it.
+    /// </summary>
+    /// <param name="regionName">The target region. Defaults to <c>"MainRegion"</c>.</param>
+    /// <param name="cancellationToken">
+    /// Cooperative cancellation, with the same semantics as
+    /// <see cref="GoBackAsync(string, CancellationToken)"/>: cancellation while
+    /// the request is still pending withdraws it and throws
+    /// <see cref="OperationCanceledException"/>; once the departing page's
+    /// <c>OnNavigatedFrom</c> has started, the back navigation is carried out.
+    /// </param>
+    /// <returns>
+    /// The fate of this request: <see langword="true"/> if it was executed;
+    /// <see langword="false"/> if it was superseded by a later request in the
+    /// same page window, vetoed by the current page's leave guard, no page of
+    /// the type is on the stack, the nearest such page already is the active
+    /// page, or the service was disposed.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
+    /// call completes; cancellation while the request is still pending also
+    /// withdraws the request.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">
+    /// Thrown when the service has been disposed.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// "Nearest" is measured from the top of the stack and the type is the
+    /// static type the page was navigated to (the same key the KeepAlive
+    /// cache uses), not the ViewModel's runtime type. The pages above the
+    /// target leave the stack without running their lifecycle callbacks:
+    /// each is deactivated under its own
+    /// <see cref="NavigationRetention"/> — a removed page's scope is disposed
+    /// (raising <see cref="ViewModelReleased"/>), a <c>KeepAlive</c> page is
+    /// moved into the KeepAlive cache. Only the departing page's leave guard
+    /// runs, once, before the move; its context describes the target page.
+    /// The target page is re-activated under its own stored parameter.
+    /// </para>
+    /// <para>
+    /// Only the stack is searched: an instance sitting in the KeepAlive cache
+    /// is not a target. Like <see cref="GoBackAsync(string, CancellationToken)"/>,
+    /// the request participates in the same window model as
+    /// <see cref="NavigateToAsync{TViewModel}(string, NavigationOperation, NavigationRetention, bool, CancellationToken)"/>.
+    /// </para>
+    /// </remarks>
+    Task<bool> GoBackToAsync<TViewModel>(
+        string regionName = DefaultRegionName,
+        CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel;
+
+    /// <summary>
+    /// Navigates back to the page of the specified type on the region's stack
+    /// that the recognition gate claims for the specified parameter,
+    /// removing every page above it.
+    /// </summary>
+    /// <param name="parameter">
+    /// The parameter identifying the target page, through the same
+    /// recognition gate as a forward navigation: a page implementing
+    /// <see cref="INavigationTargetAware"/> has the final say for its own
+    /// entry; any other page is compared by the parameter it was last
+    /// activated with.
+    /// </param>
+    /// <param name="regionName">The target region. Defaults to <c>"MainRegion"</c>.</param>
+    /// <param name="cancellationToken">
+    /// Cooperative cancellation, with the same semantics as
+    /// <see cref="GoBackAsync(string, CancellationToken)"/>.
+    /// </param>
+    /// <returns>
+    /// The fate of this request: <see langword="true"/> if it was executed;
+    /// <see langword="false"/> if it was superseded, vetoed by the current
+    /// page's leave guard, no page of the type is claimed for the parameter,
+    /// the claimed page already is the active page, or the service was
+    /// disposed.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
+    /// call completes; cancellation while the request is still pending also
+    /// withdraws the request.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">
+    /// Thrown when the service has been disposed.
+    /// </exception>
+    /// <remarks>
+    /// Candidates are considered from the top of the stack down, without the
+    /// <see cref="NavigationRetention.KeepAlive"/> restriction the forward
+    /// parameter recognition applies: any page of the type on the stack can
+    /// be the target. Unlike a forward navigation, an unrecognized parameter
+    /// never creates a page — the request simply completes with
+    /// <see langword="false"/>. The target page is re-activated with
+    /// <paramref name="parameter"/>, which also becomes its stored parameter.
+    /// In every other respect the semantics match
+    /// <see cref="GoBackToAsync{TViewModel}(string, CancellationToken)"/>.
+    /// </remarks>
+    Task<bool> GoBackToAsync<TViewModel, TParam>(
+        TParam parameter,
+        string regionName = DefaultRegionName,
+        CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel;
+
+    /// <summary>
+    /// Makes the specified page the region's root: every page currently on
+    /// the stack is replaced by the target page.
+    /// </summary>
+    /// <param name="regionName">The target region. Defaults to <c>"MainRegion"</c>.</param>
+    /// <param name="retention">
+    /// The <see cref="NavigationRetention"/> the new root page itself is
+    /// created with; it takes effect when the root later leaves the stack.
+    /// Pages being replaced are deactivated under their own retention.
+    /// </param>
+    /// <param name="cancellationToken">Cooperative cancellation, with the same semantics as <see cref="NavigateToAsync{TViewModel}(string, NavigationOperation, NavigationRetention, bool, CancellationToken)"/>.</param>
+    /// <returns>
+    /// The fate of this request: <see langword="true"/> if it was executed;
+    /// <see langword="false"/> if it was superseded by a later request in the
+    /// same page window, vetoed by the current page's leave guard, or the
+    /// service was disposed.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
+    /// call completes; cancellation while the request is still pending also
+    /// withdraws the request.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">
+    /// Thrown when the service has been disposed.
+    /// </exception>
+    /// <remarks>
+    /// Equivalent to <see cref="NavigateToAsync{TViewModel}(string, NavigationOperation, NavigationRetention, bool, CancellationToken)"/>
+    /// with <see cref="NavigationOperation.Reset"/> and no refresh: the
+    /// recognition gate still applies, so when a <c>KeepAlive</c> instance of
+    /// the page sits in the cache and is claimed for the (absent) parameter,
+    /// it is adopted as the new root instead of constructing a new page.
+    /// A request for the page type that is already active is not a no-op:
+    /// the stack is still reset around it.
+    /// </remarks>
+    Task<bool> SetRootAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
+        string regionName = DefaultRegionName,
+        NavigationRetention retention = NavigationRetention.Destroy,
+        CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel;
+
+    /// <summary>
+    /// Makes the page identified by the specified parameter the region's
+    /// root: every page currently on the stack is replaced by it.
+    /// </summary>
+    /// <param name="parameter">The navigation parameter for the new root page; also drives the KeepAlive recognition gate, exactly as on <see cref="NavigateToAsync{TViewModel, TParam}(TParam, string, NavigationOperation, NavigationRetention, bool, CancellationToken)"/>.</param>
+    /// <param name="regionName">The target region. Defaults to <c>"MainRegion"</c>.</param>
+    /// <param name="retention">
+    /// The <see cref="NavigationRetention"/> the new root page itself is
+    /// created with; it takes effect when the root later leaves the stack.
+    /// Pages being replaced are deactivated under their own retention.
+    /// </param>
+    /// <param name="cancellationToken">Cooperative cancellation, with the same semantics as <see cref="NavigateToAsync{TViewModel}(string, NavigationOperation, NavigationRetention, bool, CancellationToken)"/>.</param>
+    /// <returns>
+    /// The fate of this request: <see langword="true"/> if it was executed;
+    /// <see langword="false"/> if it was superseded by a later request in the
+    /// same page window, vetoed by the current page's leave guard, or the
+    /// service was disposed.
+    /// </returns>
+    /// <exception cref="OperationCanceledException">
+    /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
+    /// call completes; cancellation while the request is still pending also
+    /// withdraws the request.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">
+    /// Thrown when the service has been disposed.
+    /// </exception>
+    /// <remarks>
+    /// Equivalent to <see cref="NavigateToAsync{TViewModel, TParam}(TParam, string, NavigationOperation, NavigationRetention, bool, CancellationToken)"/>
+    /// with <see cref="NavigationOperation.Reset"/> and no refresh.
+    /// </remarks>
+    Task<bool> SetRootAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
+        TParam parameter,
+        string regionName = DefaultRegionName,
+        NavigationRetention retention = NavigationRetention.Destroy,
+        CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel;
+
+    /// <summary>
+    /// Synchronously removes every covered page of the specified type from
+    /// the region's stack.
+    /// </summary>
+    /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
+    /// <returns>The number of pages removed.</returns>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the navigation lock cannot be acquired within
+    /// <see cref="NavigationOptions.SyncLockTimeout"/> (default 2 seconds).
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Only covered pages are removed: the active page is never removed, even
+    /// when it matches, and pages above a removed page keep their positions.
+    /// Removal is immediate stack surgery, not a navigation: no page's
+    /// lifecycle callbacks or leave guard run. Each removed page is
+    /// deactivated under its own <see cref="NavigationRetention"/> — a
+    /// <see cref="NavigationRetention.Destroy"/> page's scope is disposed
+    /// (raising <see cref="ViewModelReleased"/>), a
+    /// <see cref="NavigationRetention.KeepAlive"/> page is moved into the
+    /// KeepAlive cache, evicting and disposing any previous entry under its
+    /// cache key. The KeepAlive cache itself is never searched or modified
+    /// beyond such an eviction.
+    /// </para>
+    /// <para>
+    /// The type is the static type the page was navigated to (the same key
+    /// the KeepAlive cache uses), not the ViewModel's runtime type.
+    /// </para>
+    /// <para>
+    /// The synchronous disposal path has the same limits as
+    /// <see cref="ClearCache(string)"/>: a removed page whose scope contains
+    /// a service that only implements <see cref="IAsyncDisposable"/> makes
+    /// the DI container throw <see cref="InvalidOperationException"/>
+    /// directing the caller to the asynchronous APIs.
+    /// </para>
+    /// <para>
+    /// Reentrancy: throws <see cref="InvalidOperationException"/> if called
+    /// from within a page lifecycle callback. Call it outside the callback
+    /// instead. After the service is disposed, returns 0 without doing
+    /// anything.
+    /// </para>
+    /// </remarks>
+    int Remove<TViewModel>(string regionName = DefaultRegionName)
+        where TViewModel : INavigationViewModel;
+
+    /// <summary>
+    /// Synchronously removes the covered pages of the specified type that the
+    /// recognition gate claims for the specified parameter from the region's
+    /// stack.
+    /// </summary>
+    /// <param name="parameter">
+    /// The parameter identifying the pages to remove, through the same
+    /// recognition gate as a forward navigation: a page implementing
+    /// <see cref="INavigationTargetAware"/> has the final say for its own
+    /// entry; any other page is compared by the parameter it was last
+    /// activated with.
+    /// </param>
+    /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
+    /// <returns>The number of pages removed.</returns>
+    /// <exception cref="TimeoutException">
+    /// Thrown when the navigation lock cannot be acquired within
+    /// <see cref="NavigationOptions.SyncLockTimeout"/> (default 2 seconds).
+    /// </exception>
+    /// <remarks>
+    /// Every claimed page is removed (recognition here selects a set, not a
+    /// single target). In every other respect the semantics match
+    /// <see cref="Remove{TViewModel}(string)"/>.
+    /// </remarks>
+    int Remove<TViewModel, TParam>(TParam parameter, string regionName = DefaultRegionName)
+        where TViewModel : INavigationViewModel;
 
     // ──────────────── Cache Management (Sync then Async) ────────────────
 

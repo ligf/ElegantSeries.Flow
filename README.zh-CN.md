@@ -436,6 +436,9 @@ Avalonia 示例的 csproj 里开了 `PublishAot=true`，作为框架 AOT 能力�
 | `NavigateToAsync<T>(region?, operation?, retention?, refreshIfActive?, cancellationToken?)` | 导航到 ViewModel 类型 |
 | `NavigateToAsync<T, TParam>(param, region?, operation?, retention?, refreshIfActive?, cancellationToken?)` | 带强类型参数导航 |
 | `GoBackAsync(region?, cancellationToken?)` | 弹出当前页面 |
+| `GoBackToAsync<T>(region?, cancellationToken?)` / `GoBackToAsync<T, TParam>(param, region?, cancellationToken?)` | 回退到栈上的某个页面，弹出其上方全部页面 |
+| `SetRootAsync<T>(region?, retention?, cancellationToken?)` / `SetRootAsync<T, TParam>(param, region?, retention?, cancellationToken?)` | 以新页面为根替换整个栈 |
+| `Remove<T>(region?)` / `Remove<T, TParam>(param, region?)` | 同步移除栈中被覆盖的页面 |
 | `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentRetention(region?)` / `GetCurrentParameter(viewModel, region?)` / `GetNavigationStack(region?)` | 查询 |
 | `ClearCache(region?)` / `ClearCacheAsync(region?)` | 清空单个 region 的 KeepAlive 缓存 |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | 清空所有 KeepAlive 缓存 |
