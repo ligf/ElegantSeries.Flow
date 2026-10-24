@@ -25,17 +25,41 @@ public sealed partial class NavigationService
     /// window's slot and return immediately, instead of awaiting a fate the
     /// pump can only complete after the processing returns.
     /// </summary>
-    private static readonly AsyncLocal<NavigationEntry?> _currentLifecycleEntry = new();
+    /// <remarks>
+    /// The slot holds a per-invocation <see cref="LifecycleMarker"/>, not the
+    /// entry itself: an async flow forked from inside a callback captures the
+    /// slot's value in its execution-context snapshot, and the callback's
+    /// restore (a write on the callback's own flow) never reaches the fork.
+    /// Expiring the shared marker when the invocation returns is what stops
+    /// the fork classifying as in-callback for the rest of its life.
+    /// </remarks>
+    private static readonly AsyncLocal<LifecycleMarker?> _currentLifecycleMarker = new();
+
+    /// <summary>
+    /// One lifecycle invocation's marker. A fresh instance is created for
+    /// every guard/To/From invocation and expired the moment that invocation
+    /// returns — disposal callbacks that outlive their invocation, and flows
+    /// forked from inside it, observe <see cref="Active"/> as false.
+    /// </summary>
+    private sealed class LifecycleMarker(NavigationEntry entry)
+    {
+        public NavigationEntry Entry { get; } = entry;
+
+        /// <summary>True while the invocation that created this marker is still running.</summary>
+        public volatile bool Active = true;
+    }
 
     /// <summary>
     /// The lifecycle entry whose processing is running on this flow, when it
-    /// belongs to THIS service instance; null otherwise. Calls into another
-    /// instance from this instance's callback are outside calls for that
-    /// instance and must not be classified as in-callback there.
+    /// belongs to THIS service instance and its invocation is still running;
+    /// null otherwise. Calls into another instance from this instance's
+    /// callback are outside calls for that instance and must not be classified
+    /// as in-callback there.
     /// </summary>
     private NavigationEntry? CurrentOwnLifecycleEntry =>
-        _currentLifecycleEntry.Value is { } entry && ReferenceEquals(entry.OwnerService, this)
-            ? entry
+        _currentLifecycleMarker.Value is { Active: true } marker
+            && ReferenceEquals(marker.Entry.OwnerService, this)
+            ? marker.Entry
             : null;
 
     /// <summary>
@@ -46,15 +70,15 @@ public sealed partial class NavigationService
     /// </summary>
     private static void RaiseNavigationChangedNotification(INavigationViewModel viewModel)
     {
-        var previousCurrent = _currentLifecycleEntry.Value;
-        _currentLifecycleEntry.Value = null;
+        var previousCurrent = _currentLifecycleMarker.Value;
+        _currentLifecycleMarker.Value = null;
         try
         {
             viewModel.RaiseNavigationChanged();
         }
         finally
         {
-            _currentLifecycleEntry.Value = previousCurrent;
+            _currentLifecycleMarker.Value = previousCurrent;
         }
     }
 
@@ -74,8 +98,8 @@ public sealed partial class NavigationService
             return;
         }
 
-        var previousCurrent = _currentLifecycleEntry.Value;
-        _currentLifecycleEntry.Value = null;
+        var previousCurrent = _currentLifecycleMarker.Value;
+        _currentLifecycleMarker.Value = null;
         try
         {
             handlers.Invoke(error);
@@ -86,7 +110,7 @@ public sealed partial class NavigationService
         }
         finally
         {
-            _currentLifecycleEntry.Value = previousCurrent;
+            _currentLifecycleMarker.Value = previousCurrent;
         }
     }
 
@@ -109,8 +133,8 @@ public sealed partial class NavigationService
             return;
         }
 
-        var previousCurrent = _currentLifecycleEntry.Value;
-        _currentLifecycleEntry.Value = null;
+        var previousCurrent = _currentLifecycleMarker.Value;
+        _currentLifecycleMarker.Value = null;
         try
         {
             foreach (var handler in handlers.GetInvocationList())
@@ -128,7 +152,7 @@ public sealed partial class NavigationService
         }
         finally
         {
-            _currentLifecycleEntry.Value = previousCurrent;
+            _currentLifecycleMarker.Value = previousCurrent;
         }
     }
 
@@ -144,8 +168,8 @@ public sealed partial class NavigationService
         }
 
         // Marker cleared for subscribers, as in RaiseRegionNavigated.
-        var previousCurrent = _currentLifecycleEntry.Value;
-        _currentLifecycleEntry.Value = null;
+        var previousCurrent = _currentLifecycleMarker.Value;
+        _currentLifecycleMarker.Value = null;
         try
         {
             foreach (var handler in handlers.GetInvocationList())
@@ -163,7 +187,7 @@ public sealed partial class NavigationService
         }
         finally
         {
-            _currentLifecycleEntry.Value = previousCurrent;
+            _currentLifecycleMarker.Value = previousCurrent;
         }
     }
 
@@ -179,8 +203,8 @@ public sealed partial class NavigationService
         }
 
         // Marker cleared for subscribers, as in RaiseRegionNavigated.
-        var previousCurrent = _currentLifecycleEntry.Value;
-        _currentLifecycleEntry.Value = null;
+        var previousCurrent = _currentLifecycleMarker.Value;
+        _currentLifecycleMarker.Value = null;
         try
         {
             foreach (var handler in handlers.GetInvocationList())
@@ -198,7 +222,7 @@ public sealed partial class NavigationService
         }
         finally
         {
-            _currentLifecycleEntry.Value = previousCurrent;
+            _currentLifecycleMarker.Value = previousCurrent;
         }
     }
 
@@ -340,8 +364,9 @@ public sealed partial class NavigationService
         if (entry.ViewModel is INavigationAwareAsync asyncAware)
         {
             var token = entry.LifecycleCts.Token;
-            var previousCurrent = _currentLifecycleEntry.Value;
-            _currentLifecycleEntry.Value = entry;
+            var marker = new LifecycleMarker(entry);
+            var previousCurrent = _currentLifecycleMarker.Value;
+            _currentLifecycleMarker.Value = marker;
             try
             {
                 await asyncAware.OnNavigatedFromAsync(token).ConfigureAwait(false);
@@ -367,14 +392,16 @@ public sealed partial class NavigationService
             }
             finally
             {
-                _currentLifecycleEntry.Value = previousCurrent;
+                marker.Active = false;
+                _currentLifecycleMarker.Value = previousCurrent;
                 entry.ExitInFlightLifecycle(gateTask);
             }
         }
         else if (entry.ViewModel is INavigationAware aware)
         {
-            var previousCurrent = _currentLifecycleEntry.Value;
-            _currentLifecycleEntry.Value = entry;
+            var marker = new LifecycleMarker(entry);
+            var previousCurrent = _currentLifecycleMarker.Value;
+            _currentLifecycleMarker.Value = marker;
             try
             {
                 aware.OnNavigatedFrom();
@@ -385,7 +412,8 @@ public sealed partial class NavigationService
             }
             finally
             {
-                _currentLifecycleEntry.Value = previousCurrent;
+                marker.Active = false;
+                _currentLifecycleMarker.Value = previousCurrent;
                 entry.ExitInFlightLifecycle(gateTask);
             }
         }
@@ -412,8 +440,9 @@ public sealed partial class NavigationService
         if (viewModel is INavigationAwareAsync asyncAware)
         {
             var token = entry.LifecycleCts.Token;
-            var previousCurrent = _currentLifecycleEntry.Value;
-            _currentLifecycleEntry.Value = entry;
+            var marker = new LifecycleMarker(entry);
+            var previousCurrent = _currentLifecycleMarker.Value;
+            _currentLifecycleMarker.Value = marker;
             try
             {
                 await asyncAware.OnNavigatedToAsync(parameter, token).ConfigureAwait(false);
@@ -440,14 +469,16 @@ public sealed partial class NavigationService
             }
             finally
             {
-                _currentLifecycleEntry.Value = previousCurrent;
+                marker.Active = false;
+                _currentLifecycleMarker.Value = previousCurrent;
                 entry.ExitInFlightLifecycle(gateTask);
             }
         }
         else if (viewModel is INavigationAware aware)
         {
-            var previousCurrent = _currentLifecycleEntry.Value;
-            _currentLifecycleEntry.Value = entry;
+            var marker = new LifecycleMarker(entry);
+            var previousCurrent = _currentLifecycleMarker.Value;
+            _currentLifecycleMarker.Value = marker;
             try
             {
                 aware.OnNavigatedTo(parameter);
@@ -458,7 +489,8 @@ public sealed partial class NavigationService
             }
             finally
             {
-                _currentLifecycleEntry.Value = previousCurrent;
+                marker.Active = false;
+                _currentLifecycleMarker.Value = previousCurrent;
                 entry.ExitInFlightLifecycle(gateTask);
             }
         }
@@ -597,7 +629,8 @@ public sealed partial class NavigationService
             // would deadlock until the timeout, AND disposing immediately would
             // pull the scope's services out from under the still-running callback.
             // Defer the disposal until the callback exits.
-            bool isSelfDispose = ReferenceEquals(_currentLifecycleEntry.Value, entry);
+            bool isSelfDispose = _currentLifecycleMarker.Value is { Active: true } selfMarker
+                && ReferenceEquals(selfMarker.Entry, entry);
             var gateTask = entry.InFlightGateTask;
             // A gate the pump already timed out on (and reported) is not waited
             // on again: the scope is released exactly as after a timeout here.
