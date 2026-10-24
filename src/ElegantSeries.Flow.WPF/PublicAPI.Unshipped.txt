@@ -1,0 +1,42 @@
+#nullable enable
+ElegantSeries.Flow.WPF.Extensions.FlowViewServiceExtensions
+ElegantSeries.Flow.WPF.Hosting.NavigationHost
+ElegantSeries.Flow.WPF.Hosting.NavigationHost.Dispose() -> void
+ElegantSeries.Flow.WPF.Hosting.NavigationHost.NavigationHost() -> void
+ElegantSeries.Flow.WPF.Hosting.NavigationHost.NavigationHost(ElegantSeries.Flow.Threading.IDispatcher! dispatcher) -> void
+ElegantSeries.Flow.WPF.Hosting.NavigationHost.NavigationService.get -> ElegantSeries.Flow.Navigation.INavigationService?
+ElegantSeries.Flow.WPF.Hosting.NavigationHost.NavigationService.set -> void
+ElegantSeries.Flow.WPF.Hosting.NavigationHost.RegionName.get -> string!
+ElegantSeries.Flow.WPF.Hosting.NavigationHost.RegionName.set -> void
+ElegantSeries.Flow.WPF.Hosting.NavigationHost.ViewLocator.get -> ElegantSeries.Flow.WPF.Locating.IViewLocator?
+ElegantSeries.Flow.WPF.Hosting.NavigationHost.ViewLocator.set -> void
+ElegantSeries.Flow.WPF.Locating.IViewLocator
+ElegantSeries.Flow.WPF.Locating.IViewLocator.CreateView(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel) -> System.Windows.FrameworkElement!
+ElegantSeries.Flow.WPF.Locating.IViewLocator.IsRegistered<TViewModel>() -> bool
+ElegantSeries.Flow.WPF.Locating.IViewLocator.Register<TView, TViewModel>() -> void
+ElegantSeries.Flow.WPF.Locating.IViewLocator.Register<TViewModel>(System.Func<TViewModel, System.Windows.FrameworkElement!>! viewFactory) -> void
+ElegantSeries.Flow.WPF.Locating.IViewLocator.RegisterSingleton<TView, TViewModel>() -> void
+ElegantSeries.Flow.WPF.Locating.IViewLocator.RegisterTransient<TView, TViewModel>() -> void
+ElegantSeries.Flow.WPF.Locating.ViewLocator
+ElegantSeries.Flow.WPF.Locating.ViewLocator.CreateView(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel) -> System.Windows.FrameworkElement!
+ElegantSeries.Flow.WPF.Locating.ViewLocator.IsRegistered<TViewModel>() -> bool
+ElegantSeries.Flow.WPF.Locating.ViewLocator.Register<TView, TViewModel>() -> void
+ElegantSeries.Flow.WPF.Locating.ViewLocator.Register<TViewModel>(System.Func<TViewModel, System.Windows.FrameworkElement!>! viewFactory) -> void
+ElegantSeries.Flow.WPF.Locating.ViewLocator.RegisterSingleton<TView, TViewModel>() -> void
+ElegantSeries.Flow.WPF.Locating.ViewLocator.RegisterTransient<TView, TViewModel>() -> void
+ElegantSeries.Flow.WPF.Locating.ViewLocator.ViewLocator() -> void
+ElegantSeries.Flow.WPF.Threading.IDispatcher
+ElegantSeries.Flow.WPF.Threading.WpfDispatcher
+ElegantSeries.Flow.WPF.Threading.WpfDispatcher.CheckAccess() -> bool
+ElegantSeries.Flow.WPF.Threading.WpfDispatcher.Post(System.Action! action) -> void
+ElegantSeries.Flow.WPF.Threading.WpfDispatcher.WpfDispatcher() -> void
+ElegantSeries.Flow.WPF.Threading.WpfDispatcher.WpfDispatcher(System.Windows.Threading.Dispatcher! dispatcher) -> void
+ElegantSeries.Flow.WPF.Views.BaseView<TViewModel>
+ElegantSeries.Flow.WPF.Views.BaseView<TViewModel>.BaseView() -> void
+ElegantSeries.Flow.WPF.Views.BaseView<TViewModel>.ViewModel.get -> TViewModel?
+static ElegantSeries.Flow.WPF.Extensions.FlowViewServiceExtensions.AddElegantSeriesFlowViews(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<ElegantSeries.Flow.WPF.Locating.IViewLocator!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static readonly ElegantSeries.Flow.WPF.Hosting.NavigationHost.NavigationServiceProperty -> System.Windows.DependencyProperty!
+static readonly ElegantSeries.Flow.WPF.Hosting.NavigationHost.RegionNameProperty -> System.Windows.DependencyProperty!
+static readonly ElegantSeries.Flow.WPF.Hosting.NavigationHost.ViewLocatorProperty -> System.Windows.DependencyProperty!
+virtual ElegantSeries.Flow.WPF.Hosting.NavigationHost.OnViewCreationFailed(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel, System.Exception! exception) -> void
+virtual ElegantSeries.Flow.WPF.Views.BaseView<TViewModel>.OnViewModelChanged(TViewModel? oldValue, TViewModel? newValue) -> void
