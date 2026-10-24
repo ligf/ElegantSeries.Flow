@@ -23,8 +23,8 @@ thread-safe by design.
 - **Typed parameters** — `NavigateToAsync<TViewModel, TParam>(param)` with compile-time type safety
 - **Lifecycle callbacks** — `INavigationAware` (`OnNavigatedTo` / `OnNavigatedFrom`),
   or the async `INavigationAwareAsync` when the transition needs `await`
-- **Navigation guards** — `INavigationGuard.CanNavigateFromAsync()` can cancel navigation,
-  or `INavigationGuardWithContext` for target/mode/parameter-aware decisions
+- **Navigation guards** — `INavigationGuard.CanNavigateFromAsync(cancellationToken)` can cancel navigation,
+  or `INavigationGuardWithContext` for target/operation/parameter-aware decisions
 - **Cancellation** — `CancellationToken` on navigation calls, honored until the stack updates
 - **Refresh** — re-invoke the active page's callbacks with a new parameter (`refreshIfActive`)
 - **AOT / trimming safe** — `DynamicallyAccessedMembers` annotations, no runtime reflection
@@ -136,11 +136,11 @@ ElegantSeries.Flow is UI-agnostic: it manages ViewModels, and your platform laye
 active ViewModel to a View. The typical pattern is a `ContentControl`-style host bound to
 `GetCurrentViewModel()` and refreshed on the `RegionNavigated` event. For AOT-safe
 ViewModel→View mapping, register views explicitly via `views.Register` /
-`views.RegisterTransient` / `views.RegisterSingleton` inside `services.AddFlowViews(...)`
+`views.RegisterTransient` / `views.RegisterSingleton` inside `services.AddElegantSeriesFlowViews(...)`
 — no runtime reflection, no naming conventions. Alternatively, put a `[ViewFor]`
 attribute (`ElegantSeries.Flow.Routing`) on the View class declaring its ViewModel
 and let the ElegantSeries.Flow source generator emit the same registrations into a
-generated `RegisterAttributedViews()` extension (call it inside `AddFlowViews`); the
+generated `RegisterAttributedViews()` extension (call it inside `AddElegantSeriesFlowViews`); the
 attribute's `Lifetime` selects `Transient` (default), `Singleton`, or `ViewOnly`
 (mapping only — register the ViewModel in DI yourself). The runtime never scans the
 attribute. Register a ViewModel either manually or via the attribute, not both:
@@ -172,7 +172,7 @@ dotnet add package ElegantSeries.Flow.Avalonia   # Avalonia apps
 
 ```csharp
 // 1. Register views (AOT-safe: no runtime reflection)
-services.AddFlowViews(locator =>
+services.AddElegantSeriesFlowViews(locator =>
 {
     locator.RegisterTransient<HomeView, HomeViewModel>();   // view mapping + AddTransient
     locator.RegisterTransient<DetailView, DetailViewModel>();
@@ -266,13 +266,13 @@ public interface INavigationAwareAsync   // implement INSTEAD of INavigationAwar
 
 public interface INavigationGuard
 {
-    Task<bool> CanNavigateFromAsync();      // return false to cancel navigation
+    Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken);  // return false to cancel navigation
 }
 
 public interface INavigationGuardWithContext  // instead of INavigationGuard, when the decision needs context
 {
-    Task<bool> CanNavigateFromAsync(NavigationGuardContext context);
-    // context: RegionName, TargetViewModelType, Mode (null for back), Parameter, IsBack
+    Task<bool> CanNavigateFromAsync(NavigationGuardContext context, CancellationToken cancellationToken);
+    // context: RegionName, TargetViewModelType, Operation (null for back), Retention (null for back), Parameter, IsBack
 }
 
 public interface INavigationTargetAware  // optional: claim or refuse a navigation addressed to your page type

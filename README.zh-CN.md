@@ -22,7 +22,7 @@ ElegantSeries.Flow 提供基于 region 的导航栈、可选的 KeepAlive ViewMo
 - **强类型参数**——`NavigateToAsync<TViewModel, TParam>(param)`，编译期类型安全
 - **生命周期回调**——`INavigationAware`（`OnNavigatedTo` / `OnNavigatedFrom`），
   需要 `await` 时用异步版 `INavigationAwareAsync`
-- **导航守卫**——`INavigationGuard.CanNavigateFromAsync()` 可取消导航，
+- **导航守卫**——`INavigationGuard.CanNavigateFromAsync(cancellationToken)` 可取消导航，
   需要上下文时用 `INavigationGuardWithContext`
 - **取消支持**——导航调用接受 `CancellationToken`，请求执行前可取消撤回
 - **刷新**——用新参数重新触发当前页面的回调（`refreshIfActive`）
@@ -127,12 +127,12 @@ var current = navigation.GetCurrentViewModel();
 ElegantSeries.Flow 与 UI 无关：它管理 ViewModel，平台层负责把活动 ViewModel
 映射成 View。典型做法是一个 `ContentControl` 风格的 host 绑定
 `GetCurrentViewModel()`，并在 `RegionNavigated` 事件里刷新。AOT 安全的
-ViewModel→View 映射方式：在 `services.AddFlowViews(...)` 里用 `views.Register` /
+ViewModel→View 映射方式：在 `services.AddElegantSeriesFlowViews(...)` 里用 `views.Register` /
 `views.RegisterTransient` / `views.RegisterSingleton` 显式注册——无运行时反射，
 无命名约定。也可以在 View 类上放 `[ViewFor]` attribute
 （`ElegantSeries.Flow.Routing`）声明它的 ViewModel，让 ElegantSeries.Flow
 source generator 在编译期生成等价的注册代码，生成一个 `RegisterAttributedViews()`
-扩展方法（在 `AddFlowViews` 里调用）；attribute 的 `Lifetime` 可选 `Transient`
+扩展方法（在 `AddElegantSeriesFlowViews` 里调用）；attribute 的 `Lifetime` 可选 `Transient`
 （默认）、`Singleton` 或 `ViewOnly`（只生成映射，ViewModel 的 DI 注册自己管）。
 运行时从不扫描这个 attribute。每个 ViewModel 二选一：手动注册或 attribute 生成，
 不要两边都做——重复注册会在启动时抛 `InvalidOperationException`。
@@ -163,7 +163,7 @@ dotnet add package ElegantSeries.Flow.Avalonia   # Avalonia 应用
 
 ```csharp
 // 1. 注册 view（AOT 安全：无运行时反射）
-services.AddFlowViews(locator =>
+services.AddElegantSeriesFlowViews(locator =>
 {
     locator.RegisterTransient<HomeView, HomeViewModel>();   // view 映射 + AddTransient
     locator.RegisterTransient<DetailView, DetailViewModel>();
@@ -255,13 +255,13 @@ public interface INavigationAwareAsync   // 需要 await 时用这个，代替 I
 
 public interface INavigationGuard
 {
-    Task<bool> CanNavigateFromAsync();      // 返回 false 取消导航
+    Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken);  // 返回 false 取消导航
 }
 
 public interface INavigationGuardWithContext  // 决策需要上下文时用这个，代替 INavigationGuard
 {
-    Task<bool> CanNavigateFromAsync(NavigationGuardContext context);
-    // context: RegionName, TargetViewModelType, Mode（返回时为 null）, Parameter, IsBack
+    Task<bool> CanNavigateFromAsync(NavigationGuardContext context, CancellationToken cancellationToken);
+    // context: RegionName, TargetViewModelType, Operation（回退时为 null）, Retention（回退时为 null）, Parameter, IsBack
 }
 
 public interface INavigationTargetAware  // 可选：认领或拒绝一次发给本页面类型的导航
@@ -433,8 +433,8 @@ Avalonia 示例的 csproj 里开了 `PublishAot=true`，作为框架 AOT 能力�
 
 | 成员 | 说明 |
 |--------|-------------|
-| `NavigateToAsync<T>(region?, mode?, refreshIfActive?, cancellationToken?)` | 导航到 ViewModel 类型 |
-| `NavigateToAsync<T, TParam>(param, region?, mode?, refreshIfActive?, cancellationToken?)` | 带强类型参数导航 |
+| `NavigateToAsync<T>(region?, operation?, retention?, refreshIfActive?, cancellationToken?)` | 导航到 ViewModel 类型 |
+| `NavigateToAsync<T, TParam>(param, region?, operation?, retention?, refreshIfActive?, cancellationToken?)` | 带强类型参数导航 |
 | `GoBackAsync(region?, cancellationToken?)` | 弹出当前页面 |
 | `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentRetention(region?)` / `GetNavigationStack(region?)` | 查询 |
 | `ClearCache(region?)` / `ClearCacheAsync(region?)` | 清空单个 region 的 KeepAlive 缓存 |
