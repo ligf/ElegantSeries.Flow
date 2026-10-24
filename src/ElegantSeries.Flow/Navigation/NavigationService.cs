@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.DependencyInjection;
 
 using static ElegantSeries.Flow.Navigation.NavigationDefaults;
@@ -111,11 +112,23 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     private readonly Lock _stateLock = new();
 
     /// <summary>
-    /// Scopes that have been disposed (or collected for disposal by Dispose/DisposeAsync).
-    /// Ensures exactly-once disposal when deferred tasks race with Dispose.
-    /// Guarded by <see cref="_stateLock"/>.
+    /// Scopes that have been claimed for disposal (or collected for disposal by
+    /// Dispose/DisposeAsync). Ensures exactly-once disposal when deferred tasks race
+    /// with Dispose: the first path to claim a scope disposes it, later paths skip it.
+    /// Claims are made via <c>TryAdd</c> under <see cref="_stateLock"/>.
     /// </summary>
-    private readonly HashSet<IServiceScope> _disposedScopes = new(ReferenceEqualityComparer.Instance);
+    /// <remarks>
+    /// The table holds its keys weakly and never roots a scope. An entry can only
+    /// disappear once the scope is unreachable everywhere — and a scope no path can
+    /// reach can never be presented for disposal again — so a vanished entry cannot
+    /// let a second disposal through, while a disposed page's scope (and the scoped
+    /// service graph its resolved-services table still references) becomes
+    /// garbage-collectable as soon as the page itself is forgotten.
+    /// </remarks>
+    private readonly ConditionalWeakTable<IServiceScope, object> _disposedScopes = new();
+
+    /// <summary>Marker value stored in <see cref="_disposedScopes"/>; only key presence matters.</summary>
+    private static readonly object DisposedScopeMarker = new();
 
     /// <summary>
     /// Tracks deferred scope disposals (from reentrant navigation or sync APIs
@@ -162,7 +175,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 using (_stateLock.EnterScope())
                 {
                     // Exactly-once: skip if Dispose/DisposeAsync already took it.
-                    shouldDispose = _disposedScopes.Add(scope);
+                    shouldDispose = _disposedScopes.TryAdd(scope, DisposedScopeMarker);
                 }
 
                 if (shouldDispose)
@@ -781,10 +794,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         QueueCacheClearedEvents(targets, pendingEvents);
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
 
-        // Note: _disposedScopes is intentionally NOT cleared here. Deferred disposal
+        // Note: _disposedScopes needs no clearing here. Deferred disposal
         // tasks (from reentrant navigation) continue running in the background and
-        // still check the set for exactly-once coordination. The service is being
-        // shut down, so the bounded growth is acceptable.
+        // still claim scopes through it for exactly-once coordination; the table
+        // holds scopes weakly, so leaving it in place roots nothing.
 
         ThrowCollectedErrors(errors);
     }
@@ -888,10 +901,11 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
 
         DisposeLifecycleSources(entriesToCancel);
 
-        // Note: _disposedScopes is intentionally NOT cleared. A navigation that was
+        // Note: _disposedScopes needs no clearing. A navigation that was
         // in-flight during DisposeAsync may call TrackDeferredDisposal after the
-        // WaitForDeferredDisposalsAsync snapshot; its task still needs the set for
-        // exactly-once coordination. The set is released with the service itself.
+        // WaitForDeferredDisposalsAsync snapshot; its task still claims scopes
+        // through the table for exactly-once coordination. The table holds scopes
+        // weakly and is released with the service itself.
 
         QueueCacheClearedEvents(targets, pendingEvents);
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));

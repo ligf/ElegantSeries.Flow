@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.DependencyInjection;
 using ElegantSeries.Flow.Extensions;
 using ElegantSeries.Flow.Navigation;
@@ -959,6 +961,29 @@ public class ThrowingAsyncDisposeViewModel : NavigationViewModelBase, IAsyncDisp
 
 public class TestView { }
 
+/// <summary>Collects weak references to every <see cref="ScopedProbeService"/> the container creates.</summary>
+public sealed class ProbeRegistry
+{
+    public List<WeakReference> Probes { get; } = [];
+}
+
+/// <summary>
+/// A scoped service that records a weak reference to itself on construction, so a
+/// test can check whether it stays rooted after its page scope is disposed.
+/// </summary>
+public sealed class ScopedProbeService
+{
+    public ScopedProbeService(ProbeRegistry registry) => registry.Probes.Add(new WeakReference(this));
+}
+
+/// <summary>Page whose scope resolves a <see cref="ScopedProbeService"/>.</summary>
+public sealed class ProbePageViewModel : NavigationViewModelBase
+{
+    public ProbePageViewModel(ScopedProbeService probe) => Probe = probe;
+
+    public ScopedProbeService Probe { get; }
+}
+
 public class NavigationServiceTests
 {
     private readonly IServiceProvider _serviceProvider;
@@ -1430,6 +1455,91 @@ public class NavigationServiceTests
         // Navigating back reuses the cached instance.
         await _navigationService.NavigateToAsync<KeepAliveViewModel>(retention: NavigationRetention.KeepAlive);
         Assert.Same(keepAlive, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public void DisposedPageScope_DoesNotRootItsScopedServices()
+    {
+        // Regression (round-5 review P0-1): the exactly-once disposal arbitration
+        // used to keep a strong reference to every disposed scope forever, and a
+        // disposed MS DI scope keeps its resolved scoped services in its
+        // resolved-services table — so every visited page's whole scoped graph
+        // stayed rooted for the (singleton) navigation service's lifetime. The
+        // arbitration now holds scopes weakly: once the page is left (Destroy)
+        // and forgotten, its scoped services must become collectable while the
+        // navigation service itself is still alive and in use.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddSingleton<ProbeRegistry>();
+        services.AddScoped<ScopedProbeService>();
+        services.AddTransient<ProbePageViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+        var registry = provider.GetRequiredService<ProbeRegistry>();
+
+        // The navigation runs on a dedicated thread: completed navigation
+        // tasks and their state machines (which transitively reference the
+        // departed page's entry and scope) must not be reachable from this
+        // test's own async frame when the collection is checked. Failures on
+        // that thread are ferried back and rethrown here — an unhandled
+        // exception on a raw Thread would kill the whole test host.
+        List<WeakReference>? probes = null;
+        Exception? threadError = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                probes = CaptureProbesThenLeave(nav, registry);
+            }
+            catch (Exception ex)
+            {
+                threadError = ex;
+            }
+        });
+        thread.Start();
+        thread.Join();
+
+        if (threadError is not null)
+        {
+            ExceptionDispatchInfo.Capture(threadError).Throw();
+        }
+
+        Assert.NotNull(probes);
+        Assert.NotEmpty(probes);
+        AssertAllCollectable(probes);
+
+        // The navigation service outlives the collected page (and this use
+        // after the GC point also keeps it rooted across the assertions).
+        Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
+        GC.KeepAlive(provider);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static List<WeakReference> CaptureProbesThenLeave(INavigationService nav, ProbeRegistry registry)
+    {
+        nav.NavigateToAsync<ProbePageViewModel>().GetAwaiter().GetResult();
+        var probes = registry.Probes.ToList();
+        Assert.All(probes, probe => Assert.True(probe.IsAlive)); // rooted by the active page's entry
+
+        // Replace the page (Destroy retention): the entry leaves the stack
+        // and its scope is disposed during the departure. (A Push would only
+        // cover the page — its entry and scope stay on the stack.)
+        nav.NavigateToAsync<TestHomeViewModel>(operation: NavigationOperation.Replace).GetAwaiter().GetResult();
+        return probes;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void AssertAllCollectable(List<WeakReference> probes)
+    {
+        for (var attempt = 0; attempt < 5 && probes.Any(probe => probe.IsAlive); attempt++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+
+        Assert.All(probes, probe => Assert.False(probe.IsAlive));
     }
 
     [Fact]
