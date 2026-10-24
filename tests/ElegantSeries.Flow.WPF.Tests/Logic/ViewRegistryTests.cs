@@ -1,5 +1,6 @@
 using ElegantSeries.Flow.ViewModels;
 using ElegantSeries.Flow.Locating;
+using ElegantSeries.Flow.Navigation;
 
 namespace ElegantSeries.Flow.WPF.Tests.Logic;
 
@@ -74,7 +75,7 @@ public sealed class ViewRegistryTests
     {
         var registry = new ViewRegistry<object>();
 
-        Assert.Throws<ArgumentNullException>(() => registry.CreateView(null!));
+        Assert.Throws<ArgumentNullException>(() => registry.CreateView((INavigationViewModel)null!));
     }
 
     [Fact]
@@ -130,6 +131,70 @@ public sealed class ViewRegistryTests
     {
         var registry = new ViewRegistry<object>();
         registry.Register<StubViewModel>(_ => null!);
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => registry.CreateView(new StubViewModel()));
+
+        Assert.Contains(typeof(StubViewModel).FullName!, ex.Message);
+    }
+
+    [Fact]
+    public void RegisterFactory_CreateViewWithContext_PassesContextToFactory()
+    {
+        var registry = new ViewRegistry<object>();
+        var vm = new StubViewModel();
+        var view = new object();
+        ViewCreationContext? received = null;
+        registry.RegisterFactory<StubViewModel>(ctx => { received = ctx; return view; });
+
+        var created = registry.CreateView(new ViewCreationContext(vm, "Sidebar", 42));
+
+        Assert.Same(view, created);
+        Assert.NotNull(received);
+        Assert.Same(vm, received!.ViewModel);
+        Assert.Equal("Sidebar", received.RegionName);
+        Assert.Equal(42, received.Parameter);
+    }
+
+    [Fact]
+    public void RegisterFactory_LegacyCreateView_PassesNullRegionAndParameter()
+    {
+        var registry = new ViewRegistry<object>();
+        ViewCreationContext? received = null;
+        registry.RegisterFactory<StubViewModel>(ctx => { received = ctx; return new object(); });
+
+        registry.CreateView(new StubViewModel());
+
+        Assert.NotNull(received);
+        Assert.Null(received!.RegionName);
+        Assert.Null(received.Parameter);
+    }
+
+    [Fact]
+    public void RegisterFactory_DuplicateAndCrossRegistration_ThrowInvalidOperationException()
+    {
+        var registry = new ViewRegistry<object>();
+        registry.RegisterFactory<StubViewModel>(_ => new object());
+
+        Assert.Throws<InvalidOperationException>(
+            () => registry.RegisterFactory<StubViewModel>(_ => new object()));
+        Assert.Throws<InvalidOperationException>(
+            () => registry.Register<StubViewModel>(_ => new object()));
+    }
+
+    [Fact]
+    public void RegisterFactory_NullFactory_ThrowsArgumentNullException()
+    {
+        var registry = new ViewRegistry<object>();
+
+        Assert.Throws<ArgumentNullException>(() => registry.RegisterFactory<StubViewModel>(null!));
+    }
+
+    [Fact]
+    public void RegisterFactory_FactoryReturnsNull_ThrowsInvalidOperationException()
+    {
+        var registry = new ViewRegistry<object>();
+        registry.RegisterFactory<StubViewModel>(_ => null!);
 
         var ex = Assert.Throws<InvalidOperationException>(
             () => registry.CreateView(new StubViewModel()));

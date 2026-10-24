@@ -397,6 +397,32 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     }
 
     /// <inheritdoc />
+    public object? GetCurrentParameter(INavigationViewModel viewModel, string regionName = DefaultRegionName)
+    {
+        ArgumentNullException.ThrowIfNull(viewModel);
+        regionName = NormalizeRegionName(regionName);
+        using (_stateLock.EnterScope())
+        {
+            if (!_regionStacks.TryGetValue(regionName, out var stack))
+            {
+                return null;
+            }
+
+            // Stack enumeration is top-first: the first match is the
+            // instance's most recent activation in this region.
+            foreach (var entry in stack)
+            {
+                if (ReferenceEquals(entry.ViewModel, viewModel))
+                {
+                    return entry.Parameter;
+                }
+            }
+
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = DefaultRegionName)
     {
         regionName = NormalizeRegionName(regionName);

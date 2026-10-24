@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using ElegantSeries.Flow.Locating;
 using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.Threading;
 
@@ -42,7 +43,7 @@ internal sealed class NavigationHostController<TView> where TView : class
 {
     private readonly IDispatcher _dispatcher;
     private readonly Func<string> _regionNameProvider;
-    private readonly Func<INavigationViewModel, TView> _viewFactory;
+    private readonly Func<ViewCreationContext, TView> _viewFactory;
     private readonly Action<TView, INavigationViewModel> _showView;
     private readonly Action _clearView;
     private readonly Action<INavigationViewModel, Exception>? _onViewCreationFailed;
@@ -60,7 +61,8 @@ internal sealed class NavigationHostController<TView> where TView : class
     /// <param name="dispatcher">Marshals view updates to the UI thread.</param>
     /// <param name="regionNameProvider">Returns the region this host displays. Evaluated per event so renames take effect immediately.</param>
     /// <param name="viewFactory">
-    /// Creates the view for a ViewModel. May throw (for example
+    /// Creates the view for a page, given its <see cref="ViewCreationContext"/>.
+    /// May throw (for example
     /// <see cref="InvalidOperationException"/> for an unregistered ViewModel type);
     /// failures are reported via <paramref name="onViewCreationFailed"/> and the
     /// previously shown content is kept.
@@ -71,7 +73,7 @@ internal sealed class NavigationHostController<TView> where TView : class
     public NavigationHostController(
         IDispatcher dispatcher,
         Func<string> regionNameProvider,
-        Func<INavigationViewModel, TView> viewFactory,
+        Func<ViewCreationContext, TView> viewFactory,
         Action<TView, INavigationViewModel> showView,
         Action clearView,
         Action<INavigationViewModel, Exception>? onViewCreationFailed = null)
@@ -149,7 +151,7 @@ internal sealed class NavigationHostController<TView> where TView : class
             return;
         }
 
-        ApplyNavigation(viewModel);
+        ApplyNavigation(viewModel, service, regionName);
     }
 
     private void DetachLocked()
@@ -188,7 +190,7 @@ internal sealed class NavigationHostController<TView> where TView : class
 
         if (_dispatcher.CheckAccess())
         {
-            ApplyNavigation(viewModel);
+            ApplyNavigation(viewModel, service, regionName);
         }
         else
         {
@@ -221,12 +223,12 @@ internal sealed class NavigationHostController<TView> where TView : class
                     return;
                 }
 
-                ApplyNavigation(capturedViewModel);
+                ApplyNavigation(capturedViewModel, capturedService, capturedRegion);
             });
         }
     }
 
-    private void ApplyNavigation(INavigationViewModel viewModel)
+    private void ApplyNavigation(INavigationViewModel viewModel, INavigationService? service, string? regionName)
     {
         TView view;
         try
@@ -236,7 +238,7 @@ internal sealed class NavigationHostController<TView> where TView : class
             view = _viewCache.GetValue(
                     viewModel,
                     key => new StrongBox<TView>(
-                        _viewFactory(key) ?? throw new InvalidOperationException(
+                        _viewFactory(CreateContext(key, service, regionName)) ?? throw new InvalidOperationException(
                             $"The view factory returned null for ViewModel type '{key.GetType().FullName}'. " +
                             "View factories must not return null.")))
                 // Null-forgiving: the box is only constructed with a non-null view (see above).
@@ -251,5 +253,25 @@ internal sealed class NavigationHostController<TView> where TView : class
         }
 
         _showView(view, viewModel);
+    }
+
+    private ViewCreationContext CreateContext(
+        INavigationViewModel viewModel, INavigationService? service, string? regionName)
+    {
+        // The service and region are the caller's validated snapshot — the
+        // same ones the stale checks ran against — never re-read here, so a
+        // concurrent re-attach cannot substitute another service's state.
+        // The parameter query is keyed by the ViewModel instance, so the
+        // parameter it returns belongs to this page even if another
+        // navigation has landed in the meantime. No service (detached), or
+        // a blank region name (which the queries reject), yields a context
+        // without region and parameter.
+        if (string.IsNullOrWhiteSpace(regionName))
+        {
+            return new ViewCreationContext(viewModel, regionName: null, parameter: null);
+        }
+
+        var parameter = service?.GetCurrentParameter(viewModel, regionName);
+        return new ViewCreationContext(viewModel, regionName, parameter);
     }
 }

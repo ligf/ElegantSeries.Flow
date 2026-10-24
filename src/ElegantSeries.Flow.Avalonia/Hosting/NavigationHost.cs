@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using ElegantSeries.Flow.Hosting;
+using ElegantSeries.Flow.Locating;
 using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.Avalonia.Locating;
 using ElegantSeries.Flow.Avalonia.Threading;
@@ -261,7 +262,7 @@ public class NavigationHost : ContentControl, IDisposable
         _subscribedService = null;
     }
 
-    private Control CreateView(INavigationViewModel viewModel)
+    private Control CreateView(ViewCreationContext context)
     {
         if (ViewLocator is null)
         {
@@ -270,7 +271,7 @@ public class NavigationHost : ContentControl, IDisposable
                 $"Assign an {nameof(IViewLocator)} before navigation occurs.");
         }
 
-        return ViewLocator.CreateView(viewModel);
+        return ViewLocator.CreateView(context);
     }
 
     private void UpdateSubscription()
