@@ -11,17 +11,21 @@ ElegantSeries.Flow.WPF.Hosting.NavigationHost.RegionName.set -> void
 ElegantSeries.Flow.WPF.Hosting.NavigationHost.ViewLocator.get -> ElegantSeries.Flow.WPF.Locating.IViewLocator?
 ElegantSeries.Flow.WPF.Hosting.NavigationHost.ViewLocator.set -> void
 ElegantSeries.Flow.WPF.Locating.IViewLocator
+ElegantSeries.Flow.WPF.Locating.IViewLocator.CreateView(ElegantSeries.Flow.Locating.ViewCreationContext! context) -> System.Windows.FrameworkElement!
 ElegantSeries.Flow.WPF.Locating.IViewLocator.CreateView(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel) -> System.Windows.FrameworkElement!
 ElegantSeries.Flow.WPF.Locating.IViewLocator.IsRegistered<TViewModel>() -> bool
 ElegantSeries.Flow.WPF.Locating.IViewLocator.Register<TView, TViewModel>() -> void
 ElegantSeries.Flow.WPF.Locating.IViewLocator.Register<TViewModel>(System.Func<TViewModel, System.Windows.FrameworkElement!>! viewFactory) -> void
+ElegantSeries.Flow.WPF.Locating.IViewLocator.RegisterFactory<TViewModel>(System.Func<ElegantSeries.Flow.Locating.ViewCreationContext!, System.Windows.FrameworkElement!>! viewFactory) -> void
 ElegantSeries.Flow.WPF.Locating.IViewLocator.RegisterSingleton<TView, TViewModel>() -> void
 ElegantSeries.Flow.WPF.Locating.IViewLocator.RegisterTransient<TView, TViewModel>() -> void
 ElegantSeries.Flow.WPF.Locating.ViewLocator
+ElegantSeries.Flow.WPF.Locating.ViewLocator.CreateView(ElegantSeries.Flow.Locating.ViewCreationContext! context) -> System.Windows.FrameworkElement!
 ElegantSeries.Flow.WPF.Locating.ViewLocator.CreateView(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel) -> System.Windows.FrameworkElement!
 ElegantSeries.Flow.WPF.Locating.ViewLocator.IsRegistered<TViewModel>() -> bool
 ElegantSeries.Flow.WPF.Locating.ViewLocator.Register<TView, TViewModel>() -> void
 ElegantSeries.Flow.WPF.Locating.ViewLocator.Register<TViewModel>(System.Func<TViewModel, System.Windows.FrameworkElement!>! viewFactory) -> void
+ElegantSeries.Flow.WPF.Locating.ViewLocator.RegisterFactory<TViewModel>(System.Func<ElegantSeries.Flow.Locating.ViewCreationContext!, System.Windows.FrameworkElement!>! viewFactory) -> void
 ElegantSeries.Flow.WPF.Locating.ViewLocator.RegisterSingleton<TView, TViewModel>() -> void
 ElegantSeries.Flow.WPF.Locating.ViewLocator.RegisterTransient<TView, TViewModel>() -> void
 ElegantSeries.Flow.WPF.Locating.ViewLocator.ViewLocator() -> void

@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using ElegantSeries.Flow.Hosting;
+using ElegantSeries.Flow.Locating;
 using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.WPF.Locating;
 using ElegantSeries.Flow.WPF.Threading;
@@ -209,7 +210,7 @@ public class NavigationHost : ContentControl, IDisposable
         _controller.Detach();
     }
 
-    private FrameworkElement CreateView(INavigationViewModel viewModel)
+    private FrameworkElement CreateView(ViewCreationContext context)
     {
         if (ViewLocator is null)
         {
@@ -218,7 +219,7 @@ public class NavigationHost : ContentControl, IDisposable
                 $"Assign an {nameof(IViewLocator)} (for example via services.AddElegantSeriesFlowViews()) before navigating.");
         }
 
-        return ViewLocator.CreateView(viewModel);
+        return ViewLocator.CreateView(context);
     }
 
     private static void OnRegionNameChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)

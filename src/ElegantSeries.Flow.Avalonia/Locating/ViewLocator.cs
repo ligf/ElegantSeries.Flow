@@ -83,8 +83,17 @@ public sealed class ViewLocator : IViewLocator
         => _registry.Register(viewFactory);
 
     /// <inheritdoc />
+    public void RegisterFactory<TViewModel>(Func<ViewCreationContext, Control> viewFactory)
+        where TViewModel : INavigationViewModel
+        => _registry.RegisterFactory<TViewModel>(viewFactory);
+
+    /// <inheritdoc />
     public Control CreateView(INavigationViewModel viewModel)
         => _registry.CreateView(viewModel);
+
+    /// <inheritdoc />
+    public Control CreateView(ViewCreationContext context)
+        => _registry.CreateView(context);
 
     /// <inheritdoc />
     public bool IsRegistered<TViewModel>()

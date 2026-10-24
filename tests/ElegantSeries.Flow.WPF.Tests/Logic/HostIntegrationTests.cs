@@ -78,7 +78,7 @@ internal sealed class ControllerHostHarness : IHostIntegrationHarness
         state.Controller = new NavigationHostController<object>(
             _dispatcher,
             regionNameProvider: () => state.Region,
-            viewFactory: vm => vm is HostAlphaViewModel ? new HostAlphaView() : new HostBetaView(),
+            viewFactory: ctx => ctx.ViewModel is HostAlphaViewModel ? new HostAlphaView() : new HostBetaView(),
             showView: (view, vm) =>
             {
                 state.Current = vm;

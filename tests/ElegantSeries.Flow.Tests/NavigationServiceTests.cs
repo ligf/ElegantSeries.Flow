@@ -4738,6 +4738,46 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task GetCurrentParameter_ReturnsTheInstancesMostRecentActivationParameter()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        var home = _navigationService.GetCurrentViewModel()!;
+        // A page activated without a parameter reports null.
+        Assert.Null(_navigationService.GetCurrentParameter(home));
+
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel, string>("first"));
+        var detail = _navigationService.GetCurrentViewModel()!;
+        Assert.Equal("first", _navigationService.GetCurrentParameter(detail));
+        // The covered page keeps its own parameter; the lookup is keyed by
+        // the instance, not by whichever page is on top.
+        Assert.Null(_navigationService.GetCurrentParameter(home));
+        Assert.Null(_navigationService.GetCurrentParameter(detail, "NoSuchRegion"));
+        Assert.Null(_navigationService.GetCurrentParameter(new TestHomeViewModel()));
+        Assert.Throws<ArgumentNullException>(() => _navigationService.GetCurrentParameter(null!));
+
+        // A refresh re-activates the page with the new parameter.
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel, string>(
+            "second", refreshIfActive: true));
+        Assert.Equal("second", _navigationService.GetCurrentParameter(detail));
+
+        // Once the instance has left the stack it is no longer found.
+        Assert.True(await _navigationService.GoBackAsync());
+        Assert.Null(_navigationService.GetCurrentParameter(detail));
+    }
+
+    [Fact]
+    public async Task GetCurrentParameter_AfterDispose_ReturnsNull()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestDetailViewModel, string>("x"));
+        var detail = _navigationService.GetCurrentViewModel()!;
+        Assert.Equal("x", _navigationService.GetCurrentParameter(detail));
+
+        await ((IAsyncDisposable)_navigationService).DisposeAsync();
+
+        Assert.Null(_navigationService.GetCurrentParameter(detail));
+    }
+
+    [Fact]
     public async Task RegionName_SurroundingWhitespace_AddressesSameRegionAcrossApis()
     {
         // Names are trimmed at the API boundary: every spelling of the

@@ -1,3 +1,4 @@
+using ElegantSeries.Flow.Locating;
 using ElegantSeries.Flow.Navigation;
 using Avalonia.Controls;
 using System.Diagnostics.CodeAnalysis;
@@ -26,7 +27,7 @@ public interface IViewLocator
 {
     /// <summary>
     /// Registers a view type for a ViewModel type. The view is created with its
-    /// parameterless constructor each time <see cref="CreateView"/> is called.
+    /// parameterless constructor each time <see cref="CreateView(INavigationViewModel)"/> is called.
     /// </summary>
     /// <typeparam name="TView">The view type. Must have a public parameterless constructor (XAML requirement).</typeparam>
     /// <typeparam name="TViewModel">The ViewModel type.</typeparam>
@@ -56,6 +57,23 @@ public interface IViewLocator
     /// Thrown if a view is already registered for <typeparamref name="TViewModel"/>.
     /// </exception>
     void Register<TViewModel>(Func<TViewModel, Control> viewFactory)
+        where TViewModel : INavigationViewModel;
+
+    /// <summary>
+    /// Registers a context-aware view factory for a ViewModel type. The
+    /// factory receives the <see cref="ViewCreationContext"/> of the page the
+    /// view is created for: the ViewModel, the region it is displayed in, and
+    /// the parameter it was most recently activated with. Use this overload
+    /// when view creation depends on the region or the navigation parameter.
+    /// The factory runs on the UI thread, once per ViewModel instance (views
+    /// are cached per instance), so it cannot be used to change the view of a
+    /// kept-alive page on re-activation.
+    /// </summary>
+    /// <typeparam name="TViewModel">The ViewModel type the view is created for.</typeparam>
+    /// <param name="viewFactory">Creates the view for a page, given its creation context. Must not return <see langword="null"/>.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="viewFactory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">A view is already registered for <typeparamref name="TViewModel"/>.</exception>
+    void RegisterFactory<TViewModel>(Func<ViewCreationContext, Control> viewFactory)
         where TViewModel : INavigationViewModel;
 
     /// <summary>
@@ -140,6 +158,19 @@ public interface IViewLocator
     /// the locator itself keeps no partial state.
     /// </remarks>
     Control CreateView(INavigationViewModel viewModel);
+
+    /// <summary>
+    /// Creates the registered view for the page described by
+    /// <paramref name="context"/>. The context is passed through to a factory
+    /// registered with <see cref="RegisterFactory{TViewModel}"/>; a factory
+    /// registered with <see cref="Register{TViewModel}(Func{TViewModel, Control})"/>
+    /// receives only the ViewModel, as before.
+    /// </summary>
+    /// <param name="context">The creation context; the lookup uses its ViewModel's exact runtime type.</param>
+    /// <returns>The created view.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">No view is registered for the ViewModel's type.</exception>
+    Control CreateView(ViewCreationContext context);
 
     /// <summary>
     /// Determines whether a view is registered for the given ViewModel type.

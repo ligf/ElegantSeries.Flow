@@ -1,5 +1,7 @@
 using Avalonia.Controls;
 using ElegantSeries.Flow.Avalonia.Locating;
+using ElegantSeries.Flow.Locating;
+using ElegantSeries.Flow.Navigation;
 
 namespace ElegantSeries.Flow.Avalonia.Tests;
 
@@ -44,7 +46,7 @@ public sealed class ViewLocatorTests
     {
         var locator = new ViewLocator();
 
-        Assert.Throws<ArgumentNullException>(() => locator.CreateView(null!));
+        Assert.Throws<ArgumentNullException>(() => locator.CreateView((INavigationViewModel)null!));
     }
 
     [Fact]
@@ -133,5 +135,49 @@ public sealed class ViewLocatorTests
         Assert.True(locator.IsRegistered<OtherViewModel>());
         Assert.True(locator.IsRegistered<ThirdViewModel>());
         Assert.True(locator.IsRegistered<FourthViewModel>());
+    }
+
+    [Fact]
+    public void RegisterFactory_CreateViewWithContext_PassesContextToFactory()
+    {
+        var locator = new ViewLocator();
+        var vm = new TestViewModel();
+        var view = new TestView();
+        ViewCreationContext? received = null;
+        locator.RegisterFactory<TestViewModel>(ctx => { received = ctx; return view; });
+
+        var created = locator.CreateView(new ViewCreationContext(vm, "Sidebar", 42));
+
+        Assert.Same(view, created);
+        Assert.NotNull(received);
+        Assert.Same(vm, received!.ViewModel);
+        Assert.Equal("Sidebar", received.RegionName);
+        Assert.Equal(42, received.Parameter);
+    }
+
+    [Fact]
+    public void RegisterFactory_CreateView_LegacyPath_PassesNullRegionAndParameter()
+    {
+        var locator = new ViewLocator();
+        ViewCreationContext? received = null;
+        locator.RegisterFactory<TestViewModel>(ctx => { received = ctx; return new TestView(); });
+
+        locator.CreateView(new TestViewModel());
+
+        Assert.NotNull(received);
+        Assert.Null(received!.RegionName);
+        Assert.Null(received.Parameter);
+    }
+
+    [Fact]
+    public void RegisterFactory_DuplicateRegistration_ThrowsInvalidOperationException()
+    {
+        var locator = new ViewLocator();
+        locator.RegisterFactory<TestViewModel>(_ => new TestView());
+
+        Assert.Throws<InvalidOperationException>(
+            () => locator.RegisterFactory<TestViewModel>(_ => new TestView()));
+        Assert.Throws<InvalidOperationException>(
+            () => locator.Register<TestView, TestViewModel>());
     }
 }

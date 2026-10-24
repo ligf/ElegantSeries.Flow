@@ -115,8 +115,9 @@ namespace ElegantSeries.Flow.Navigation;
 /// discarded silently at disposal, with no observable completion.
 /// Query methods never throw for disposal: they report the actual state,
 /// which is empty — <c>CanGoBack</c> and <c>IsActive</c> return
-/// <see langword="false"/>, <c>GetCurrentViewModel</c> and
-/// <c>GetCurrentRetention</c> return <see langword="null"/>, and
+/// <see langword="false"/>, <c>GetCurrentViewModel</c>,
+/// <c>GetCurrentRetention</c> and <c>GetCurrentParameter</c> return
+/// <see langword="null"/>, and
 /// <c>GetNavigationStack</c> returns an empty list. The cache-clearing methods
 /// are silent no-ops. Event subscriptions remain valid and no new navigation
 /// activity is raised, but work already in flight at disposal — a deferred
@@ -265,6 +266,25 @@ public interface INavigationService
     /// <returns>The current page's retention, or <see langword="null"/> if the region is empty.</returns>
     /// <remarks>After the service is disposed, returns <see langword="null"/> (the stacks are empty); query methods never throw <see cref="ObjectDisposedException"/>.</remarks>
     NavigationRetention? GetCurrentRetention(string regionName = DefaultRegionName);
+
+    /// <summary>
+    /// Gets the parameter the specified page was most recently activated with
+    /// in the specified region.
+    /// </summary>
+    /// <param name="viewModel">The page instance to look up.</param>
+    /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
+    /// <returns>
+    /// The parameter of the page instance's most recent activation — updated
+    /// on every activation, including a refresh and a pop-to-existing
+    /// reactivation — or <see langword="null"/> if the instance is not on the
+    /// region's stack (any more) or was activated without a parameter.
+    /// Because the lookup is keyed by the instance, the returned parameter
+    /// always belongs to that page, never to whichever page is currently on
+    /// top of the stack.
+    /// </returns>
+    /// <remarks>After the service is disposed, returns <see langword="null"/> (the stacks are empty); query methods never throw <see cref="ObjectDisposedException"/>.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="viewModel"/> is <see langword="null"/>.</exception>
+    object? GetCurrentParameter(INavigationViewModel viewModel, string regionName = DefaultRegionName);
 
     /// <summary>
     /// Gets a snapshot of the specified region's navigation stack: the

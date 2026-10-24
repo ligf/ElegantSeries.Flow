@@ -20,7 +20,7 @@ namespace ElegantSeries.Flow.Locating;
 /// <typeparam name="TView">The view type.</typeparam>
 internal sealed class ViewRegistry<TView> where TView : class
 {
-    private readonly Dictionary<Type, Func<INavigationViewModel, TView>> _factories = new();
+    private readonly Dictionary<Type, Func<ViewCreationContext, TView>> _factories = new();
     private readonly Lock _syncRoot = new();
 
     /// <summary>
@@ -35,6 +35,23 @@ internal sealed class ViewRegistry<TView> where TView : class
     {
         ArgumentNullException.ThrowIfNull(viewFactory);
 
+        RegisterFactory<TViewModel>(context => viewFactory((TViewModel)context.ViewModel));
+    }
+
+    /// <summary>
+    /// Registers a context-aware view factory for a ViewModel type. The
+    /// factory receives the <see cref="ViewCreationContext"/> of the page the
+    /// view is created for (ViewModel, region, activation parameter).
+    /// </summary>
+    /// <typeparam name="TViewModel">The ViewModel type.</typeparam>
+    /// <param name="viewFactory">Creates the view for a page, given its creation context.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="viewFactory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">A factory is already registered for <typeparamref name="TViewModel"/>.</exception>
+    public void RegisterFactory<TViewModel>(Func<ViewCreationContext, TView> viewFactory)
+        where TViewModel : INavigationViewModel
+    {
+        ArgumentNullException.ThrowIfNull(viewFactory);
+
         var key = typeof(TViewModel);
         lock (_syncRoot)
         {
@@ -45,12 +62,14 @@ internal sealed class ViewRegistry<TView> where TView : class
                     "Each ViewModel type can only be registered once.");
             }
 
-            _factories[key] = viewModel => viewFactory((TViewModel)viewModel);
+            _factories[key] = viewFactory;
         }
     }
 
     /// <summary>
-    /// Creates the registered view for a ViewModel instance.
+    /// Creates the registered view for a ViewModel instance. The creation
+    /// context carries no region and no parameter; use
+    /// <see cref="CreateView(ViewCreationContext)"/> to supply them.
     /// </summary>
     /// <param name="viewModel">The ViewModel instance; its exact runtime type is used for the lookup.</param>
     /// <returns>The created view.</returns>
@@ -60,7 +79,23 @@ internal sealed class ViewRegistry<TView> where TView : class
     {
         ArgumentNullException.ThrowIfNull(viewModel);
 
-        Func<INavigationViewModel, TView>? factory;
+        return CreateView(new ViewCreationContext(viewModel, regionName: null, parameter: null));
+    }
+
+    /// <summary>
+    /// Creates the registered view for the page described by
+    /// <paramref name="context"/>.
+    /// </summary>
+    /// <param name="context">The creation context; its ViewModel's exact runtime type is used for the lookup.</param>
+    /// <returns>The created view.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">No view is registered for the ViewModel's type.</exception>
+    public TView CreateView(ViewCreationContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var viewModel = context.ViewModel;
+        Func<ViewCreationContext, TView>? factory;
         lock (_syncRoot)
         {
             _factories.TryGetValue(viewModel.GetType(), out factory);
@@ -75,7 +110,7 @@ internal sealed class ViewRegistry<TView> where TView : class
 
         // User code: exceptions propagate unchanged; a null return fails fast
         // instead of poisoning downstream caches.
-        var view = factory(viewModel);
+        var view = factory(context);
         if (view is null)
         {
             throw new InvalidOperationException(

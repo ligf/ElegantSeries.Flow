@@ -141,6 +141,10 @@ internal sealed class FakeNavigationService : INavigationService
         => CurrentByRegion.TryGetValue(regionName, out var vm) ? vm : null;
     public bool IsActive<TViewModel>(string regionName = "MainRegion") where TViewModel : INavigationViewModel => throw new NotImplementedException();
     public NavigationRetention? GetCurrentRetention(string regionName = "MainRegion") => throw new NotImplementedException();
+
+    public Dictionary<INavigationViewModel, object?> ParametersByViewModel { get; } = new();
+    public object? GetCurrentParameter(INavigationViewModel viewModel, string regionName = "MainRegion")
+        => ParametersByViewModel.TryGetValue(viewModel, out var parameter) ? parameter : null;
     public IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = "MainRegion") => throw new NotImplementedException();
     public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(string regionName = "MainRegion", NavigationOperation operation = NavigationOperation.Push, NavigationRetention retention = NavigationRetention.Destroy, bool refreshIfActive = false, CancellationToken cancellationToken = default) where TViewModel : INavigationViewModel => throw new NotImplementedException();
     public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(TParam parameter, string regionName = "MainRegion", NavigationOperation operation = NavigationOperation.Push, NavigationRetention retention = NavigationRetention.Destroy, bool refreshIfActive = false, CancellationToken cancellationToken = default) where TViewModel : INavigationViewModel => throw new NotImplementedException();

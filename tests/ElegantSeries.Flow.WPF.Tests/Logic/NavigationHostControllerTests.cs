@@ -1,6 +1,7 @@
 using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.ViewModels;
 using ElegantSeries.Flow.Hosting;
+using ElegantSeries.Flow.Locating;
 using ElegantSeries.Flow.WPF.Tests;
 
 namespace ElegantSeries.Flow.WPF.Tests.Logic;
@@ -29,7 +30,7 @@ public sealed class NavigationHostControllerTests
             Controller = new NavigationHostController<object>(
                 Dispatcher,
                 regionNameProvider: () => RegionName,
-                viewFactory: vm => ViewFactory(vm),
+                viewFactory: ctx => ViewFactory(ctx.ViewModel),
                 showView: (view, vm) => Shown.Add((view, vm)),
                 clearView: () => ClearedCount++,
                 onViewCreationFailed: (vm, ex) => Failures.Add((vm, ex)));
@@ -369,5 +370,61 @@ public sealed class NavigationHostControllerTests
         dispatcher.RunPosted();
 
         Assert.Empty(shown); // stale VM-A must not be applied
+    }
+
+    [Fact]
+    public void Factory_ReceivesRegionAndParameterFromService()
+    {
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var service = new FakeNavigationService();
+        var vm = new StubViewModel();
+        service.CurrentByRegion["MainRegion"] = vm;
+        service.ParametersByViewModel[vm] = "param-1";
+        ViewCreationContext? received = null;
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: ctx => { received = ctx; return new object(); },
+            showView: (_, _) => { },
+            clearView: () => { });
+        controller.Attach(service);
+
+        service.RaiseNavigated("MainRegion", vm);
+
+        Assert.NotNull(received);
+        Assert.Same(vm, received!.ViewModel);
+        Assert.Equal("MainRegion", received.RegionName);
+        Assert.Equal("param-1", received.Parameter);
+    }
+
+    [Fact]
+    public void Factory_RunsOncePerViewModel_ParameterChangeDoesNotRecreateView()
+    {
+        // Views are cached per ViewModel instance: a later activation of the
+        // same instance (even with a different parameter) reuses the view,
+        // so the factory — and its context — reflect the first activation.
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var service = new FakeNavigationService();
+        var vm = new StubViewModel();
+        service.CurrentByRegion["MainRegion"] = vm;
+        service.ParametersByViewModel[vm] = "param-1";
+        var contexts = new List<ViewCreationContext>();
+        var shown = new List<object>();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: ctx => { contexts.Add(ctx); return new object(); },
+            showView: (view, _) => shown.Add(view),
+            clearView: () => { });
+        controller.Attach(service);
+
+        service.RaiseNavigated("MainRegion", vm);
+        service.ParametersByViewModel[vm] = "param-2";
+        service.RaiseNavigated("MainRegion", vm);
+
+        var context = Assert.Single(contexts);
+        Assert.Equal("param-1", context.Parameter);
+        Assert.Equal(2, shown.Count);
+        Assert.Same(shown[0], shown[1]);
     }
 }

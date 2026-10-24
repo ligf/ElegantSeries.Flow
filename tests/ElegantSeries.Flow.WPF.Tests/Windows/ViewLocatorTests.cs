@@ -1,4 +1,5 @@
 using System.Windows;
+using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.WPF.Locating;
 
 namespace ElegantSeries.Flow.WPF.Tests.Windows;
@@ -90,7 +91,7 @@ public sealed class ViewLocatorTests
     {
         IViewLocator locator = new ViewLocator();
 
-        Assert.Throws<ArgumentNullException>(() => locator.CreateView(null!));
+        Assert.Throws<ArgumentNullException>(() => locator.CreateView((INavigationViewModel)null!));
     }
 
     [Fact]

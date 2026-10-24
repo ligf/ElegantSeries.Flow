@@ -11,17 +11,21 @@ ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.RegionName.set -> void
 ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.ViewLocator.get -> ElegantSeries.Flow.Avalonia.Locating.IViewLocator?
 ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.ViewLocator.set -> void
 ElegantSeries.Flow.Avalonia.Locating.IViewLocator
+ElegantSeries.Flow.Avalonia.Locating.IViewLocator.CreateView(ElegantSeries.Flow.Locating.ViewCreationContext! context) -> Avalonia.Controls.Control!
 ElegantSeries.Flow.Avalonia.Locating.IViewLocator.CreateView(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel) -> Avalonia.Controls.Control!
 ElegantSeries.Flow.Avalonia.Locating.IViewLocator.IsRegistered<TViewModel>() -> bool
 ElegantSeries.Flow.Avalonia.Locating.IViewLocator.Register<TView, TViewModel>() -> void
 ElegantSeries.Flow.Avalonia.Locating.IViewLocator.Register<TViewModel>(System.Func<TViewModel, Avalonia.Controls.Control!>! viewFactory) -> void
+ElegantSeries.Flow.Avalonia.Locating.IViewLocator.RegisterFactory<TViewModel>(System.Func<ElegantSeries.Flow.Locating.ViewCreationContext!, Avalonia.Controls.Control!>! viewFactory) -> void
 ElegantSeries.Flow.Avalonia.Locating.IViewLocator.RegisterSingleton<TView, TViewModel>() -> void
 ElegantSeries.Flow.Avalonia.Locating.IViewLocator.RegisterTransient<TView, TViewModel>() -> void
 ElegantSeries.Flow.Avalonia.Locating.ViewLocator
+ElegantSeries.Flow.Avalonia.Locating.ViewLocator.CreateView(ElegantSeries.Flow.Locating.ViewCreationContext! context) -> Avalonia.Controls.Control!
 ElegantSeries.Flow.Avalonia.Locating.ViewLocator.CreateView(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel) -> Avalonia.Controls.Control!
 ElegantSeries.Flow.Avalonia.Locating.ViewLocator.IsRegistered<TViewModel>() -> bool
 ElegantSeries.Flow.Avalonia.Locating.ViewLocator.Register<TView, TViewModel>() -> void
 ElegantSeries.Flow.Avalonia.Locating.ViewLocator.Register<TViewModel>(System.Func<TViewModel, Avalonia.Controls.Control!>! viewFactory) -> void
+ElegantSeries.Flow.Avalonia.Locating.ViewLocator.RegisterFactory<TViewModel>(System.Func<ElegantSeries.Flow.Locating.ViewCreationContext!, Avalonia.Controls.Control!>! viewFactory) -> void
 ElegantSeries.Flow.Avalonia.Locating.ViewLocator.RegisterSingleton<TView, TViewModel>() -> void
 ElegantSeries.Flow.Avalonia.Locating.ViewLocator.RegisterTransient<TView, TViewModel>() -> void
 ElegantSeries.Flow.Avalonia.Locating.ViewLocator.ViewLocator() -> void
