@@ -245,6 +245,18 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             (viewType.IsUnboundGenericType ||
              viewType.TypeArguments.Any(a => a is ITypeParameterSymbol));
 
+        // An open generic view is already rejected with FLOWGEN008. A
+        // parameterless [ViewFor] on a view like GenericView<T> : BaseView<T>
+        // would also raise FLOWGEN004, because the BaseView argument is the
+        // view's own type parameter and no ViewModel can be inferred from
+        // it — but that diagnostic's message claims the view does not
+        // inherit BaseView<TViewModel>, which is false here, and a second
+        // error adds nothing: the view cannot be registered either way.
+        if (isOpenGenericView)
+        {
+            cannotInfer = false;
+        }
+
         return new ViewMapping(
             viewName,
             viewModelName ?? string.Empty,

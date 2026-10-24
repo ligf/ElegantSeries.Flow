@@ -887,6 +887,33 @@ public sealed class SecondDerivedKeepAliveViewModel : BaseKeepAliveViewModel, ID
     public void Dispose() => Disposed = true;
 }
 
+public abstract class BaseSelfTargetViewModel : NavigationViewModelBase, INavigationAware, INavigationGuard
+{
+    public int ToCount { get; private set; }
+    public int FromCount { get; private set; }
+    public int GuardCalls { get; private set; }
+    public bool GuardAllows { get; set; } = true;
+    public object? LastParameter { get; private set; }
+
+    public void OnNavigatedTo(object? parameter)
+    {
+        ToCount++;
+        LastParameter = parameter;
+    }
+
+    public void OnNavigatedFrom() => FromCount++;
+
+    public Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
+    {
+        GuardCalls++;
+        return Task.FromResult(GuardAllows);
+    }
+}
+
+public sealed class DerivedSelfTargetViewModel : BaseSelfTargetViewModel
+{
+}
+
 public sealed class ParamAwareKeepAliveViewModel : NavigationViewModelBase, INavigationAware, IDisposable
 {
     public object? LastParameter { get; private set; }
@@ -1428,6 +1455,60 @@ public class NavigationServiceTests
         await nav.NavigateToAsync<BaseKeepAliveViewModel>(retention: NavigationRetention.KeepAlive);
 
         Assert.Same(first, nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task SelfNavigation_ViaBaseType_IsNoOpWithoutGuard()
+    {
+        // The self-target check must compare against the static type the
+        // page was navigated to, not the runtime type: DI resolves the
+        // derived implementation, yet navigating to the base type again
+        // targets the already-active page — a no-op that never consults
+        // the guard and never runs From.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<BaseSelfTargetViewModel, DerivedSelfTargetViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<BaseSelfTargetViewModel>();
+        var vm = Assert.IsType<DerivedSelfTargetViewModel>(nav.GetCurrentViewModel());
+        Assert.Equal(1, vm.ToCount);
+
+        // Even a vetoing guard is never asked: the request is a no-op.
+        vm.GuardAllows = false;
+        var result = await nav.NavigateToAsync<BaseSelfTargetViewModel>();
+
+        Assert.True(result);
+        Assert.Equal(0, vm.GuardCalls);
+        Assert.Equal(0, vm.FromCount);
+        Assert.Equal(1, vm.ToCount);
+        Assert.Same(vm, nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task SelfRefresh_ViaBaseType_RefreshesInPlace()
+    {
+        // Same static-type rule for refresh: the active page is refreshed
+        // in place (To again with the new parameter, no From, same
+        // instance) instead of running a full leave-and-enter cycle.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<BaseSelfTargetViewModel, DerivedSelfTargetViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<BaseSelfTargetViewModel, string>("first");
+        var vm = Assert.IsType<DerivedSelfTargetViewModel>(nav.GetCurrentViewModel());
+        Assert.Equal("first", vm.LastParameter);
+
+        var result = await nav.NavigateToAsync<BaseSelfTargetViewModel, string>("second", refreshIfActive: true);
+
+        Assert.True(result);
+        Assert.Same(vm, nav.GetCurrentViewModel());
+        Assert.Equal(0, vm.FromCount);
+        Assert.Equal(2, vm.ToCount);
+        Assert.Equal("second", vm.LastParameter);
     }
 
     [Fact]
@@ -5565,6 +5646,198 @@ public class NavigationServiceTests
             refreshIfActive: true));
         Assert.True(IsCtsDisposed(cts1),
             "Pop-to-existing retired CTS was not reclaimed after settling");
+    }
+
+    [Fact]
+    public async Task ClearCache_DestroyedCacheEntry_LifecycleCtsIsDisposed()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncOnlyKeepAliveViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>(retention: NavigationRetention.KeepAlive);
+        await nav.GoBackAsync();
+
+        // The popped KeepAlive entry now sits in the cache. Clearing the
+        // cache destroys it: its lifecycle CTS must be disposed with it,
+        // not merely cancelled and left for the GC.
+        var entry = GetNavigationEntry(nav, "MainRegion", typeof(SyncOnlyKeepAliveViewModel));
+        Assert.NotNull(entry);
+        var cts = (CancellationTokenSource)entry.GetType().GetProperty("LifecycleCts",
+            BindingFlags.Public | BindingFlags.Instance)!.GetValue(entry)!;
+        Assert.False(IsCtsDisposed(cts));
+
+        nav.ClearCache("MainRegion");
+
+        Assert.True(cts.IsCancellationRequested);
+        Assert.True(IsCtsDisposed(cts),
+            "ClearCache left the destroyed entry's lifecycle CTS undisposed");
+    }
+
+    [Fact]
+    public async Task ClearCacheAsync_DestroyedCacheEntry_LifecycleCtsIsDisposed()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncOnlyKeepAliveViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>(retention: NavigationRetention.KeepAlive);
+        await nav.GoBackAsync();
+
+        var entry = GetNavigationEntry(nav, "MainRegion", typeof(SyncOnlyKeepAliveViewModel));
+        Assert.NotNull(entry);
+        var cts = (CancellationTokenSource)entry.GetType().GetProperty("LifecycleCts",
+            BindingFlags.Public | BindingFlags.Instance)!.GetValue(entry)!;
+        Assert.False(IsCtsDisposed(cts));
+
+        await nav.ClearCacheAsync("MainRegion");
+
+        Assert.True(cts.IsCancellationRequested);
+        Assert.True(IsCtsDisposed(cts),
+            "ClearCacheAsync left the destroyed entry's lifecycle CTS undisposed");
+    }
+
+    [Fact]
+    public async Task ClearAllCache_DestroyedCacheEntry_LifecycleCtsIsDisposed()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncOnlyKeepAliveViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>(retention: NavigationRetention.KeepAlive);
+        await nav.GoBackAsync();
+
+        var entry = GetNavigationEntry(nav, "MainRegion", typeof(SyncOnlyKeepAliveViewModel));
+        Assert.NotNull(entry);
+        var cts = (CancellationTokenSource)entry.GetType().GetProperty("LifecycleCts",
+            BindingFlags.Public | BindingFlags.Instance)!.GetValue(entry)!;
+        Assert.False(IsCtsDisposed(cts));
+
+        nav.ClearAllCache();
+
+        Assert.True(cts.IsCancellationRequested);
+        Assert.True(IsCtsDisposed(cts),
+            "ClearAllCache left the destroyed entry's lifecycle CTS undisposed");
+    }
+
+    [Fact]
+    public async Task ClearAllCacheAsync_DestroyedCacheEntry_LifecycleCtsIsDisposed()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncOnlyKeepAliveViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>(retention: NavigationRetention.KeepAlive);
+        await nav.GoBackAsync();
+
+        var entry = GetNavigationEntry(nav, "MainRegion", typeof(SyncOnlyKeepAliveViewModel));
+        Assert.NotNull(entry);
+        var cts = (CancellationTokenSource)entry.GetType().GetProperty("LifecycleCts",
+            BindingFlags.Public | BindingFlags.Instance)!.GetValue(entry)!;
+        Assert.False(IsCtsDisposed(cts));
+
+        await nav.ClearAllCacheAsync();
+
+        Assert.True(cts.IsCancellationRequested);
+        Assert.True(IsCtsDisposed(cts),
+            "ClearAllCacheAsync left the destroyed entry's lifecycle CTS undisposed");
+    }
+
+    [Fact]
+    public async Task Dispose_EntryWithSettledRetiredCts_BothSourcesDisposed()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncOnlyKeepAliveViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<SyncOnlyKeepAliveViewModel>(retention: NavigationRetention.KeepAlive);
+        var entry = GetNavigationEntry(nav, "MainRegion", typeof(SyncOnlyKeepAliveViewModel));
+        Assert.NotNull(entry);
+        var entryType = entry.GetType();
+        var lifecycleProperty = entryType.GetProperty("LifecycleCts",
+            BindingFlags.Public | BindingFlags.Instance)!;
+        var cts1 = (CancellationTokenSource)lifecycleProperty.GetValue(entry)!;
+
+        // Retire cts1 and settle its cancellation directly on the entry,
+        // with no subsequent activation or callback exit to reclaim it —
+        // the state a destroyed entry can carry into a cache clear or a
+        // service disposal. (Through the public navigation flow the exit
+        // sweep normally reclaims a settled source first, which is why
+        // this state is constructed on the entry itself.)
+        var beginMethod = entryType.GetMethod("BeginNewActivation",
+            BindingFlags.Public | BindingFlags.Instance)!;
+        var retired = (CancellationTokenSource)beginMethod.Invoke(entry, null)!;
+        Assert.Same(cts1, retired);
+        NavigationEntry_CancelRetiredOutsideLocks(entry, retired);
+        Assert.True(cts1.IsCancellationRequested);
+        Assert.False(IsCtsDisposed(cts1));
+        var cts2 = (CancellationTokenSource)lifecycleProperty.GetValue(entry)!;
+        Assert.NotSame(cts1, cts2);
+
+        nav.Dispose();
+
+        Assert.True(IsCtsDisposed(cts2),
+            "Dispose left the entry's current lifecycle CTS undisposed");
+        Assert.True(IsCtsDisposed(cts1),
+            "Dispose left the entry's settled retired CTS undisposed");
+    }
+
+    [Fact]
+    public async Task Dispose_DestroyedEntry_LifecycleCtsIsDisposed()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        var cts = GetActiveEntryCts(nav, "MainRegion");
+        Assert.NotNull(cts);
+        Assert.False(IsCtsDisposed(cts));
+
+        nav.Dispose();
+
+        Assert.True(IsCtsDisposed(cts),
+            "Dispose left the destroyed entry's lifecycle CTS undisposed");
+    }
+
+    [Fact]
+    public async Task DisposeAsync_DestroyedEntry_LifecycleCtsIsDisposed()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        var cts = GetActiveEntryCts(nav, "MainRegion");
+        Assert.NotNull(cts);
+        Assert.False(IsCtsDisposed(cts));
+
+        await nav.DisposeAsync();
+
+        Assert.True(IsCtsDisposed(cts),
+            "DisposeAsync left the destroyed entry's lifecycle CTS undisposed");
     }
 
     private static bool WindowsContain(NavigationService nav, string regionName)

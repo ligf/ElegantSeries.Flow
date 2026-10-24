@@ -331,6 +331,32 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void OpenGenericViewWithParameterlessViewFor_ReportsFlowGen008Only()
+    {
+        // GenericView<T> DOES inherit BaseView<T> — the base class's type
+        // argument is the view's own type parameter, so no ViewModel can
+        // be inferred from it. Only FLOWGEN008 may be reported: FLOWGEN004
+        // must not accompany it, because its message claims the view does
+        // not inherit BaseView<TViewModel>, which is false here.
+        var sources = AttributeStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class GenericView<T> : ElegantSeries.Flow.Avalonia.Views.BaseView<T>
+                {
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN008");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN004");
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
     public void NullViewModelType_ReportsFlowGen006()
     {
         var sources = AttributeStub + AvaloniaLocatorStub + """

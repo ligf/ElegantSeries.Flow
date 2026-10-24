@@ -565,6 +565,156 @@ public class NavigationServiceCoverageTests
         Assert.IsType<InvalidOperationException>(observedError);
     }
 
+    /// <summary>
+    /// Guard whose task the test faults manually after the guard has
+    /// started. Used to deliver a faulted guard task: an
+    /// OperationCanceledException reaches the fault path wrapped in an
+    /// AggregateException (a bare OCE thrown by an async guard completes
+    /// its task as Canceled instead and never faults).
+    /// </summary>
+    private sealed class ManuallyFaultedGuardViewModel : NavigationViewModelBase, INavigationGuard
+    {
+        public TaskCompletionSource<bool> GuardEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _guardResult = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Fault(Exception error) => _guardResult.TrySetException(error);
+
+        public Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
+        {
+            GuardEntered.TrySetResult(true);
+            return _guardResult.Task;
+        }
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenCancelledDuringGuard_GuardOceFaultIsNotReported()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ManuallyFaultedGuardViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        await svc.NavigateToAsync<ManuallyFaultedGuardViewModel>();
+
+        using var cts = new CancellationTokenSource();
+        var navTask = svc.NavigateToAsync<TestHomeViewModel>(cancellationToken: cts.Token);
+
+        var vm = Assert.IsType<ManuallyFaultedGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+        await vm.GuardEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Cancel while the guard is still running: the pump abandons the
+        // guard race and completes the caller as cancelled. Awaiting the
+        // navigation guarantees the abandon branch has run.
+        cts.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => navTask);
+
+        // A cancellation artifact is an outcome, not an error: nothing may
+        // reach SubscriberError even though the abandoned guard's task
+        // faulted carrying an OperationCanceledException. The report, if
+        // one were (incorrectly) made, rides a thread-pool continuation —
+        // poll briefly so a misreport fails fast, while the full window
+        // elapsing with no report is the pass condition.
+        vm.Fault(new AggregateException(new OperationCanceledException()));
+        for (var i = 0; i < 60 && observedError is null; i++)
+        {
+            await Task.Delay(50);
+        }
+
+        Assert.Null(observedError);
+        Assert.IsType<ManuallyFaultedGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenCancelledDuringGuard_GuardMixedFaultReportsOnlyRealError()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ManuallyFaultedGuardViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        var errorSeen = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        svc.SubscribeSubscriberError(ex =>
+        {
+            observedError = ex;
+            errorSeen.TrySetResult(true);
+        });
+
+        await svc.NavigateToAsync<ManuallyFaultedGuardViewModel>();
+
+        using var cts = new CancellationTokenSource();
+        var navTask = svc.NavigateToAsync<TestHomeViewModel>(cancellationToken: cts.Token);
+
+        var vm = Assert.IsType<ManuallyFaultedGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+        await vm.GuardEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        cts.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => navTask);
+
+        // The OCE inner is skipped, the real error is still reported.
+        vm.Fault(new AggregateException(
+            new OperationCanceledException(),
+            new InvalidOperationException("Guard failed after cancellation.")));
+        await errorSeen.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.IsType<InvalidOperationException>(observedError);
+    }
+
+    /// <summary>
+    /// Guard that cancels the caller's own token source and immediately
+    /// faults with an OperationCanceledException. By the time the pump
+    /// surfaces the guard's exception the candidate is already withdrawn,
+    /// which is exactly the constellation that used to divert the OCE to
+    /// SubscriberError via FaultOrReport (or report it from the abandon
+    /// branch) instead of treating it as the cancelled outcome.
+    /// </summary>
+    private sealed class SelfCancellingOceGuardViewModel : NavigationViewModelBase, INavigationGuard
+    {
+        public CancellationTokenSource? CallerCts { get; set; }
+
+        public Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
+        {
+            CallerCts!.Cancel();
+            return Task.FromException<bool>(new OperationCanceledException());
+        }
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenGuardFaultsWithOceAsCallerCancels_OceIsNotReported()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SelfCancellingOceGuardViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        await svc.NavigateToAsync<SelfCancellingOceGuardViewModel>();
+
+        using var cts = new CancellationTokenSource();
+        var vm = Assert.IsType<SelfCancellingOceGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+        vm.CallerCts = cts;
+
+        // Whichever completion the guard race surfaces (the faulted guard
+        // or the cancellation), the caller observes cancellation, the page
+        // stays, and nothing is reported: every delivery path runs before
+        // the navigation task completes.
+        var navTask = svc.NavigateToAsync<TestHomeViewModel>(cancellationToken: cts.Token);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => navTask);
+
+        Assert.Null(observedError);
+        Assert.IsType<SelfCancellingOceGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+    }
+
     // ── ClearCacheAsync / ClearAllCacheAsync gate timeout ────────
     // Note: Gate timeout paths for ClearCacheAsync/ClearAllCacheAsync are
     // difficult to test reliably without hanging the test suite (the hanging
