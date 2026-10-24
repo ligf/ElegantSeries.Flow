@@ -58,7 +58,7 @@ public interface INavigationGuard
 
 /// <summary>
 /// Implement this interface on a ViewModel to intercept navigation away from the current page
-/// with full context about the pending navigation (target, mode, parameter).
+/// with full context about the pending navigation (target, operation, retention, parameter).
 /// </summary>
 /// <remarks>
 /// <para>

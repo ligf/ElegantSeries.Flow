@@ -14,7 +14,8 @@ public sealed partial class NavigationService
     /// <summary>
     /// Executes one Navigate hop: resolves the target page (reusing the
     /// KeepAlive cache entry when present) and performs the stack surgery for
-    /// the intent's mode. Runs after the departing page's From callbacks, with
+    /// the intent's operation and retention. Runs after the departing page's From
+    /// callbacks, with
     /// the final intent known, so the departing entry's deactivation plan is
     /// computed against the move that actually happens.
     /// </summary>

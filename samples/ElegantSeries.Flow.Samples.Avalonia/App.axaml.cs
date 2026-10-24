@@ -3,7 +3,6 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using ElegantSeries.Flow.Avalonia.Extensions;
 using ElegantSeries.Flow.Extensions;
-using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.Generated;
 using Microsoft.Extensions.DependencyInjection;
 using ElegantSeries.Flow.Samples.Shared;
@@ -82,11 +81,11 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow();
-
-            // Show the first page.
-            var navigation = Services.GetRequiredService<INavigationService>();
-            _ = navigation.NavigateToAsync<HomeViewModel>();
+            // The bootstrapper attaches the window's hosts and runs the
+            // startup navigation before the window is shown.
+            var window = new MainWindow();
+            desktop.MainWindow = window;
+            MainWindowBootstrapper.Run(window, Services, window.ReportError);
         }
 
         base.OnFrameworkInitializationCompleted();

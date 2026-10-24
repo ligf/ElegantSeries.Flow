@@ -16,7 +16,7 @@ public partial class ToolkitFreeView : ElegantSeries.Flow.WPF.Views.BaseView<Too
     {
         if (ViewModel is not null)
         {
-            SampleHelpers.ObserveNavigation(ViewModel.LeaveAsync(), ReportError);
+            SampleNavigation.Observe(ViewModel.LeaveAsync(), ReportError);
         }
     }
 
