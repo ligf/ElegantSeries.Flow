@@ -377,7 +377,7 @@ public sealed partial class NavigationService
         using (_stateLock.EnterScope())
         {
             // Exactly-once: skip if already disposed (e.g. by a racing Dispose).
-            shouldDispose = _disposedScopes.Add(scope);
+            shouldDispose = _disposedScopes.TryAdd(scope, DisposedScopeMarker);
         }
 
         if (!shouldDispose)
@@ -423,7 +423,7 @@ public sealed partial class NavigationService
         using (_stateLock.EnterScope())
         {
             // Exactly-once: skip if already disposed (e.g. by a racing Dispose).
-            shouldDispose = _disposedScopes.Add(scope);
+            shouldDispose = _disposedScopes.TryAdd(scope, DisposedScopeMarker);
         }
 
         if (!shouldDispose)
@@ -458,7 +458,7 @@ public sealed partial class NavigationService
         bool shouldDispose;
         using (_stateLock.EnterScope())
         {
-            shouldDispose = _disposedScopes.Add(scope);
+            shouldDispose = _disposedScopes.TryAdd(scope, DisposedScopeMarker);
         }
 
         if (!shouldDispose)
