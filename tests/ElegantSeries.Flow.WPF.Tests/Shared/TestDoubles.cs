@@ -149,6 +149,24 @@ internal sealed class FakeNavigationService : INavigationService
     public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(string regionName = "MainRegion", NavigationOperation operation = NavigationOperation.Push, NavigationRetention retention = NavigationRetention.Destroy, bool refreshIfActive = false, CancellationToken cancellationToken = default) where TViewModel : INavigationViewModel => throw new NotImplementedException();
     public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(TParam parameter, string regionName = "MainRegion", NavigationOperation operation = NavigationOperation.Push, NavigationRetention retention = NavigationRetention.Destroy, bool refreshIfActive = false, CancellationToken cancellationToken = default) where TViewModel : INavigationViewModel => throw new NotImplementedException();
     public Task<bool> GoBackAsync(string regionName = "MainRegion", CancellationToken cancellationToken = default) => throw new NotImplementedException();
+    public Task<bool> GoBackToAsync<TViewModel>(string regionName = "MainRegion", CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel
+        => throw new NotImplementedException();
+    public Task<bool> GoBackToAsync<TViewModel, TParam>(TParam parameter, string regionName = "MainRegion", CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel
+        => throw new NotImplementedException();
+    public Task<bool> SetRootAsync<TViewModel>(string regionName = "MainRegion", NavigationRetention retention = NavigationRetention.Destroy, CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel
+        => throw new NotImplementedException();
+    public Task<bool> SetRootAsync<TViewModel, TParam>(TParam parameter, string regionName = "MainRegion", NavigationRetention retention = NavigationRetention.Destroy, CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel
+        => throw new NotImplementedException();
+    public int Remove<TViewModel>(string regionName = "MainRegion")
+        where TViewModel : INavigationViewModel
+        => throw new NotImplementedException();
+    public int Remove<TViewModel, TParam>(TParam parameter, string regionName = "MainRegion")
+        where TViewModel : INavigationViewModel
+        => throw new NotImplementedException();
     public void ClearCache(string regionName) => throw new NotImplementedException();
     public void ClearAllCache() => throw new NotImplementedException();
     public ValueTask ClearCacheAsync(string regionName) => throw new NotImplementedException();

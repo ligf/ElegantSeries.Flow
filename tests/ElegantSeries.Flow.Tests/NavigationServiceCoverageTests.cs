@@ -1545,6 +1545,103 @@ public class NavigationServiceCoverageTests
         Assert.Equal(typeof(TestHomeViewModel), svc.GetCurrentViewModel()?.GetType());
     }
 
+    // ── Detached flows forked from a lifecycle callback ──────
+
+    /// <summary>
+    /// A flow forked from inside a lifecycle callback inherits the callback's
+    /// AsyncLocal snapshot, which the callback's restore can never reach:
+    /// calls the fork makes AFTER the callback has returned are outside
+    /// calls. They must be classified as such — a navigation is awaited and
+    /// decided by the guard (here: vetoed), and the synchronous management
+    /// APIs must not trip the in-callback reentrancy guard.
+    /// </summary>
+    [Fact]
+    public async Task DetachedFlowForkedFromCallback_IsNotClassifiedAsInCallback()
+    {
+        DetachedForkViewModel.Reset();
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddTransient<DetachedForkViewModel>();
+        using var provider = services.BuildServiceProvider();
+        var service = provider.GetRequiredService<INavigationService>();
+
+        Assert.True(await service.NavigateToAsync<DetachedForkViewModel>());
+        var page = service.GetCurrentViewModel();
+        // The callback ran and forked the detached flow.
+        await DetachedForkViewModel.ForkReady.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        DetachedForkViewModel.ReleaseFork.TrySetResult();
+
+        // Wait until the fork has issued both calls; only then are its
+        // recorded results safe to read.
+        await DetachedForkViewModel.ForkDone.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Awaited as an outside call and vetoed by the page's guard: false.
+        // (Misclassified as in-callback it would complete immediately with
+        // true — the registration result — and ClearCache below would throw
+        // the reentrancy guard's InvalidOperationException.)
+        Assert.NotNull(DetachedForkViewModel.ForkNavigation);
+        Assert.False(await DetachedForkViewModel.ForkNavigation!.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Null(DetachedForkViewModel.ForkClearError);
+        Assert.Same(page, service.GetCurrentViewModel());
+    }
+
+    /// <summary>
+    /// Forks a detached flow from inside <c>OnNavigatedToAsync</c>; the page's
+    /// leave guard vetoes every departure, so an outside navigation from the
+    /// fork is decided (false) rather than registered.
+    /// </summary>
+    private sealed class DetachedForkViewModel : NavigationViewModelBase, INavigationAwareAsync, INavigationGuard
+    {
+        public static TaskCompletionSource ForkReady { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public static TaskCompletionSource ReleaseFork { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public static TaskCompletionSource ForkDone { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public static Task<bool>? ForkNavigation { get; private set; }
+        public static Exception? ForkClearError { get; private set; }
+
+        public static void Reset()
+        {
+            ForkReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            ReleaseFork = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            ForkDone = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            ForkNavigation = null;
+            ForkClearError = null;
+        }
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            _ = DetachedAsync();
+            ForkReady.TrySetResult();
+            return Task.CompletedTask;
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken) => Task.FromResult(false);
+
+        private async Task DetachedAsync()
+        {
+            await ReleaseFork.Task.ConfigureAwait(false);
+            try
+            {
+                ForkNavigation = Navigation!.NavigateToAsync<TestHomeViewModel>();
+                try
+                {
+                    Navigation!.ClearCache("MainRegion");
+                }
+                catch (Exception ex)
+                {
+                    ForkClearError = ex;
+                }
+            }
+            finally
+            {
+                ForkDone.TrySetResult();
+            }
+        }
+    }
+
     /// <summary>
     /// Calls ClearCacheAsync reentrantly from within its own OnNavigatedToAsync,
     /// while the page is still the active page on the stack.

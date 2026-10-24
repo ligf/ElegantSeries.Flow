@@ -481,6 +481,9 @@ framework's AOT story (verified by the Native AOT publish smoke test in CI).
 | `NavigateToAsync<T>(region?, operation?, retention?, refreshIfActive?, cancellationToken?)` | Navigate to a ViewModel type |
 | `NavigateToAsync<T, TParam>(param, region?, operation?, retention?, refreshIfActive?, cancellationToken?)` | Navigate with a typed parameter |
 | `GoBackAsync(region?, cancellationToken?)` | Pop the current page |
+| `GoBackToAsync<T>(region?, cancellationToken?)` / `GoBackToAsync<T, TParam>(param, region?, cancellationToken?)` | Go back to a page on the stack, popping everything above it |
+| `SetRootAsync<T>(region?, retention?, cancellationToken?)` / `SetRootAsync<T, TParam>(param, region?, retention?, cancellationToken?)` | Replace the whole stack with a new root page |
+| `Remove<T>(region?)` / `Remove<T, TParam>(param, region?)` | Synchronously remove covered pages from the stack |
 | `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentRetention(region?)` / `GetCurrentParameter(viewModel, region?)` / `GetNavigationStack(region?)` | Queries |
 | `ClearCache(region)` / `ClearCacheAsync(region)` | Clear one region's KeepAlive cache |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | Clear all KeepAlive caches |

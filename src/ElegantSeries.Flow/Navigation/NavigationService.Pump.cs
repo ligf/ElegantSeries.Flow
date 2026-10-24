@@ -145,6 +145,7 @@ public sealed partial class NavigationService
     {
         Navigate,
         GoBack,
+        GoBackTo,
     }
 
     /// <summary>
@@ -170,6 +171,14 @@ public sealed partial class NavigationService
         public NavigationOperation Operation { get; init; }
         public NavigationRetention Retention { get; init; }
         public object? Parameter { get; init; }
+
+        /// <summary>
+        /// True for a parameterized <c>GoBackTo</c> intent: the target search
+        /// runs the recognition gate with <see cref="Parameter"/> instead of
+        /// accepting the nearest entry of the target type. (Navigate intents
+        /// distinguish the two shapes by their entry points instead.)
+        /// </summary>
+        public bool HasParameter { get; init; }
         public bool RefreshIfActive { get; init; }
         public CancellationToken CancellationToken { get; init; }
 
@@ -193,9 +202,12 @@ public sealed partial class NavigationService
 
         public bool IsWithdrawn => CancellationToken.IsCancellationRequested;
 
-        public string Describe() => Kind == NavigationIntentKind.GoBack
-            ? "GoBack"
-            : TargetType?.Name ?? "?";
+        public string Describe() => Kind switch
+        {
+            NavigationIntentKind.GoBack => "GoBack",
+            NavigationIntentKind.GoBackTo => $"GoBackTo({TargetType?.Name ?? "?"})",
+            _ => TargetType?.Name ?? "?",
+        };
     }
 
     /// <summary>
@@ -290,6 +302,84 @@ public sealed partial class NavigationService
         }
 
         return await AwaitIntentFateAsync(intent).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Entry point behind <c>GoBackToAsync</c>: registers a back-to intent for
+    /// the region and returns the intent's fate. The target search itself
+    /// runs later — at departure time and again in the executing hop —
+    /// against the stack as it then stands.
+    /// </summary>
+    private async Task<bool> GoBackToIntentAsync<TViewModel>(
+        string regionName,
+        bool hasParameter,
+        object? parameter,
+        CancellationToken cancellationToken)
+        where TViewModel : INavigationViewModel
+    {
+        regionName = NormalizeRegionName(regionName);
+        bool inCallback = CurrentOwnLifecycleEntry is not null;
+        if (_disposed)
+        {
+            if (inCallback) return false;
+            ThrowIfDisposed();
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var intent = new NavigationIntent
+        {
+            RegionName = regionName,
+            Kind = NavigationIntentKind.GoBackTo,
+            RegisteredInCallback = inCallback,
+            TargetType = typeof(TViewModel),
+            HasParameter = hasParameter,
+            Parameter = parameter,
+            CancellationToken = cancellationToken,
+            Fate = inCallback ? null : new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+            ExecuteHop = (i, w, work, errors) => ExecuteGoBackToHopAsync(i, work, errors, w),
+        };
+
+        RegisterIntent(intent);
+        if (inCallback)
+        {
+            return true;
+        }
+
+        return await AwaitIntentFateAsync(intent).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Finds the entry a <c>GoBackTo</c> intent is addressed to within a
+    /// stack snapshot (top first): the nearest entry whose navigation target
+    /// type is the intent's type and — for a parameterized intent — that the
+    /// recognition gate claims for the intent's parameter. There is no
+    /// KeepAlive restriction: any entry on the stack can be the target.
+    /// Classification invokes user code; the caller must not hold
+    /// <see cref="_stateLock"/>.
+    /// </summary>
+    private static NavigationEntry? FindGoBackToTarget(
+        List<NavigationEntry> snapshotTopFirst, NavigationIntent intent, List<Exception> classificationErrors)
+    {
+        foreach (var entry in snapshotTopFirst)
+        {
+            if (entry.CacheKeyType != intent.TargetType)
+            {
+                continue;
+            }
+
+            if (!intent.HasParameter)
+            {
+                return entry;
+            }
+
+            if (ClassifyCandidate(entry, intent.Parameter, classificationErrors) == RecognitionVerdict.Recognized)
+            {
+                return entry;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -1340,6 +1430,24 @@ public sealed partial class NavigationService
         return current is OperationCanceledException ? null : current;
     }
 
+    /// <summary>
+    /// Reports a candidate's deferred classification failures (see
+    /// <see cref="RunDepartureCoreAsync"/>) through
+    /// <see cref="INavigationService.SubscriberError"/>.
+    /// </summary>
+    private void ReportClassificationErrors(List<Exception>? errors)
+    {
+        if (errors is null)
+        {
+            return;
+        }
+
+        foreach (var ex in errors)
+        {
+            ReportSubscriberError(ex);
+        }
+    }
+
     private async Task<bool> RunDepartureCoreAsync(RegionWindow window, string regionName, NavigationIntent candidate)
     {
         NavigationEntry? current;
@@ -1384,6 +1492,47 @@ public sealed partial class NavigationService
             return true;
         }
 
+        // Classification failures of a GoBackTo candidate whose departure
+        // proceeds: held back (not reported at the search sites) because the
+        // executing hop classifies again and reports through its error list.
+        // Every terminal below where the candidate's hop never runs — guard
+        // veto/fault/cancel, withdrawal, chain limit, supersession at final
+        // sampling — flushes them instead, so each failure is reported
+        // exactly once on every route.
+        List<Exception>? candidateClassificationErrors = null;
+
+        if (candidate.Kind == NavigationIntentKind.GoBackTo)
+        {
+            // A back-to request whose target is not on the stack — or already
+            // is the active page — never starts a departure, exactly like a
+            // back request at the bottom of the stack: no guard runs and the
+            // current page is not disturbed. The executing hop re-validates
+            // the target, so this early verdict only needs the snapshot.
+            List<NavigationEntry> snapshot;
+            using (_stateLock.EnterScope())
+            {
+                snapshot = _regionStacks.TryGetValue(regionName, out var s) ? [.. s] : [];
+            }
+
+            var classificationErrors = new List<Exception>();
+            var target = FindGoBackToTarget(snapshot, candidate, classificationErrors);
+            candidateClassificationErrors = classificationErrors;
+            if (target is null || ReferenceEquals(target, current))
+            {
+                ReportClassificationErrors(candidateClassificationErrors);
+                candidateClassificationErrors = null;
+
+                CompleteIntent(candidate, result: false);
+                RenewActivationIfCancelled(current);
+                using (_stateLock.EnterScope())
+                {
+                    window.Phase = WindowPhase.Open;
+                }
+
+                return true;
+            }
+        }
+
         // Leave guard, with the candidate that started this departure as its
         // context. A later overwrite of the candidate does not re-run the guard.
         // The guard runs as part of the current entry's lifecycle processing:
@@ -1393,8 +1542,9 @@ public sealed partial class NavigationService
         // complete after this very guard returns — that wait would deadlock.
         var guardContext = BuildGuardContext(regionName, candidate, current);
         GuardOutcome guardOutcome;
-        var previousCurrent = _currentLifecycleEntry.Value;
-        _currentLifecycleEntry.Value = current;
+        var marker = new LifecycleMarker(current);
+        var previousCurrent = _currentLifecycleMarker.Value;
+        _currentLifecycleMarker.Value = marker;
         try
         {
             guardOutcome = await RunGuardAsync(current.ViewModel, guardContext, candidate.CancellationToken, window.DisposalSignal.Task).ConfigureAwait(false);
@@ -1417,6 +1567,7 @@ public sealed partial class NavigationService
             }
 
             CancelIntent(candidate);
+            ReportClassificationErrors(candidateClassificationErrors);
             RenewActivationIfCancelled(current);
             using (_stateLock.EnterScope())
             {
@@ -1470,6 +1621,7 @@ public sealed partial class NavigationService
                 FaultOrReport(candidate, FirstNonCancellationError(ex) ?? ex);
             }
 
+            ReportClassificationErrors(candidateClassificationErrors);
             RenewActivationIfCancelled(current);
             EndChain(window);
             DrainSlot(window, result: false);
@@ -1477,7 +1629,8 @@ public sealed partial class NavigationService
         }
         finally
         {
-            _currentLifecycleEntry.Value = previousCurrent;
+            marker.Active = false;
+            _currentLifecycleMarker.Value = previousCurrent;
         }
 
         if (_disposed)
@@ -1489,6 +1642,7 @@ public sealed partial class NavigationService
         if (guardOutcome == GuardOutcome.Cancelled)
         {
             CancelIntent(candidate);
+            ReportClassificationErrors(candidateClassificationErrors);
             RenewActivationIfCancelled(current);
             using (_stateLock.EnterScope())
             {
@@ -1502,6 +1656,7 @@ public sealed partial class NavigationService
         {
             // The page refuses to leave: every pending leave request is moot.
             CompleteIntent(candidate, result: false);
+            ReportClassificationErrors(candidateClassificationErrors);
             RenewActivationIfCancelled(current);
             EndChain(window);
             DrainSlot(window, result: false);
@@ -1513,6 +1668,7 @@ public sealed partial class NavigationService
             // Withdrawn before its From phase started: the departure is aborted
             // and the page was never run through From. Pending intents stand.
             CancelIntent(candidate);
+            ReportClassificationErrors(candidateClassificationErrors);
             RenewActivationIfCancelled(current);
             using (_stateLock.EnterScope())
             {
@@ -1601,6 +1757,7 @@ public sealed partial class NavigationService
                 CompleteIntent(toDrain, result: false);
             }
 
+            ReportClassificationErrors(candidateClassificationErrors);
             RenewActivationIfCancelled(current);
             return true;
         }
@@ -1758,6 +1915,8 @@ public sealed partial class NavigationService
         if (!ReferenceEquals(final, candidate))
         {
             CompleteIntent(candidate, result: false);
+            ReportClassificationErrors(candidateClassificationErrors);
+            candidateClassificationErrors = null;
 
             // The chain accounting ran against the candidate before From,
             // but the hop that executes is the sampled one: reconcile the
@@ -1994,6 +2153,29 @@ public sealed partial class NavigationService
     /// </summary>
     private NavigationGuardContext BuildGuardContext(string regionName, NavigationIntent candidate, NavigationEntry current)
     {
+        if (candidate.Kind == NavigationIntentKind.GoBackTo)
+        {
+            List<NavigationEntry> snapshot;
+            using (_stateLock.EnterScope())
+            {
+                snapshot = _regionStacks.TryGetValue(regionName, out var s) ? [.. s] : [];
+            }
+
+            // Classification failures are not reported here: the guard
+            // context is advisory, and the executing hop runs the same
+            // classification and reports through its error list.
+            var classificationErrors = new List<Exception>();
+            var target = FindGoBackToTarget(snapshot, candidate, classificationErrors);
+
+            if (target is not null)
+            {
+                return new NavigationGuardContext(
+                    regionName, target.ViewModel.GetType(), operation: null, retention: null, target.Parameter, isBack: true);
+            }
+
+            return new NavigationGuardContext(regionName, current.ViewModel.GetType(), operation: null, retention: null, current.Parameter, isBack: true);
+        }
+
         if (candidate.Kind == NavigationIntentKind.GoBack)
         {
             using (_stateLock.EnterScope())
@@ -2320,6 +2502,129 @@ public sealed partial class NavigationService
             // Defensive: cannot happen (see summary). Complete the intent and
             // revive the departing page when it is still on the stack, so its
             // already-run From is paired with a fresh To.
+            CompleteIntent(intent, result: false);
+            NavigationEntry? top;
+            using (_stateLock.EnterScope())
+            {
+                top = _regionStacks.TryGetValue(regionName, out var s) && s.Count > 0 ? s.Peek() : null;
+            }
+
+            if (top is not null && !_disposed)
+            {
+                await ReviveCurrentPageAsync(window, regionName, top, intent: null, errors).ConfigureAwait(false);
+            }
+
+            return new HopResult(null, null, null);
+        }
+
+        if (retiredCts is not null)
+        {
+            previous.CancelRetiredOutsideLocks(retiredCts);
+        }
+
+        await RunDisposalActionsAsync(work).ConfigureAwait(false);
+        errors.AddRange(work.Errors);
+
+        if (_disposed)
+        {
+            // The entering step will never run for this hop: exit the in-flight
+            // registration made at commit time, otherwise the entry's gate
+            // stays open and DisposeAsync waits out the full gate timeout for
+            // a callback that never ran.
+            previous.ExitInFlightLifecycle(gate);
+            CompleteIntent(intent, result: false);
+            return new HopResult(null, null, null);
+        }
+
+        return new HopResult(previous, gate, work);
+    }
+
+    /// <summary>
+    /// Executes one back-to hop: pops every entry above the intent's target
+    /// and re-activates the target. Runs after the departing page's From
+    /// callbacks, like the back hop; the intermediate entries run no
+    /// lifecycle callbacks — they are deactivated under their own retention
+    /// through the same disposal queueing as a single pop.
+    /// </summary>
+    /// <remarks>
+    /// The target is searched twice — once before the navigation lock (the
+    /// classification invokes user code, so it runs with no locks held) and
+    /// re-validated by reference under the lock, because a concurrent
+    /// <c>Remove</c> or disposal can change the stack in between.
+    /// </remarks>
+    private async Task<HopResult> ExecuteGoBackToHopAsync(NavigationIntent intent, TransitionWork work, List<Exception> errors, RegionWindow window)
+    {
+        var regionName = intent.RegionName;
+
+        List<NavigationEntry> snapshot;
+        using (_stateLock.EnterScope())
+        {
+            snapshot = _regionStacks.TryGetValue(regionName, out var s) ? [.. s] : [];
+        }
+
+        var classificationErrors = new List<Exception>();
+        var target = FindGoBackToTarget(snapshot, intent, classificationErrors);
+        errors.AddRange(classificationErrors);
+
+        NavigationEntry? previous = null;
+        Task? gate = null;
+        CancellationTokenSource? retiredCts = null;
+
+        if (target is not null)
+        {
+            await _navigationLock.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                using (_stateLock.EnterScope())
+                {
+                    if (_regionStacks.TryGetValue(regionName, out var stack)
+                        && stack.Count > 0
+                        && !ReferenceEquals(stack.Peek(), target)
+                        && ContainsEntryLocked(stack, target))
+                    {
+                        while (!ReferenceEquals(stack.Peek(), target))
+                        {
+                            var popped = stack.Pop();
+                            try
+                            {
+                                QueueOutgoingDisposal(popped, destroy: popped.Retention != NavigationRetention.KeepAlive, work);
+                            }
+                            catch
+                            {
+                                // Same salvage discipline as the back hop: a
+                                // throwing detach must not orphan the popped
+                                // entry's scope.
+                                SalvageOutgoingDisposal(popped, popped.Retention != NavigationRetention.KeepAlive, work);
+                                throw;
+                            }
+                        }
+
+                        if (intent.HasParameter)
+                        {
+                            // The target is re-activated with the intent's
+                            // parameter, which becomes its stored parameter.
+                            target.Parameter = intent.Parameter;
+                        }
+
+                        previous = target;
+                        retiredCts = previous.BeginNewActivation();
+                        AttachNavigation(previous.ViewModel, work);
+                        gate = previous.EnterInFlightLifecycle();
+                    }
+                }
+            }
+            finally
+            {
+                _navigationLock.Release();
+            }
+        }
+
+        if (previous is null || gate is null)
+        {
+            // The target vanished (or became the active page) after the
+            // departure phase: complete the intent and revive the departing
+            // page when it is still on the stack, so its already-run From is
+            // paired with a fresh To — the same recovery as the back hop.
             CompleteIntent(intent, result: false);
             NavigationEntry? top;
             using (_stateLock.EnterScope())

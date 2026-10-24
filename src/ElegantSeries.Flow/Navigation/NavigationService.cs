@@ -94,14 +94,22 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// Thrown when the lock cannot be acquired within <see cref="NavigationOptions.SyncLockTimeout"/>.
     /// Prefer the async counterpart on UI threads.
     /// </exception>
-    private void WaitNavigationLock(string caller)
+    private void WaitNavigationLock(string caller) => WaitNavigationLock(caller, hasAsyncCounterpart: true);
+
+    /// <param name="caller">Calling method name, for the exception message.</param>
+    /// <param name="hasAsyncCounterpart">Whether an asynchronous counterpart
+    /// named <c>{caller}Async</c> exists that the timeout message can point
+    /// to. <c>Remove</c> has none; its message must not invent one.</param>
+    private void WaitNavigationLock(string caller, bool hasAsyncCounterpart)
     {
         if (!_navigationLock.Wait(_options.SyncLockTimeout))
         {
+            var advice = hasAsyncCounterpart
+                ? $"Prefer the async counterpart ({caller}Async) on UI threads to avoid blocking."
+                : "Call it off the UI thread to avoid blocking.";
             throw new TimeoutException(
                 $"{caller} timed out after {_options.SyncLockTimeout.TotalSeconds:F0}s waiting for the navigation lock. " +
-                $"A navigation is likely running a slow lifecycle callback. Prefer the async counterpart " +
-                $"({caller}Async) on UI threads to avoid blocking.");
+                $"A navigation is likely running a slow lifecycle callback. {advice}");
         }
     }
 
@@ -336,6 +344,213 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <inheritdoc />
     public Task<bool> GoBackAsync(string regionName = DefaultRegionName, CancellationToken cancellationToken = default)
         => GoBackIntentAsync(regionName, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> GoBackToAsync<TViewModel>(
+        string regionName = DefaultRegionName,
+        CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel
+        => GoBackToIntentAsync<TViewModel>(regionName, hasParameter: false, parameter: null, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> GoBackToAsync<TViewModel, TParam>(
+        TParam parameter,
+        string regionName = DefaultRegionName,
+        CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel
+        => GoBackToIntentAsync<TViewModel>(regionName, hasParameter: true, parameter, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> SetRootAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
+        string regionName = DefaultRegionName,
+        NavigationRetention retention = NavigationRetention.Destroy,
+        CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel
+        => NavigateIntentAsync<TViewModel>(regionName, null, NavigationOperation.Reset, retention, refreshIfActive: false, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> SetRootAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
+        TParam parameter,
+        string regionName = DefaultRegionName,
+        NavigationRetention retention = NavigationRetention.Destroy,
+        CancellationToken cancellationToken = default)
+        where TViewModel : INavigationViewModel
+        => NavigateIntentAsync<TViewModel>(regionName, parameter, NavigationOperation.Reset, retention, refreshIfActive: false, cancellationToken);
+
+    /// <inheritdoc />
+    public int Remove<TViewModel>(string regionName = DefaultRegionName)
+        where TViewModel : INavigationViewModel
+        => RemoveCore(regionName, typeof(TViewModel), hasParameter: false, parameter: null);
+
+    /// <inheritdoc />
+    public int Remove<TViewModel, TParam>(TParam parameter, string regionName = DefaultRegionName)
+        where TViewModel : INavigationViewModel
+        => RemoveCore(regionName, typeof(TViewModel), hasParameter: true, parameter);
+
+    /// <summary>
+    /// The shared implementation of the <c>Remove</c> overloads: synchronous
+    /// stack surgery in the shape of <see cref="ClearCache(string)"/> —
+    /// classify outside the locks, mutate the stack under both locks,
+    /// deactivate the removed entries through the same plans a pop uses,
+    /// dispose scopes outside the navigation lock.
+    /// </summary>
+    private int RemoveCore(string regionName, Type targetType, bool hasParameter, object? parameter)
+    {
+        regionName = NormalizeRegionName(regionName);
+        if (_disposed) return 0;
+        if (CurrentOwnLifecycleEntry is not null)
+            throw new InvalidOperationException(
+                "Remove cannot be called from within a page lifecycle callback. " +
+                "Call it outside the callback instead.");
+
+        // Snapshot and classify with no locks held: classification invokes
+        // user code (recognition votes, parameter equality). The commit
+        // below re-validates every matched entry by reference, so a stale
+        // snapshot can only shrink the removal set, never corrupt it.
+        List<NavigationEntry> snapshot;
+        using (_stateLock.EnterScope())
+        {
+            snapshot = _regionStacks.TryGetValue(regionName, out var s) ? [.. s] : [];
+        }
+
+        // The snapshot is top-first: index 0 is the active page, which is
+        // never removed.
+        var classificationErrors = new List<Exception>();
+        var matched = new List<NavigationEntry>();
+        for (var i = 1; i < snapshot.Count; i++)
+        {
+            var entry = snapshot[i];
+            if (entry.CacheKeyType != targetType)
+            {
+                continue;
+            }
+
+            if (!hasParameter
+                || ClassifyCandidate(entry, parameter, classificationErrors) == RecognitionVerdict.Recognized)
+            {
+                matched.Add(entry);
+            }
+        }
+
+        foreach (var ex in classificationErrors)
+        {
+            ReportSubscriberError(ex);
+        }
+
+        if (matched.Count == 0)
+        {
+            return 0;
+        }
+
+        List<Action> pendingEvents = [];
+        var errors = new List<Exception>();
+        var targets = new List<ScopeDisposalTarget>();
+        var disposedEntries = new List<NavigationEntry>();
+        var removedCount = 0;
+
+        // Serialized with navigation transitions (see ClearCache): a
+        // concurrent hop could otherwise resurrect or double-dispose an
+        // entry this call is removing.
+        WaitNavigationLock("Remove", hasAsyncCounterpart: false);
+        try
+        {
+            if (_disposed)
+            {
+                return 0;
+            }
+
+            List<NavigationEntry> removed;
+            using (_stateLock.EnterScope())
+            {
+                if (!_regionStacks.TryGetValue(regionName, out var stack))
+                {
+                    return 0;
+                }
+
+                var matchedSet = new HashSet<NavigationEntry>(matched, ReferenceEqualityComparer.Instance);
+                // The active page is never removed — re-checked against the
+                // live stack, because a concurrent navigation may have
+                // changed which entry is on top since the snapshot.
+                var top = stack.Count > 0 ? stack.Peek() : null;
+                removed = [];
+                var remaining = new List<NavigationEntry>(stack.Count);
+                foreach (var entry in stack)
+                {
+                    if (!ReferenceEquals(entry, top) && matchedSet.Contains(entry))
+                    {
+                        removed.Add(entry);
+                    }
+                    else
+                    {
+                        remaining.Add(entry);
+                    }
+                }
+
+                if (removed.Count == 0)
+                {
+                    return 0;
+                }
+
+                stack.Clear();
+                for (var i = remaining.Count - 1; i >= 0; i--)
+                {
+                    stack.Push(remaining[i]);
+                }
+            }
+
+            removedCount = removed.Count;
+
+            foreach (var entry in removed)
+            {
+                // Deactivation exactly as for a popped entry: detach the
+                // navigation reference (silently; the notification is raised
+                // after the lock is released), then run the deactivation
+                // plan — Destroy entries dispose, KeepAlive entries move
+                // into the cache (evicting as a pop would).
+                entry.ViewModel.SetNavigationSilent(null);
+                var detachedViewModel = entry.ViewModel;
+                pendingEvents.Add(() => RaiseNavigationChangedNotification(detachedViewModel));
+
+                var plan = BuildDeactivatePlan(entry, destroy: entry.Retention != NavigationRetention.KeepAlive);
+                if (plan.ShouldDispose)
+                {
+                    targets.Add(new ScopeDisposalTarget(entry.Scope, entry.ViewModel, plan.RegionsToNotify));
+                    disposedEntries.Add(entry);
+                }
+
+                if (plan.EvictedDisposals is not null)
+                {
+                    foreach (var (evictedEntry, evictedRegions) in plan.EvictedDisposals)
+                    {
+                        targets.Add(new ScopeDisposalTarget(evictedEntry.Scope, evictedEntry.ViewModel, evictedRegions));
+                        disposedEntries.Add(evictedEntry);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            _navigationLock.Release();
+        }
+
+        DisposeScopesSync(targets, pendingEvents, errors);
+
+        // The same tail the queued disposal path runs: drop the disposed
+        // scopes' deferred-disposal records and release the entries'
+        // lifecycle sources.
+        using (_stateLock.EnterScope())
+        {
+            foreach (var entry in disposedEntries)
+            {
+                _pendingScopeDisposals.Remove(entry.Scope);
+            }
+        }
+
+        DisposeLifecycleSources(disposedEntries);
+        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
+        ThrowCollectedErrors(errors);
+        return removedCount;
+    }
 
     /// <summary>
     /// Normalizes a caller-supplied region name at the API boundary:
