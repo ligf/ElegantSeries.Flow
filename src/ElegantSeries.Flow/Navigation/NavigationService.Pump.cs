@@ -1542,8 +1542,9 @@ public sealed partial class NavigationService
         // complete after this very guard returns — that wait would deadlock.
         var guardContext = BuildGuardContext(regionName, candidate, current);
         GuardOutcome guardOutcome;
-        var previousCurrent = _currentLifecycleEntry.Value;
-        _currentLifecycleEntry.Value = current;
+        var marker = new LifecycleMarker(current);
+        var previousCurrent = _currentLifecycleMarker.Value;
+        _currentLifecycleMarker.Value = marker;
         try
         {
             guardOutcome = await RunGuardAsync(current.ViewModel, guardContext, candidate.CancellationToken, window.DisposalSignal.Task).ConfigureAwait(false);
@@ -1628,7 +1629,8 @@ public sealed partial class NavigationService
         }
         finally
         {
-            _currentLifecycleEntry.Value = previousCurrent;
+            marker.Active = false;
+            _currentLifecycleMarker.Value = previousCurrent;
         }
 
         if (_disposed)
