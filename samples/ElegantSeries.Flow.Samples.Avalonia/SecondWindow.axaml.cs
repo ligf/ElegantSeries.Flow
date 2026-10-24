@@ -35,7 +35,7 @@ public partial class SecondWindow : Window
         WindowHost.NavigationService = _navigation;
         WindowHost.ViewLocator = views;
 
-        SampleHelpers.ObserveNavigation(_navigation.NavigateToAsync<HomeViewModel>(), ReportError);
+        SampleNavigation.Observe(_navigation.NavigateToAsync<HomeViewModel>(), ReportError);
     }
 
     // Surfaces failures of the initial navigation instead of leaving an

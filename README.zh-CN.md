@@ -442,8 +442,12 @@ Avalonia 示例的 csproj 里开了 `PublishAot=true`，作为框架 AOT 能力�
 | `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentRetention(region?)` / `GetCurrentParameter(viewModel, region?)` / `GetNavigationStack(region?)` | 查询 |
 | `ClearCache(region?)` / `ClearCacheAsync(region?)` | 清空单个 region 的 KeepAlive 缓存 |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | 清空所有 KeepAlive 缓存 |
-| `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` | 事件 |
+| `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` / `SubscriberError` | 事件 |
+| `SubscribeRegionNavigated` / `SubscribeViewModelReleased` / `SubscribeRegionCacheCleared` / `SubscribeSubscriberError` | 可释放的事件订阅 |
 | `AddElegantSeriesFlow()` / `AddElegantSeriesFlow(ServiceLifetime.Scoped)` | DI 注册 |
+| `AddElegantSeriesFlow(configure, lifetime?)` | 带 `NavigationOptions` 的 DI 注册 |
+| `NavigationOptions.DisposalGateTimeout` | 异步生命周期等待超时（默认 5 秒） |
+| `NavigationOptions.SyncLockTimeout` | 同步 API 锁获取超时（默认 2 秒） |
 | `NavigationOptions.MaxNavigationChainLength` | 回调驱动的连续跳数上限（默认 10） |
 
 ## 参与贡献

@@ -75,6 +75,14 @@ public partial class App : Application
         Services.GetRequiredService<MenuViewModel>().OpenSecondWindowRequested +=
             () => new SecondWindow().Show();
 
+        // The main window is created explicitly (no StartupUri) so the
+        // bootstrapper can attach its hosts and run the startup navigation
+        // before the window is shown.
+        var window = new MainWindow();
+        MainWindow = window;
+        MainWindowBootstrapper.Run(window, Services, window.ReportError);
+        window.Show();
+
         base.OnStartup(e);
     }
 }
