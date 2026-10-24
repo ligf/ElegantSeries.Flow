@@ -379,16 +379,16 @@ public sealed partial class NavigationService
                     {
                         foreach (var inner in exception.InnerExceptions)
                         {
-                            if (inner is not OperationCanceledException)
+                            if (FirstNonCancellationError(inner) is { } real)
                             {
-                                ReportSubscriberError(inner);
+                                ReportSubscriberError(real);
                             }
                         }
                     }
                     else if (exception.InnerException is { } single
-                        && single is not OperationCanceledException)
+                        && FirstNonCancellationError(single) is { } real)
                     {
-                        ReportSubscriberError(single);
+                        ReportSubscriberError(real);
                     }
                 },
                 CancellationToken.None,
@@ -1287,16 +1287,17 @@ public sealed partial class NavigationService
 
     /// <summary>
     /// True when an exception carries nothing but cancellation: a bare
-    /// <see cref="OperationCanceledException"/>, or an aggregate whose
-    /// flattened leaves are all <see cref="OperationCanceledException"/>.
+    /// <see cref="OperationCanceledException"/> whose inner-exception chain
+    /// is empty or consists only of further
+    /// <see cref="OperationCanceledException"/>s, or an aggregate whose
+    /// flattened leaves all satisfy the same rule. An
+    /// <see cref="OperationCanceledException"/> wrapping a real error (for
+    /// example <c>new OperationCanceledException("x", realError)</c>) is
+    /// NOT cancellation-only: the wrapped error must be reported, not
+    /// swallowed as a cancellation outcome.
     /// </summary>
     private static bool IsCancellationOnly(Exception error)
     {
-        if (error is OperationCanceledException)
-        {
-            return true;
-        }
-
         if (error is AggregateException aggregate)
         {
             // Not vacuously: an aggregate with no leaves at all (a guard
@@ -1307,7 +1308,7 @@ public sealed partial class NavigationService
             foreach (var inner in aggregate.Flatten().InnerExceptions)
             {
                 any = true;
-                if (inner is not OperationCanceledException)
+                if (FirstNonCancellationError(inner) is not null)
                 {
                     return false;
                 }
@@ -1316,7 +1317,27 @@ public sealed partial class NavigationService
             return any;
         }
 
-        return false;
+        return error is OperationCanceledException && FirstNonCancellationError(error) is null;
+    }
+
+    /// <summary>
+    /// Walks an <see cref="OperationCanceledException"/> inner-exception
+    /// chain and returns the first error that is not itself cancellation,
+    /// or <see langword="null"/> when the chain carries nothing but
+    /// cancellation. A non-cancellation exception is returned as-is.
+    /// Callers use this wherever a fault is filtered with "skip
+    /// cancellation artifacts": skipping must stop at a wrapped real error
+    /// instead of discarding it along with its wrapper.
+    /// </summary>
+    private static Exception? FirstNonCancellationError(Exception error)
+    {
+        var current = error;
+        while (current is OperationCanceledException oce && oce.InnerException is not null)
+        {
+            current = oce.InnerException;
+        }
+
+        return current is OperationCanceledException ? null : current;
     }
 
     private async Task<bool> RunDepartureCoreAsync(RegionWindow window, string regionName, NavigationIntent candidate)
@@ -1406,31 +1427,47 @@ public sealed partial class NavigationService
         }
         catch (Exception ex)
         {
-            // When the failure will be reported, not delivered to a waiting
-            // caller (the candidate was withdrawn, or has no fate), an
-            // aggregate is reported by its real leaves only, as
+            // An aggregate failure is delivered by its real leaves only, as
             // ReportGuardFault does — cancellation artifacts inside it are
-            // outcomes, not errors. (A candidate still awaited by its
-            // caller keeps the original exception via FaultOrReport: a
-            // guard's thrown exception propagates to its caller. An
-            // aggregate with no leaves has nothing to classify and also
-            // goes through FaultOrReport.)
+            // outcomes, not errors. A candidate with no fate, or already
+            // withdrawn, reports each real leaf to SubscriberError; a
+            // candidate still awaited by its caller faults with the single
+            // real leaf, or an aggregate of them. (An aggregate with no
+            // leaves has nothing to classify and goes through FaultOrReport
+            // with the original exception.)
             var leavesReported = false;
-            if ((candidate.Fate is null || candidate.IsWithdrawn) && ex is AggregateException aggregate)
+            if (ex is AggregateException aggregate)
             {
+                var reals = new List<Exception>();
                 foreach (var inner in aggregate.Flatten().InnerExceptions)
                 {
-                    if (inner is not OperationCanceledException)
+                    if (FirstNonCancellationError(inner) is { } real)
                     {
-                        ReportSubscriberError(inner);
+                        reals.Add(real);
+                    }
+                }
+
+                if (candidate.Fate is null || candidate.IsWithdrawn)
+                {
+                    foreach (var real in reals)
+                    {
+                        ReportSubscriberError(real);
                         leavesReported = true;
                     }
+                }
+                else if (reals.Count > 0)
+                {
+                    FaultOrReport(candidate, reals.Count == 1 ? reals[0] : new AggregateException(reals));
+                    leavesReported = true;
                 }
             }
 
             if (!leavesReported)
             {
-                FaultOrReport(candidate, ex);
+                // A non-aggregate guard failure may still be a cancellation
+                // wrapper around a real error: deliver the wrapped error,
+                // not the wrapper, to the caller (or SubscriberError).
+                FaultOrReport(candidate, FirstNonCancellationError(ex) ?? ex);
             }
 
             RenewActivationIfCancelled(current);
@@ -1911,9 +1948,9 @@ public sealed partial class NavigationService
 
                 foreach (var inner in leaves)
                 {
-                    if (inner is not OperationCanceledException)
+                    if (FirstNonCancellationError(inner) is { } real)
                     {
-                        ReportSubscriberError(inner);
+                        ReportSubscriberError(real);
                     }
                 }
             }
