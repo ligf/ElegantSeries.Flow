@@ -392,6 +392,40 @@ public class InCallbackTaskStateViewModel : NavigationViewModelBase, INavigation
     public void OnNavigatedFrom() { }
 }
 
+/// <summary>
+/// Calls Dispose and DisposeAsync on the concrete service from inside its own
+/// lifecycle callback and records what each call threw.
+/// </summary>
+public class DisposeInCallbackViewModel : NavigationViewModelBase, INavigationAware
+{
+    public Exception? DisposeError { get; private set; }
+    public Exception? DisposeAsyncError { get; private set; }
+
+    public void OnNavigatedTo(object? parameter)
+    {
+        var svc = (NavigationService)Navigation!;
+        try
+        {
+            svc.Dispose();
+        }
+        catch (Exception ex)
+        {
+            DisposeError = ex;
+        }
+
+        try
+        {
+            svc.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            DisposeAsyncError = ex;
+        }
+    }
+
+    public void OnNavigatedFrom() { }
+}
+
 /// <summary>Deliberately never registered in any test container: resolving it fails.</summary>
 public class UnregisteredViewModel : NavigationViewModelBase
 {
@@ -1913,6 +1947,99 @@ public class NavigationServiceTests
         // 验证已释放后调用导航抛出 ObjectDisposedException
         await Assert.ThrowsAsync<ObjectDisposedException>(() => navService.NavigateToAsync<TestHomeViewModel>());
         await Assert.ThrowsAsync<ObjectDisposedException>(() => navService.GoBackAsync());
+    }
+
+    [Fact]
+    public async Task DisposeAndDisposeAsync_InLifecycleCallback_ThrowInvalidOperationException()
+    {
+        // D-1: like the ClearCache family, Dispose/DisposeAsync called from
+        // within a page lifecycle callback fail fast instead of disposing the
+        // service (and the caller's own page scope) mid-callback — DisposeAsync
+        // previously also waited out the full disposal gate timeout first.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<DisposeInCallbackViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<DisposeInCallbackViewModel>();
+        var vm = Assert.IsType<DisposeInCallbackViewModel>(nav.GetCurrentViewModel());
+
+        var disposeError = Assert.IsType<InvalidOperationException>(vm.DisposeError);
+        Assert.Contains("Dispose cannot be called from within a page lifecycle callback", disposeError.Message);
+        var disposeAsyncError = Assert.IsType<InvalidOperationException>(vm.DisposeAsyncError);
+        Assert.Contains("DisposeAsync cannot be called from within a page lifecycle callback", disposeAsyncError.Message);
+
+        // Neither call disposed the service: it is still usable.
+        Assert.True(await nav.NavigateToAsync<TestHomeViewModel>());
+    }
+
+    [Fact]
+    public async Task AfterDisposeAsync_QueriesReportEmptyState_AndCacheClearsAreSilentNoOps()
+    {
+        // D-2 contract (async disposal leg): after disposal, navigation
+        // throws ObjectDisposedException, but queries report the actual
+        // (empty) state without throwing, cache clears are silent no-ops,
+        // and subscribing stays valid.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        await nav.NavigateToAsync<TestDetailViewModel>();
+        Assert.True(nav.CanGoBack());
+
+        // DisposeAsync: TestDetailViewModel is async-disposable only, which
+        // the synchronous Dispose path rejects by design.
+        await nav.DisposeAsync();
+
+        await AssertPostDisposeMatrixAsync(nav);
+    }
+
+    [Fact]
+    public async Task AfterDispose_QueriesReportEmptyState_AndCacheClearsAreSilentNoOps()
+    {
+        // D-2 contract (sync disposal leg): same matrix as the async leg.
+        // (Two distinct page types: re-navigating to the active type would
+        // be a self no-op and the stack would never reach depth two.)
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddTransient<KeepAliveViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        await nav.NavigateToAsync<KeepAliveViewModel>();
+        Assert.True(nav.CanGoBack());
+
+        nav.Dispose();
+
+        await AssertPostDisposeMatrixAsync(nav);
+    }
+
+    private static async Task AssertPostDisposeMatrixAsync(NavigationService nav)
+    {
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => nav.NavigateToAsync<TestHomeViewModel>());
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => nav.GoBackAsync());
+
+        Assert.False(nav.CanGoBack());
+        Assert.Null(nav.GetCurrentViewModel());
+        Assert.False(nav.IsActive<TestHomeViewModel>());
+        Assert.Null(nav.GetCurrentRetention());
+        Assert.Empty(nav.GetNavigationStack());
+
+        nav.ClearCache("MainRegion");
+        nav.ClearAllCache();
+        await nav.ClearCacheAsync("MainRegion");
+        await nav.ClearAllCacheAsync();
+
+        // Subscribing (and unsubscribing) stays valid after disposal.
+        using var subscription = nav.SubscribeRegionNavigated((_, _) => { });
     }
 
     [Fact]

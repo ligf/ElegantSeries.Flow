@@ -431,6 +431,100 @@ public class NavigationServiceCoverageTests
     /// <summary>
     /// Simple disposable service for tracking scope disposal in tests.
     /// </summary>
+    // ── ClearCacheAsync / ClearAllCacheAsync gate timeout ──────
+
+    /// <summary>
+    /// KeepAlive page whose <c>OnNavigatedFromAsync</c> hangs until released,
+    /// ignoring its cancellation token. Leaving it makes the pump abandon the
+    /// callback after the disposal gate timeout; the entry then sits in the
+    /// cache with its lifecycle gate still open.
+    /// </summary>
+    private sealed class HangingLeaveViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public HangingLeaveViewModel(TrackedDisposeService tracked) => Tracked = tracked;
+
+        public TrackedDisposeService Tracked { get; }
+        public TaskCompletionSource LeaveGate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource LeaveEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public async Task OnNavigatedFromAsync(CancellationToken cancellationToken)
+        {
+            LeaveEntered.TrySetResult();
+            // Deliberately ignores the cancellation token.
+            await LeaveGate.Task.ConfigureAwait(false);
+        }
+    }
+
+    [Fact]
+    public async Task ClearCacheAsync_WhenCachedPageLifecycleHangs_TimesOutReportsAndDisposesAnyway()
+        => await RunClearCacheGateTimeoutScenarioAsync(
+            svc => svc.ClearCacheAsync("MainRegion").AsTask(),
+            "ClearCacheAsync timed out");
+
+    [Fact]
+    public async Task ClearAllCacheAsync_WhenCachedPageLifecycleHangs_TimesOutReportsAndDisposesAnyway()
+        => await RunClearCacheGateTimeoutScenarioAsync(
+            svc => svc.ClearAllCacheAsync().AsTask(),
+            "ClearAllCacheAsync timed out");
+
+    private static async Task RunClearCacheGateTimeoutScenarioAsync(
+        Func<INavigationService, Task> clearAsync,
+        string expectedMessagePrefix)
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow(o => o.DisposalGateTimeout = TimeSpan.FromMilliseconds(200));
+        services.AddScoped<TrackedDisposeService>();
+        services.AddTransient<HangingLeaveViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        var timeoutSeen = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        svc.SubscribeSubscriberError(ex =>
+        {
+            if (ex is TimeoutException && ex.Message.StartsWith(expectedMessagePrefix, StringComparison.Ordinal))
+            {
+                timeoutSeen.TrySetResult(true);
+            }
+        });
+
+        await svc.NavigateToAsync<HangingLeaveViewModel>(retention: NavigationRetention.KeepAlive);
+        var vm = Assert.IsType<HangingLeaveViewModel>(svc.GetCurrentViewModel());
+        Assert.False(vm.Tracked.Disposed);
+
+        try
+        {
+            // Leave via Replace: the From callback starts and hangs. A second
+            // intent registered while it hangs makes the pump wait out the gate
+            // timeout and abandon the callback; the departure then commits and
+            // the KeepAlive entry lands in the cache with its lifecycle gate
+            // still open (the scope is NOT disposed yet).
+            var away = svc.NavigateToAsync<TestHomeViewModel>(operation: NavigationOperation.Replace);
+            await vm.LeaveEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var third = svc.NavigateToAsync<TestDetailViewModel>(operation: NavigationOperation.Replace);
+            Assert.True(await third.WaitAsync(TimeSpan.FromSeconds(30)));
+            await away.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.False(vm.Tracked.Disposed);
+
+            // The clear collects the still-open gate, waits out the same
+            // timeout, reports it, and releases the scope anyway. (The
+            // WaitAsync guards turn a regression of the timeout behavior
+            // into a test failure instead of a hung suite.)
+            await clearAsync(svc).WaitAsync(TimeSpan.FromSeconds(30));
+            await timeoutSeen.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.True(vm.Tracked.Disposed);
+        }
+        finally
+        {
+            // Let the abandoned callback finish so nothing leaks into
+            // other tests, even when an assertion above failed.
+            vm.LeaveGate.TrySetResult();
+        }
+    }
+
     private sealed class TrackedDisposeService : IDisposable
     {
         public bool Disposed { get; private set; }

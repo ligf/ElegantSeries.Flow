@@ -729,10 +729,18 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <see cref="TimeoutException"/> is thrown and the service is NOT disposed.
     /// Prefer <see cref="DisposeAsync"/> on UI threads.
     /// </para>
+    /// <para>
+    /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
+    /// within a page lifecycle callback. Call it outside the callback instead.
+    /// </para>
     /// </remarks>
     public void Dispose()
     {
         if (_disposed) return;
+        if (CurrentOwnLifecycleEntry is not null)
+            throw new InvalidOperationException(
+                "Dispose cannot be called from within a page lifecycle callback. " +
+                "Call it outside the callback instead.");
 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
@@ -806,10 +814,18 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <remarks>
     /// Best-effort: every page scope is attempted even if one of them throws.
     /// Collected exceptions are rethrown after cleanup and events.
+    /// <para>
+    /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
+    /// within a page lifecycle callback. Call it outside the callback instead.
+    /// </para>
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
+        if (CurrentOwnLifecycleEntry is not null)
+            throw new InvalidOperationException(
+                "DisposeAsync cannot be called from within a page lifecycle callback. " +
+                "Call it outside the callback instead.");
 
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();

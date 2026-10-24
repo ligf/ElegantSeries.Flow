@@ -106,6 +106,25 @@ namespace ElegantSeries.Flow.Navigation;
 /// names are rejected with <see cref="ArgumentException"/>.
 /// </para>
 /// <para>
+/// <b>After disposal:</b> navigation requests fail — <c>NavigateToAsync</c> and
+/// <c>GoBackAsync</c> throw <see cref="ObjectDisposedException"/>, except a
+/// request registered from within a lifecycle callback after disposal, which
+/// completes with <see langword="false"/> instead (see the methods' return
+/// documentation). A callback-registered request that was already registered
+/// before disposal returned <see langword="true"/> at registration and is
+/// discarded silently at disposal, with no observable completion.
+/// Query methods never throw for disposal: they report the actual state,
+/// which is empty — <c>CanGoBack</c> and <c>IsActive</c> return
+/// <see langword="false"/>, <c>GetCurrentViewModel</c> and
+/// <c>GetCurrentRetention</c> return <see langword="null"/>, and
+/// <c>GetNavigationStack</c> returns an empty list. The cache-clearing methods
+/// are silent no-ops. Event subscriptions remain valid and no new navigation
+/// activity is raised, but work already in flight at disposal — a deferred
+/// scope disposal, or a guard fault the pump had abandoned — can still
+/// deliver its <c>ViewModelReleased</c> or <c>SubscriberError</c>
+/// notification afterwards.
+/// </para>
+/// <para>
 /// This interface does not extend <see cref="IDisposable"/> or
 /// <see cref="IAsyncDisposable"/>: the service is typically a singleton owned by the
 /// DI container, which disposes it. To dispose explicitly (e.g. in tests), cast to
@@ -219,6 +238,7 @@ public interface INavigationService
     /// </summary>
     /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
     /// <returns><see langword="true"/> if the region stack contains more than one page.</returns>
+    /// <remarks>After the service is disposed, returns <see langword="false"/> (the stacks are empty); query methods never throw <see cref="ObjectDisposedException"/>.</remarks>
     bool CanGoBack(string regionName = DefaultRegionName);
 
     /// <summary>
@@ -226,6 +246,7 @@ public interface INavigationService
     /// </summary>
     /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
     /// <returns>The active ViewModel, or <see langword="null"/> if the region is empty.</returns>
+    /// <remarks>After the service is disposed, returns <see langword="null"/> (the stacks are empty); query methods never throw <see cref="ObjectDisposedException"/>.</remarks>
     INavigationViewModel? GetCurrentViewModel(string regionName = DefaultRegionName);
 
     /// <summary>
@@ -233,6 +254,7 @@ public interface INavigationService
     /// </summary>
     /// <typeparam name="TViewModel">The ViewModel type to check.</typeparam>
     /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
+    /// <remarks>After the service is disposed, returns <see langword="false"/> (the stacks are empty); query methods never throw <see cref="ObjectDisposedException"/>.</remarks>
     bool IsActive<TViewModel>(string regionName = DefaultRegionName) where TViewModel : INavigationViewModel;
 
     /// <summary>
@@ -241,6 +263,7 @@ public interface INavigationService
     /// </summary>
     /// <param name="regionName">The navigation region. Defaults to <c>"MainRegion"</c>.</param>
     /// <returns>The current page's retention, or <see langword="null"/> if the region is empty.</returns>
+    /// <remarks>After the service is disposed, returns <see langword="null"/> (the stacks are empty); query methods never throw <see cref="ObjectDisposedException"/>.</remarks>
     NavigationRetention? GetCurrentRetention(string regionName = DefaultRegionName);
 
     /// <summary>
@@ -257,6 +280,7 @@ public interface INavigationService
     /// Intended for breadcrumbs, diagnostics, and state inspection;
     /// the framework's internal stack entries are never exposed.
     /// </returns>
+    /// <remarks>After the service is disposed, returns an empty list (the stacks are empty); query methods never throw <see cref="ObjectDisposedException"/>.</remarks>
     IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = DefaultRegionName);
 
     // ─────────────────── Navigation Methods (Async) ───────────────────
@@ -484,6 +508,9 @@ public interface INavigationService
     /// within a page lifecycle callback (e.g. <c>OnNavigatedToAsync</c> or
     /// <c>OnNavigatedFromAsync</c>). Call it outside the callback instead.
     /// </para>
+    /// <para>
+    /// After the service is disposed, this is a silent no-op.
+    /// </para>
     /// </remarks>
     void ClearCache(string regionName);
 
@@ -523,6 +550,9 @@ public interface INavigationService
     /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
     /// within a page lifecycle callback. Call it outside the callback instead.
     /// </para>
+    /// <para>
+    /// After the service is disposed, this is a silent no-op.
+    /// </para>
     /// </remarks>
     void ClearAllCache();
 
@@ -537,6 +567,9 @@ public interface INavigationService
     /// within a page lifecycle callback (e.g. <c>OnNavigatedFromAsync</c>).
     /// Call it outside the callback instead.
     /// </para>
+    /// <para>
+    /// After the service is disposed, this is a silent no-op.
+    /// </para>
     /// </remarks>
     ValueTask ClearCacheAsync(string regionName);
 
@@ -548,6 +581,9 @@ public interface INavigationService
     /// <para>
     /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
     /// within a page lifecycle callback. Call it outside the callback instead.
+    /// </para>
+    /// <para>
+    /// After the service is disposed, this is a silent no-op.
     /// </para>
     /// </remarks>
     ValueTask ClearAllCacheAsync();
