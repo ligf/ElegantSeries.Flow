@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using ElegantSeries.Flow.Extensions;
 using ElegantSeries.Flow.Navigation;
@@ -758,6 +759,569 @@ public class NavigationServiceCoverageTests
             new InvalidOperationException("Guard failed after cancellation.")));
         await errorSeen.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.IsType<InvalidOperationException>(observedError);
+    }
+
+    /// <summary>
+    /// Guard that faults with an <see cref="OperationCanceledException"/>
+    /// wrapping a real error. Used to verify that a wrapped error is not
+    /// swallowed as a cancellation outcome: the awaiting caller must
+    /// receive the wrapped error itself.
+    /// </summary>
+    [Fact]
+    public async Task NavigateToAsync_WhenGuardFaultsWithOceWrappingRealError_CallerReceivesRealError()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ManuallyFaultedGuardViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        await svc.NavigateToAsync<ManuallyFaultedGuardViewModel>();
+
+        var navTask = svc.NavigateToAsync<TestHomeViewModel>();
+        var vm = Assert.IsType<ManuallyFaultedGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+        await vm.GuardEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Without the unwrap fix this is classified as pure cancellation
+        // and the caller observes an OperationCanceledException instead.
+        vm.Fault(new OperationCanceledException(
+            "Guard cancelled.",
+            new InvalidOperationException("Guard real failure.")));
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => navTask);
+        Assert.Equal("Guard real failure.", thrown.Message);
+        Assert.Null(observedError);
+        Assert.IsType<ManuallyFaultedGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenGuardFaultsWithNestedOceChain_CallerReceivesInnermostRealError()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ManuallyFaultedGuardViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        await svc.NavigateToAsync<ManuallyFaultedGuardViewModel>();
+
+        var navTask = svc.NavigateToAsync<TestHomeViewModel>();
+        var vm = Assert.IsType<ManuallyFaultedGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+        await vm.GuardEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Unwrapping must walk the whole OCE chain, not stop at the first
+        // inner exception: a naive "inner must be null" rule would either
+        // swallow this or deliver the outer wrapper.
+        vm.Fault(new OperationCanceledException(
+            "Outer.",
+            new OperationCanceledException(
+                "Inner.",
+                new InvalidOperationException("Guard real failure."))));
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => navTask);
+        Assert.Equal("Guard real failure.", thrown.Message);
+        Assert.Null(observedError);
+        Assert.IsType<ManuallyFaultedGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenGuardFaultsWithOceWrappingOce_IsStillPureCancellation()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ManuallyFaultedGuardViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        await svc.NavigateToAsync<ManuallyFaultedGuardViewModel>();
+
+        var navTask = svc.NavigateToAsync<TestHomeViewModel>();
+        var vm = Assert.IsType<ManuallyFaultedGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+        await vm.GuardEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // A chain of only cancellations carries no real error: the
+        // cancellation outcome stands and nothing is reported. The fate
+        // cancellation surfaces as TaskCanceledException, an
+        // OperationCanceledException subclass, so the assertion must
+        // accept derived types. Note: this test pins the characterization
+        // only — the nested-chain test above is the one that discriminates
+        // the chain-walking rule.
+        vm.Fault(new OperationCanceledException(
+            "Outer.",
+            new OperationCanceledException("Inner.")));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => navTask);
+        Assert.Null(observedError);
+        Assert.IsType<ManuallyFaultedGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenAbandonedGuardFaultsWithWrappedOce_RealErrorIsReported()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ManuallyFaultedGuardViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        var errorSeen = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        svc.SubscribeSubscriberError(ex =>
+        {
+            observedError = ex;
+            errorSeen.TrySetResult(true);
+        });
+
+        await svc.NavigateToAsync<ManuallyFaultedGuardViewModel>();
+
+        using var cts = new CancellationTokenSource();
+        var navTask = svc.NavigateToAsync<TestHomeViewModel>(cancellationToken: cts.Token);
+
+        var vm = Assert.IsType<ManuallyFaultedGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+        await vm.GuardEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        cts.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => navTask);
+
+        // The abandoned-guard report path flattens the fault and used to
+        // skip OCE leaves outright: a wrapped real error vanished there
+        // even though the direct path reported it.
+        vm.Fault(new AggregateException(
+            new OperationCanceledException(
+                "Guard cancelled.",
+                new InvalidOperationException("Guard real failure."))));
+        await errorSeen.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.IsType<InvalidOperationException>(observedError);
+    }
+
+    /// <summary>
+    /// Page whose <c>OnNavigatedFromAsync</c> returns a faulted task carrying
+    /// an <see cref="OperationCanceledException"/> that wraps a real error.
+    /// The faulted task (rather than an async throw) is what delivers the
+    /// wrapper itself to the runner: an async method throwing an OCE would
+    /// complete its task as Canceled instead, losing the wrapper.
+    /// </summary>
+    private sealed class WrappedOceFromViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) =>
+            Task.FromException(new OperationCanceledException(
+                "From cancelled.",
+                new InvalidOperationException("From real failure.")));
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenFromCallbackFaultsWithWrappedOce_CallerReceivesRealError()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<WrappedOceFromViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        await svc.NavigateToAsync<WrappedOceFromViewModel>();
+
+        // Leaving the page cancels its lifecycle token first, so the
+        // runner's `when (token.IsCancellationRequested)` filter matches
+        // and the old code swallowed the wrapped error outright.
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.NavigateToAsync<TestHomeViewModel>());
+        Assert.Equal("From real failure.", thrown.Message);
+        Assert.Null(observedError);
+    }
+
+    /// <summary>
+    /// Page whose <c>OnNavigatedToAsync</c> returns a faulted task carrying
+    /// an <see cref="OperationCanceledException"/> that wraps a real error.
+    /// Its token is not cancelled at entry time, so the runner takes the
+    /// generic catch rather than the cancellation filter.
+    /// </summary>
+    private sealed class WrappedOceToViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken) =>
+            Task.FromException(new OperationCanceledException(
+                "To cancelled.",
+                new InvalidOperationException("To real failure.")));
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenToCallbackFaultsWithWrappedOce_CallerReceivesRealError()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<WrappedOceToViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        // The old code collected the OCE wrapper itself as the error, so
+        // the caller observed an OperationCanceledException.
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.NavigateToAsync<WrappedOceToViewModel>());
+        Assert.Equal("To real failure.", thrown.Message);
+        Assert.Null(observedError);
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenGuardFaultsWithAggregateContainingWrappedOce_CallerReceivesUnwrappedLeaves()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ManuallyFaultedGuardViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        await svc.NavigateToAsync<ManuallyFaultedGuardViewModel>();
+
+        var navTask = svc.NavigateToAsync<TestHomeViewModel>();
+        var vm = Assert.IsType<ManuallyFaultedGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+        await vm.GuardEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // A multi-leaf aggregate reaches the generic catch as an aggregate
+        // (a single-leaf one would be unwrapped by await). The old code
+        // delivered the original aggregate — wrapper included — to the
+        // awaiting caller; the new code faults with the unwrapped leaves.
+        vm.Fault(new AggregateException(
+            new OperationCanceledException(
+                "Guard cancelled.",
+                new InvalidOperationException("Guard real failure.")),
+            new InvalidOperationException("Guard second failure.")));
+        var thrown = await Assert.ThrowsAsync<AggregateException>(() => navTask);
+        Assert.Equal(2, thrown.InnerExceptions.Count);
+        Assert.IsType<InvalidOperationException>(thrown.InnerExceptions[0]);
+        Assert.Equal("Guard real failure.", thrown.InnerExceptions[0].Message);
+        Assert.Equal("Guard second failure.", thrown.InnerExceptions[1].Message);
+        Assert.Null(observedError);
+        Assert.IsType<ManuallyFaultedGuardViewModel>(svc.GetCurrentViewModel("MainRegion"));
+    }
+
+    /// <summary>
+    /// Page whose synchronous <c>OnNavigatedFrom</c> throws an
+    /// <see cref="OperationCanceledException"/> wrapping a real error.
+    /// The synchronous runner branches never unwrapped, so the caller
+    /// used to observe the wrapper.
+    /// </summary>
+    private sealed class SyncWrappedOceFromViewModel : NavigationViewModelBase, INavigationAware
+    {
+        public void OnNavigatedTo(object? parameter)
+        {
+        }
+
+        public void OnNavigatedFrom() => throw new OperationCanceledException(
+            "From cancelled.",
+            new InvalidOperationException("Sync from real failure."));
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenSyncFromCallbackThrowsWrappedOce_CallerReceivesRealError()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncWrappedOceFromViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        await svc.NavigateToAsync<SyncWrappedOceFromViewModel>();
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.NavigateToAsync<TestHomeViewModel>());
+        Assert.Equal("Sync from real failure.", thrown.Message);
+        Assert.Null(observedError);
+    }
+
+    /// <summary>
+    /// Page whose synchronous <c>OnNavigatedTo</c> throws an
+    /// <see cref="OperationCanceledException"/> wrapping a real error.
+    /// </summary>
+    private sealed class SyncWrappedOceToViewModel : NavigationViewModelBase, INavigationAware
+    {
+        public void OnNavigatedTo(object? parameter) => throw new OperationCanceledException(
+            "To cancelled.",
+            new InvalidOperationException("Sync to real failure."));
+
+        public void OnNavigatedFrom()
+        {
+        }
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenSyncToCallbackThrowsWrappedOce_CallerReceivesRealError()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<SyncWrappedOceToViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.NavigateToAsync<SyncWrappedOceToViewModel>());
+        Assert.Equal("Sync to real failure.", thrown.Message);
+        Assert.Null(observedError);
+    }
+
+    /// <summary>
+    /// Page whose async <c>OnNavigatedFromAsync</c> returns a faulted task
+    /// carrying a multi-leaf aggregate: one leaf is an
+    /// <see cref="OperationCanceledException"/> wrapping a real error, the
+    /// other is a plain error. The runner's generic catch used to collect
+    /// the aggregate as-is.
+    /// </summary>
+    private sealed class AggregateFromViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) =>
+            Task.FromException(new AggregateException(
+                new OperationCanceledException(
+                    "From cancelled.",
+                    new InvalidOperationException("Agg from real failure.")),
+                new InvalidOperationException("Agg from second failure.")));
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenFromCallbackFaultsWithAggregate_CallerReceivesUnwrappedLeaves()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<AggregateFromViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        await svc.NavigateToAsync<AggregateFromViewModel>();
+
+        var thrown = await Assert.ThrowsAsync<AggregateException>(() => svc.NavigateToAsync<TestHomeViewModel>());
+        Assert.Equal(2, thrown.InnerExceptions.Count);
+        Assert.IsType<InvalidOperationException>(thrown.InnerExceptions[0]);
+        Assert.Equal("Agg from real failure.", thrown.InnerExceptions[0].Message);
+        Assert.Equal("Agg from second failure.", thrown.InnerExceptions[1].Message);
+        Assert.Null(observedError);
+    }
+
+    /// <summary>
+    /// CollectErrors is private, so these two tests reach it by reflection
+    /// (the file already does this for DisposeScopeAsync). They pin the
+    /// helper's shape directly: a cancellation wrapper around an aggregate
+    /// must flatten to the real leaves, and an aggregate carrying no real
+    /// error must keep the original exception.
+    /// </summary>
+    [Fact]
+    public void CollectErrors_WhenOceWrapsAggregate_FlattensToRealLeaves()
+    {
+        var method = typeof(NavigationService).GetMethod("CollectErrors", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var errors = new List<Exception>();
+        method.Invoke(null, [errors, new OperationCanceledException(
+            "Wrapped.",
+            new AggregateException(
+                new InvalidOperationException("first"),
+                new InvalidOperationException("second")))]);
+        Assert.Equal(2, errors.Count);
+        Assert.Equal("first", errors[0].Message);
+        Assert.Equal("second", errors[1].Message);
+    }
+
+    [Fact]
+    public void CollectErrors_WhenAggregateCarriesNoRealError_KeepsOriginal()
+    {
+        var method = typeof(NavigationService).GetMethod("CollectErrors", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var original = new AggregateException(
+            new OperationCanceledException(),
+            new OperationCanceledException());
+        var errors = new List<Exception>();
+        method.Invoke(null, [errors, original]);
+        Assert.Single(errors);
+        Assert.Same(original, errors[0]);
+    }
+
+    /// <summary>
+    /// Page whose async <c>OnNavigatedFromAsync</c> returns a faulted task
+    /// carrying an OCE that wraps an aggregate of only OCEs. The From token
+    /// is already cancelled when the callback runs, so the runner takes
+    /// its cancellation-filter branch: a wrapper carrying no real error
+    /// must stay swallowed, not surface as a collected error via the
+    /// collector's fallback.
+    /// </summary>
+    private sealed class PureOceAggregateFromViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) =>
+            Task.FromException(new OperationCanceledException(
+                "From cancelled.",
+                new AggregateException(
+                    new OperationCanceledException(),
+                    new OperationCanceledException())));
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenFromCallbackFaultsWithPureOceAggregate_NavigationSucceeds()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<PureOceAggregateFromViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        await svc.NavigateToAsync<PureOceAggregateFromViewModel>();
+
+        Assert.True(await svc.NavigateToAsync<TestHomeViewModel>());
+        Assert.IsType<TestHomeViewModel>(svc.GetCurrentViewModel("MainRegion"));
+        Assert.Null(observedError);
+    }
+
+    /// <summary>
+    /// Page whose async <c>OnNavigatedFromAsync</c> returns a faulted task
+    /// carrying an OCE that wraps a mixed aggregate (one real error, one
+    /// OCE leaf). The cancellation-filter branch must collect exactly the
+    /// real leaf.
+    /// </summary>
+    private sealed class MixedOceAggregateFromViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) =>
+            Task.FromException(new OperationCanceledException(
+                "From cancelled.",
+                new AggregateException(
+                    new InvalidOperationException("Mixed aggregate real failure."),
+                    new OperationCanceledException())));
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenFromCallbackFaultsWithMixedOceAggregate_CallerReceivesRealLeaf()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<MixedOceAggregateFromViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        await svc.NavigateToAsync<MixedOceAggregateFromViewModel>();
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => svc.NavigateToAsync<TestHomeViewModel>());
+        Assert.Equal("Mixed aggregate real failure.", thrown.Message);
+        Assert.Null(observedError);
+    }
+
+    /// <summary>
+    /// Page whose async <c>OnNavigatedToAsync</c> blocks until its token is
+    /// cancelled, then faults with an OCE that wraps an aggregate of only
+    /// OCEs. The fault is delivered via a <see cref="TaskCompletionSource{TResult}"/>
+    /// faulted from the token's cancellation callback: an async method
+    /// throwing an OCE would complete its task as Canceled instead, losing
+    /// the wrapper. A second navigation registered while To is in flight
+    /// makes the pump claim it and cancel this entry's token, which is
+    /// exactly the To runner's cancellation-filter branch — the mirror of
+    /// the From-side pure-aggregate test.
+    /// </summary>
+    private sealed class PureOceAggregateToViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public TaskCompletionSource<bool> ToEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            ToEntered.TrySetResult(true);
+            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            cancellationToken.Register(() => tcs.TrySetException(new OperationCanceledException(
+                "To cancelled.",
+                new AggregateException(
+                    new OperationCanceledException(),
+                    new OperationCanceledException()))));
+            return tcs.Task;
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task NavigateToAsync_WhenToCallbackFaultsWithPureOceAggregateAfterCancel_NavigationSucceeds()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<PureOceAggregateToViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        Exception? observedError = null;
+        svc.SubscribeSubscriberError(ex => observedError = ex);
+
+        await svc.NavigateToAsync<TestHomeViewModel>();
+
+        // To blocks until its token is cancelled. The hop commits the entry
+        // to the stack before the entering step runs To, but the commit is
+        // asynchronous, so poll until the entering page is current rather
+        // than assuming it is already there.
+        var enteringTask = svc.NavigateToAsync<PureOceAggregateToViewModel>();
+        PureOceAggregateToViewModel? vm = null;
+        for (var i = 0; i < 100 && vm is null; i++)
+        {
+            vm = svc.GetCurrentViewModel("MainRegion") as PureOceAggregateToViewModel;
+            if (vm is null)
+            {
+                await Task.Delay(50);
+            }
+        }
+
+        Assert.NotNull(vm);
+        await vm.ToEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // A second, different-target navigation while To is in flight is
+        // claimed by the pump, which cancels the entering entry's token;
+        // the To callback then faults with the pure-OCE aggregate.
+        var leavingTask = svc.NavigateToAsync<TestDetailViewModel>();
+
+        // With the fallback version of the collector, the aggregate would
+        // be collected as an error and the entering navigation would fault
+        // with it instead of succeeding.
+        Assert.True(await enteringTask.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.True(await leavingTask.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.IsType<TestDetailViewModel>(svc.GetCurrentViewModel("MainRegion"));
+        Assert.Null(observedError);
     }
 
     /// <summary>

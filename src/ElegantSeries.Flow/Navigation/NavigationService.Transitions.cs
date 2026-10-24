@@ -242,6 +242,89 @@ public sealed partial class NavigationService
     }
 
     /// <summary>
+    /// Appends a lifecycle callback exception to a shared error list, first
+    /// stripping cancellation wrappers (and flattening aggregates, including
+    /// aggregates nested inside a cancellation wrapper) so the collected
+    /// errors are the real errors, not their wrappers — the same rule the
+    /// guard paths apply. A failure carrying no real error at all (a pure
+    /// cancellation, or an aggregate of only cancellations) keeps the
+    /// original exception, preserving the previous collection behavior
+    /// for that case.
+    /// </summary>
+    /// <remarks>
+    /// The computed leaves are appended under a single acquisition of the
+    /// list lock: the pump snapshots these lists under the same lock after
+    /// a disposal-gate timeout, and appending leaf-by-leaf would let a
+    /// snapshot observe a strict prefix while the remaining leaves land in
+    /// a list nobody re-reads.
+    /// </remarks>
+    private static void CollectErrors(List<Exception> errors, Exception ex)
+    {
+        if (!CollectRealErrors(errors, ex))
+        {
+            lock (errors)
+            {
+                errors.Add(ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Appends only the real errors carried by <paramref name="ex"/> (after
+    /// unwrapping and flattening), or nothing when it carries none.
+    /// Returns <see langword="true"/> when at least one real error was
+    /// appended. Unlike <see cref="CollectErrors"/>, this never falls back
+    /// to the original exception: the cancellation-filter branches use it
+    /// so a pure-cancellation shape — for example an OCE wrapping an
+    /// aggregate of only OCEs — stays swallowed instead of surfacing as a
+    /// collected error via the fallback.
+    /// </summary>
+    private static bool CollectRealErrors(List<Exception> errors, Exception ex)
+    {
+        var toAdd = new List<Exception>();
+        CollectInto(toAdd, ex);
+        if (toAdd.Count == 0)
+        {
+            return false;
+        }
+
+        lock (errors)
+        {
+            errors.AddRange(toAdd);
+        }
+
+        return true;
+    }
+
+    private static void CollectInto(List<Exception> toAdd, Exception ex)
+    {
+        if (ex is AggregateException aggregate)
+        {
+            foreach (var inner in aggregate.Flatten().InnerExceptions)
+            {
+                CollectInto(toAdd, inner);
+            }
+
+            return;
+        }
+
+        if (FirstNonCancellationError(ex) is { } real)
+        {
+            if (real is AggregateException realAggregate)
+            {
+                foreach (var inner in realAggregate.Flatten().InnerExceptions)
+                {
+                    CollectInto(toAdd, inner);
+                }
+            }
+            else
+            {
+                toAdd.Add(real);
+            }
+        }
+    }
+
+    /// <summary>
     /// Runs the entry's <c>OnNavigatedFrom</c> callback (the async variant when
     /// implemented, otherwise the synchronous one) and collects any exception into
     /// <paramref name="errors"/> instead of propagating it. The entry's lifecycle
@@ -263,13 +346,24 @@ public sealed partial class NavigationService
             {
                 await asyncAware.OnNavigatedFromAsync(token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            catch (OperationCanceledException ex) when (token.IsCancellationRequested)
             {
                 // Expected: the token is already cancelled (the page is leaving).
+                // But a cancellation wrapper around a real error is not a
+                // cancellation outcome: collect the wrapped error, and swallow
+                // only a pure cancellation (bare OCE or an OCE-only chain).
+                // The wrapped error may itself be an aggregate, so it goes
+                // through the real-leaf collector rather than a single
+                // append — but without the fallback: if the wrapper carries
+                // no real error at all, the outcome stays swallowed.
+                if (FirstNonCancellationError(ex) is { } real)
+                {
+                    CollectRealErrors(errors, real);
+                }
             }
             catch (Exception ex)
             {
-                CollectError(errors, ex);
+                CollectErrors(errors, ex);
             }
             finally
             {
@@ -287,7 +381,7 @@ public sealed partial class NavigationService
             }
             catch (Exception ex)
             {
-                CollectError(errors, ex);
+                CollectErrors(errors, ex);
             }
             finally
             {
@@ -324,14 +418,25 @@ public sealed partial class NavigationService
             {
                 await asyncAware.OnNavigatedToAsync(parameter, token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            catch (OperationCanceledException ex) when (token.IsCancellationRequested)
             {
                 // Expected: the page left the active position while its init was
                 // still running. Not an error — the navigation itself succeeded.
+                // But a cancellation wrapper around a real error is not a
+                // cancellation outcome: collect the wrapped error, and swallow
+                // only a pure cancellation (bare OCE or an OCE-only chain).
+                // The wrapped error may itself be an aggregate, so it goes
+                // through the real-leaf collector rather than a single
+                // append — but without the fallback: if the wrapper carries
+                // no real error at all, the outcome stays swallowed.
+                if (FirstNonCancellationError(ex) is { } real)
+                {
+                    CollectRealErrors(errors, real);
+                }
             }
             catch (Exception ex)
             {
-                CollectError(errors, ex);
+                CollectErrors(errors, ex);
             }
             finally
             {
@@ -349,7 +454,7 @@ public sealed partial class NavigationService
             }
             catch (Exception ex)
             {
-                CollectError(errors, ex);
+                CollectErrors(errors, ex);
             }
             finally
             {
