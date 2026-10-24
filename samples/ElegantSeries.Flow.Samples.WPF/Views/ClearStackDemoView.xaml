@@ -9,7 +9,7 @@
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:ClearStackDemoViewModel, IsDesignTimeCreatable=False}">
     <StackPanel Margin="16" VerticalAlignment="Center">
-        <TextBlock Text="ClearStack Mode" FontSize="20" Margin="0,0,0,8" />
+        <TextBlock Text="Reset Operation" FontSize="20" Margin="0,0,0,8" />
         <TextBlock Text="{Binding InstanceId, StringFormat='Instance: {0}'}" Margin="0,0,0,12" Opacity="0.6" />
         <Button Content="Push Child Page" Command="{Binding PushChildCommand}"
                 Width="160" HorizontalAlignment="Left" Margin="0,0,0,8" />

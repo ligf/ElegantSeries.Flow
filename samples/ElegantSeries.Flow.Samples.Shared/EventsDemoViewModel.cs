@@ -11,7 +11,8 @@ namespace ElegantSeries.Flow.Samples.Shared;
 /// <see cref="INavigationService.RegionCacheCleared"/>. Everything happens in
 /// <c>SwitchA</c> so this page stays active while it observes: push a temp page
 /// (navigated), pop it (released — only a disposed scope raises the event, so
-/// the temp page uses <c>New</c> mode), then push a KeepAlive page and clear its
+/// the temp page is pushed with the default <c>Destroy</c> retention), then push
+/// a KeepAlive page and clear its
 /// cache (cache cleared).
 /// </summary>
 /// <remarks>
