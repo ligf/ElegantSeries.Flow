@@ -423,6 +423,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         var errors = new List<Exception>();
         List<ScopeDisposalTarget> targets;
         var ctsToCancel = new List<CancellationTokenSource>();
+        List<NavigationEntry> cancelledEntries = [];
         bool cacheHadEntries = false;
 
         // Serialized with navigation transitions: otherwise a concurrent navigation
@@ -449,7 +450,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 // CTSs are cancelled after the lock is released (see below).
                 // Only entries no longer referenced by the stack: clearing the cache
                 // must not cancel an active page's lifecycle token.
-                CancelAndCollectGates(FilterUnreferencedEntries(removed.Select(kv => kv.Value)), ctsToCancel);
+                cancelledEntries = FilterUnreferencedEntries(removed.Select(kv => kv.Value));
+                CancelAndCollectGates(cancelledEntries, ctsToCancel);
                 targets = TakeCacheEntriesForDisposalLocked(removed);
             }
         }
@@ -466,6 +468,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
 
         // Scope disposal runs outside the lock; the entries are already detached above.
         DisposeScopesSync(targets, pendingEvents, errors);
+        DisposeLifecycleSources(cancelledEntries);
         if (cacheHadEntries)
         {
             pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
@@ -491,6 +494,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         WaitNavigationLock("ClearAllCache");
         List<ScopeDisposalTarget> targets;
         var ctsToCancel = new List<CancellationTokenSource>();
+        List<NavigationEntry> unreferencedEntries = [];
         try
         {
             if (_disposed)
@@ -498,7 +502,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 return;
             }
 
-            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries, out var unreferencedEntries);
+            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries, out unreferencedEntries);
             // Signal in-flight callbacks to stop (sync path cannot wait).
             // Cancelled after lock release (see below).
             // Only unreferenced entries: must not cancel an active page's token.
@@ -521,6 +525,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         }
 
         DisposeScopesSync(targets, pendingEvents, errors);
+        DisposeLifecycleSources(unreferencedEntries);
 
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(errors);
@@ -543,6 +548,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         List<ScopeDisposalTarget> targets;
         List<Task> gates;
         var ctsToCancel = new List<CancellationTokenSource>();
+        List<NavigationEntry> cancelledEntries = [];
         bool cacheHadEntries = false;
 
         // Serialized with navigation transitions: otherwise a concurrent navigation
@@ -562,7 +568,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 // Mutual exclusion: cache entries are never on a stack, so no
                 // self-dispose guard is needed (see ClearCache).
                 // Only unreferenced entries: must not cancel an active page's token.
-                gates = CancelAndCollectGates(FilterUnreferencedEntries(removed.Select(kv => kv.Value)), ctsToCancel);
+                cancelledEntries = FilterUnreferencedEntries(removed.Select(kv => kv.Value));
+                gates = CancelAndCollectGates(cancelledEntries, ctsToCancel);
                 targets = TakeCacheEntriesForDisposalLocked(removed);
             }
         }
@@ -604,6 +611,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
 
         // Scope disposal runs outside the lock; the entries are already detached above.
         await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
+        DisposeLifecycleSources(cancelledEntries);
         if (cacheHadEntries)
         {
             pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
@@ -630,6 +638,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         List<ScopeDisposalTarget> targets;
         List<Task> gates;
         var ctsToCancel = new List<CancellationTokenSource>();
+        List<NavigationEntry> unreferencedEntries = [];
         try
         {
             if (_disposed)
@@ -637,7 +646,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 return;
             }
 
-            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries, out var unreferencedEntries);
+            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries, out unreferencedEntries);
             // Only unreferenced entries: must not cancel an active page's token.
             gates = CancelAndCollectGates(unreferencedEntries, ctsToCancel);
             foreach (var region in affectedRegions)
@@ -680,6 +689,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         }
 
         await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
+        DisposeLifecycleSources(unreferencedEntries);
 
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
         ThrowCollectedErrors(errors);
@@ -715,6 +725,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         var errors = new List<Exception>();
         List<ScopeDisposalTarget> targets;
         List<CancellationTokenSource> ctsToCancel = [];
+        List<NavigationEntry> allEntries = [];
 
         WaitNavigationLock("Dispose");
         try
@@ -733,7 +744,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             // locks. Sync Dispose cannot wait for async callbacks (blocking would
             // risk deadlock on UI threads), but it must signal them to stop before
             // their scopes are released below.
-            ctsToCancel = CollectAllLifecycleCtsLocked();
+            allEntries = CollectAllEntriesLocked();
+            ctsToCancel = allEntries.Select(e => e.LifecycleCts).ToList();
 
             targets = TakeAllScopesForDisposal();
             foreach (var target in targets)
@@ -765,6 +777,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         // in their finally blocks, and disposing it under them would surface
         // ObjectDisposedException. The _disposed flag already makes it unusable.
         DisposeScopesSync(targets, pendingEvents, errors);
+        DisposeLifecycleSources(allEntries);
         QueueCacheClearedEvents(targets, pendingEvents);
         RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
 
@@ -872,6 +885,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         // Wait for deferred disposals (e.g. from reentrant navigation): their scopes
         // were not in the targets above because the entries were already detached.
         await WaitForDeferredDisposalsAsync().ConfigureAwait(false);
+
+        DisposeLifecycleSources(entriesToCancel);
 
         // Note: _disposedScopes is intentionally NOT cleared. A navigation that was
         // in-flight during DisposeAsync may call TrackDeferredDisposal after the

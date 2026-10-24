@@ -558,16 +558,14 @@ public sealed partial class NavigationService
                     _pendingScopeDisposals.Remove(entry.Scope);
             }
 
-            // The lifecycle CTS is no longer needed once the entry is gone —
-            // except for self-dispose, where the running callback still holds
-            // the token. In that case the CTS is intentionally not disposed here;
-            // it becomes eligible for GC once the callback completes (a CTS with
-            // no registered callbacks holds no unmanaged resources).
-            if (!isSelfDispose)
-            {
-                try { entry.LifecycleCts.Dispose(); }
-                catch { }
-            }
+            // The lifecycle CTS is no longer needed once the entry is gone.
+            // DisposeLifecycleSources disposes it (with any settled retired
+            // sources) only when no lifecycle callback is in flight — the
+            // self-dispose case, where the running callback still holds the
+            // token, is skipped by that check; the CTS then becomes eligible
+            // for GC once the callback completes (a CTS with no registered
+            // callbacks holds no unmanaged resources).
+            entry.DisposeLifecycleSources();
 
             // Note: ViewModelReleased is enqueued above per-branch (not here),
             // to avoid double-firing when the deferred task also raises it.
@@ -780,7 +778,9 @@ public sealed partial class NavigationService
         public volatile Task? AbandonedGateTask;
 
         /// <summary>
-        /// The ViewModel type used as the KeepAlive cache key.
+        /// The static ViewModel type this entry was navigated to: used as
+        /// the KeepAlive cache key, and as the type the self-target checks
+        /// compare an intent's target against.
         /// </summary>
         public Type CacheKeyType { get; }
 
@@ -961,6 +961,51 @@ public sealed partial class NavigationService
                     try { cts.Dispose(); }
                     catch { }
                 }
+            }
+        }
+
+        /// <summary>
+        /// Disposes this entry's lifecycle cancellation sources — the current
+        /// <see cref="LifecycleCts"/> and every retired source whose
+        /// cancellation has settled — when the entry is destroyed. Called by
+        /// the transition, cache-clear and service-disposal paths after the
+        /// entry's scope disposal. When lifecycle callbacks are still in
+        /// flight nothing is disposed: a running callback may still use its
+        /// token, so the sources are left to become eligible for GC with the
+        /// entry (the same outcome as the transition path's self-dispose
+        /// case). Retired sources whose cancellation has not settled are
+        /// likewise left: their owner's <c>Cancel()</c> may still be
+        /// executing user callbacks, and disposing the source underneath it
+        /// would surface <see cref="ObjectDisposedException"/> there.
+        /// </summary>
+        public void DisposeLifecycleSources()
+        {
+            var toDispose = new List<CancellationTokenSource>();
+            lock (_inFlightLock)
+            {
+                if (_inFlightCount > 0)
+                {
+                    return;
+                }
+
+                toDispose.Add(LifecycleCts);
+                for (int i = _retiredCts.Count - 1; i >= 0; i--)
+                {
+                    var retiredCandidate = _retiredCts[i];
+                    if (retiredCandidate.IsCancellationRequested && _settledRetiredCts.Contains(retiredCandidate))
+                    {
+                        toDispose.Add(retiredCandidate);
+                        _retiredCts.RemoveAt(i);
+                        _settledRetiredCts.Remove(retiredCandidate);
+                    }
+                }
+            }
+
+            // Dispose outside the lock, matching ExitInFlightLifecycle.
+            foreach (var cts in toDispose)
+            {
+                try { cts.Dispose(); }
+                catch { }
             }
         }
 

@@ -124,6 +124,20 @@ public sealed partial class NavigationService
     }
 
     /// <summary>
+    /// Disposes the lifecycle cancellation sources of entries destroyed by
+    /// a cache clear or a service disposal, after their scopes were
+    /// disposed. Entries with lifecycle callbacks still in flight keep
+    /// their sources (see <see cref="NavigationEntry.DisposeLifecycleSources"/>).
+    /// </summary>
+    private static void DisposeLifecycleSources(IEnumerable<NavigationEntry> entries)
+    {
+        foreach (var entry in entries)
+        {
+            entry.DisposeLifecycleSources();
+        }
+    }
+
+    /// <summary>
     /// Filters cache-removed entries to only those whose scopes are no longer referenced
     /// by any navigation stack. Entries still referenced (active pages) keep their
     /// lifecycle tokens: clearing the cache must not cancel an active page.
@@ -276,24 +290,6 @@ public sealed partial class NavigationService
         }
 
         return entries;
-    }
-
-    /// <summary>
-    /// Collects the lifecycle CTS of every tracked entry for cancellation outside
-    /// the lock. Called by sync <see cref="NavigationService.Dispose"/> (which
-    /// cannot wait for async callbacks) to signal in-flight work to stop before
-    /// scopes are released. Must be called while holding the navigation lock;
-    /// the returned sources must be cancelled after the lock is released via
-    /// <see cref="NavigationEntry.CancelOutsideLocks"/>.
-    /// </summary>
-    private List<CancellationTokenSource> CollectAllLifecycleCtsLocked()
-    {
-        var list = new List<CancellationTokenSource>();
-        foreach (var entry in CollectAllEntriesLocked())
-        {
-            list.Add(entry.LifecycleCts);
-        }
-        return list;
     }
 
     /// <summary>

@@ -1285,6 +1285,40 @@ public sealed partial class NavigationService
         }
     }
 
+    /// <summary>
+    /// True when an exception carries nothing but cancellation: a bare
+    /// <see cref="OperationCanceledException"/>, or an aggregate whose
+    /// flattened leaves are all <see cref="OperationCanceledException"/>.
+    /// </summary>
+    private static bool IsCancellationOnly(Exception error)
+    {
+        if (error is OperationCanceledException)
+        {
+            return true;
+        }
+
+        if (error is AggregateException aggregate)
+        {
+            // Not vacuously: an aggregate with no leaves at all (a guard
+            // threw `new AggregateException()`) is a failure, not
+            // cancellation — "all leaves are OCE" must not hold for zero
+            // leaves.
+            var any = false;
+            foreach (var inner in aggregate.Flatten().InnerExceptions)
+            {
+                any = true;
+                if (inner is not OperationCanceledException)
+                {
+                    return false;
+                }
+            }
+
+            return any;
+        }
+
+        return false;
+    }
+
     private async Task<bool> RunDepartureCoreAsync(RegionWindow window, string regionName, NavigationIntent candidate)
     {
         NavigationEntry? current;
@@ -1344,9 +1378,61 @@ public sealed partial class NavigationService
         {
             guardOutcome = await RunGuardAsync(current.ViewModel, guardContext, candidate.CancellationToken, window.DisposalSignal.Task).ConfigureAwait(false);
         }
+        catch (Exception ex) when (IsCancellationOnly(ex))
+        {
+            // The guard itself ended in cancellation — thrown directly (or
+            // carried as an aggregate's sole content) instead of surfacing
+            // as a Canceled task, so the race in RunGuardAsync could not
+            // deliver it as the Cancelled outcome. Cancellation is control
+            // flow, not an error: the departure is aborted exactly as for
+            // GuardOutcome.Cancelled (including the disposal check that
+            // precedes it) and nothing is reported, even when the candidate
+            // was already withdrawn (where FaultOrReport would divert the
+            // exception to SubscriberError).
+            if (_disposed)
+            {
+                CompleteIntent(candidate, result: false);
+                return false;
+            }
+
+            CancelIntent(candidate);
+            RenewActivationIfCancelled(current);
+            using (_stateLock.EnterScope())
+            {
+                window.Phase = WindowPhase.Open;
+            }
+
+            return true;
+        }
         catch (Exception ex)
         {
-            FaultOrReport(candidate, ex);
+            // When the failure will be reported, not delivered to a waiting
+            // caller (the candidate was withdrawn, or has no fate), an
+            // aggregate is reported by its real leaves only, as
+            // ReportGuardFault does — cancellation artifacts inside it are
+            // outcomes, not errors. (A candidate still awaited by its
+            // caller keeps the original exception via FaultOrReport: a
+            // guard's thrown exception propagates to its caller. An
+            // aggregate with no leaves has nothing to classify and also
+            // goes through FaultOrReport.)
+            var leavesReported = false;
+            if ((candidate.Fate is null || candidate.IsWithdrawn) && ex is AggregateException aggregate)
+            {
+                foreach (var inner in aggregate.Flatten().InnerExceptions)
+                {
+                    if (inner is not OperationCanceledException)
+                    {
+                        ReportSubscriberError(inner);
+                        leavesReported = true;
+                    }
+                }
+            }
+
+            if (!leavesReported)
+            {
+                FaultOrReport(candidate, ex);
+            }
+
             RenewActivationIfCancelled(current);
             EndChain(window);
             DrainSlot(window, result: false);
@@ -1806,7 +1892,30 @@ public sealed partial class NavigationService
             if (Interlocked.Exchange(ref reported, 1) == 0)
             {
                 var exception = guardTask.Exception!;
-                ReportSubscriberError(exception.InnerException ?? exception);
+                // Cancellation artifacts are outcomes, not errors — the
+                // same rule AwaitIntentFateAsync applies to fate faults:
+                // an inner OperationCanceledException is skipped, and a
+                // guard that faulted purely with one reports nothing.
+                // Anything else is reported individually (Flatten: a TCS
+                // faulted with an AggregateException surfaces it as one
+                // nested inner rather than as the leaf errors).
+                var leaves = exception.Flatten().InnerExceptions;
+                if (leaves.Count == 0)
+                {
+                    // An aggregate with no leaves at all (the guard threw
+                    // `new AggregateException()`): there is no leaf to
+                    // classify, but the failure itself must not vanish.
+                    ReportSubscriberError(exception);
+                    return;
+                }
+
+                foreach (var inner in leaves)
+                {
+                    if (inner is not OperationCanceledException)
+                    {
+                        ReportSubscriberError(inner);
+                    }
+                }
             }
         }
 
@@ -1882,7 +1991,7 @@ public sealed partial class NavigationService
             && intent.Retention == NavigationRetention.Destroy
             && !intent.RefreshIfActive
             && intent.TargetType is not null
-            && current.ViewModel.GetType() == intent.TargetType;
+            && current.CacheKeyType == intent.TargetType;
 
     /// <summary>
     /// A default (Push + Destroy) request for the already-active type with refresh requested,
@@ -1894,7 +2003,7 @@ public sealed partial class NavigationService
             && intent.Retention == NavigationRetention.Destroy
             && intent.RefreshIfActive
             && intent.TargetType is not null
-            && current.ViewModel.GetType() == intent.TargetType;
+            && current.CacheKeyType == intent.TargetType;
 
     /// <summary>
     /// A winning request that targets the current page itself (a default
@@ -1904,12 +2013,21 @@ public sealed partial class NavigationService
     /// (Replace/Reset/KeepAlive) are NOT self-targeting: they express
     /// restructuring intent and execute as regular hops.
     /// </summary>
+    /// <remarks>
+    /// All three self-target predicates compare the intent's target against
+    /// the entry's <see cref="NavigationEntry.CacheKeyType"/> — the static
+    /// type the page was navigated to — not the ViewModel's runtime type:
+    /// when DI resolves a derived implementation for a base registration,
+    /// a repeated navigation to the base type is still a navigation to
+    /// self. This matches the KeepAlive cache, which keys entries by the
+    /// same static type.
+    /// </remarks>
     private static bool IsSelfTargeting(NavigationIntent intent, NavigationEntry current)
         => intent.Kind == NavigationIntentKind.Navigate
             && intent.Operation == NavigationOperation.Push
             && intent.Retention == NavigationRetention.Destroy
             && intent.TargetType is not null
-            && current.ViewModel.GetType() == intent.TargetType;
+            && current.CacheKeyType == intent.TargetType;
 
     /// <summary>
     /// Ends the current chain: the departure budget resets and the window returns
