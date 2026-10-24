@@ -2,8 +2,6 @@ using System.Windows;
 using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.WPF.Hosting;
 using ElegantSeries.Flow.WPF.Locating;
-using Microsoft.Extensions.DependencyInjection;
-using ElegantSeries.Flow.Samples.Shared;
 
 namespace ElegantSeries.Flow.Samples.WPF;
 
@@ -15,25 +13,26 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        var navigation = App.Services.GetRequiredService<INavigationService>();
-        var views = App.Services.GetRequiredService<IViewLocator>();
+        _hosts = [SidebarHost, MainHost];
+    }
 
+    /// <summary>
+    /// Attaches the navigation service and the view locator to both region
+    /// hosts. Called by <see cref="MainWindowBootstrapper"/> before the
+    /// startup navigation runs, so the first pages are shown.
+    /// </summary>
+    public void AttachNavigationHosts(INavigationService navigation, IViewLocator views)
+    {
         // Both regions share the singleton navigation service but keep
         // independent stacks.
-        _hosts = [SidebarHost, MainHost];
         foreach (var host in _hosts)
         {
             host.NavigationService = navigation;
             host.ViewLocator = views;
         }
-
-        // Navigate after the hosts are attached so the first pages are shown.
-        // Failures are observed instead of fire-and-forget.
-        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<MenuViewModel>(RegionNames.Sidebar), ReportError);
-        SampleHelpers.ObserveNavigation(navigation.NavigateToAsync<HomeViewModel>(RegionNames.MainRegion), ReportError);
     }
 
-    private void ReportError(string message) =>
+    public void ReportError(string message) =>
         MessageBox.Show(message, "MainWindow", MessageBoxButton.OK, MessageBoxImage.Warning);
 
     protected override void OnClosed(EventArgs e)
