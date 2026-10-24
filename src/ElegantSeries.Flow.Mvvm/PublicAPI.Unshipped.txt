@@ -1,0 +1,7 @@
+#nullable enable
+ElegantSeries.Flow.Mvvm.BaseViewModel
+ElegantSeries.Flow.Mvvm.BaseViewModel.BaseViewModel() -> void
+ElegantSeries.Flow.Mvvm.BaseViewModel.GoBackAsync(string! regionName = "MainRegion", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Mvvm.BaseViewModel.NavigateToAsync<TViewModel, TParam>(TParam parameter, string! regionName = "MainRegion", ElegantSeries.Flow.Navigation.NavigationOperation operation = ElegantSeries.Flow.Navigation.NavigationOperation.Push, ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy, bool refreshIfActive = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Mvvm.BaseViewModel.NavigateToAsync<TViewModel>(string! regionName = "MainRegion", ElegantSeries.Flow.Navigation.NavigationOperation operation = ElegantSeries.Flow.Navigation.NavigationOperation.Push, ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy, bool refreshIfActive = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Mvvm.BaseViewModel.Navigation.get -> ElegantSeries.Flow.Navigation.INavigationService?

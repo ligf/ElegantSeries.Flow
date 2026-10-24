@@ -1,0 +1,46 @@
+#nullable enable
+ElegantSeries.Flow.Avalonia.Extensions.FlowViewServiceExtensions
+ElegantSeries.Flow.Avalonia.Hosting.NavigationHost
+ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.Dispose() -> void
+ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.NavigationHost() -> void
+ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.NavigationHost(ElegantSeries.Flow.Avalonia.Threading.IDispatcher! dispatcher) -> void
+ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.NavigationService.get -> ElegantSeries.Flow.Navigation.INavigationService?
+ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.NavigationService.set -> void
+ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.RegionName.get -> string!
+ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.RegionName.set -> void
+ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.ViewLocator.get -> ElegantSeries.Flow.Avalonia.Locating.IViewLocator?
+ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.ViewLocator.set -> void
+ElegantSeries.Flow.Avalonia.Locating.IViewLocator
+ElegantSeries.Flow.Avalonia.Locating.IViewLocator.CreateView(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel) -> Avalonia.Controls.Control!
+ElegantSeries.Flow.Avalonia.Locating.IViewLocator.IsRegistered<TViewModel>() -> bool
+ElegantSeries.Flow.Avalonia.Locating.IViewLocator.Register<TView, TViewModel>() -> void
+ElegantSeries.Flow.Avalonia.Locating.IViewLocator.Register<TViewModel>(System.Func<TViewModel, Avalonia.Controls.Control!>! viewFactory) -> void
+ElegantSeries.Flow.Avalonia.Locating.IViewLocator.RegisterSingleton<TView, TViewModel>() -> void
+ElegantSeries.Flow.Avalonia.Locating.IViewLocator.RegisterTransient<TView, TViewModel>() -> void
+ElegantSeries.Flow.Avalonia.Locating.ViewLocator
+ElegantSeries.Flow.Avalonia.Locating.ViewLocator.CreateView(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel) -> Avalonia.Controls.Control!
+ElegantSeries.Flow.Avalonia.Locating.ViewLocator.IsRegistered<TViewModel>() -> bool
+ElegantSeries.Flow.Avalonia.Locating.ViewLocator.Register<TView, TViewModel>() -> void
+ElegantSeries.Flow.Avalonia.Locating.ViewLocator.Register<TViewModel>(System.Func<TViewModel, Avalonia.Controls.Control!>! viewFactory) -> void
+ElegantSeries.Flow.Avalonia.Locating.ViewLocator.RegisterSingleton<TView, TViewModel>() -> void
+ElegantSeries.Flow.Avalonia.Locating.ViewLocator.RegisterTransient<TView, TViewModel>() -> void
+ElegantSeries.Flow.Avalonia.Locating.ViewLocator.ViewLocator() -> void
+ElegantSeries.Flow.Avalonia.Threading.AvaloniaDispatcher
+ElegantSeries.Flow.Avalonia.Threading.AvaloniaDispatcher.AvaloniaDispatcher() -> void
+ElegantSeries.Flow.Avalonia.Threading.AvaloniaDispatcher.AvaloniaDispatcher(Avalonia.Threading.Dispatcher! dispatcher) -> void
+ElegantSeries.Flow.Avalonia.Threading.AvaloniaDispatcher.CheckAccess() -> bool
+ElegantSeries.Flow.Avalonia.Threading.AvaloniaDispatcher.Post(System.Action! action) -> void
+ElegantSeries.Flow.Avalonia.Threading.IDispatcher
+ElegantSeries.Flow.Avalonia.Views.BaseView<TViewModel>
+ElegantSeries.Flow.Avalonia.Views.BaseView<TViewModel>.BaseView() -> void
+ElegantSeries.Flow.Avalonia.Views.BaseView<TViewModel>.ViewModel.get -> TViewModel?
+override ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs! e) -> void
+override ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.OnDetachedFromVisualTree(Avalonia.VisualTreeAttachmentEventArgs! e) -> void
+override ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.OnPropertyChanged(Avalonia.AvaloniaPropertyChangedEventArgs! change) -> void
+override ElegantSeries.Flow.Avalonia.Views.BaseView<TViewModel>.OnDataContextChanged(System.EventArgs! e) -> void
+static ElegantSeries.Flow.Avalonia.Extensions.FlowViewServiceExtensions.AddElegantSeriesFlowViews(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<ElegantSeries.Flow.Avalonia.Locating.IViewLocator!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static readonly ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.NavigationServiceProperty -> Avalonia.StyledProperty<ElegantSeries.Flow.Navigation.INavigationService?>!
+static readonly ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.RegionNameProperty -> Avalonia.StyledProperty<string!>!
+static readonly ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.ViewLocatorProperty -> Avalonia.StyledProperty<ElegantSeries.Flow.Avalonia.Locating.IViewLocator?>!
+virtual ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.OnViewCreationFailed(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel, System.Exception! exception) -> void
+virtual ElegantSeries.Flow.Avalonia.Views.BaseView<TViewModel>.OnViewModelChanged(TViewModel? oldValue, TViewModel? newValue) -> void

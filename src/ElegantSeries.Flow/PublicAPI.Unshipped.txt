@@ -1,0 +1,114 @@
+#nullable enable
+const ElegantSeries.Flow.Navigation.NavigationDefaults.DefaultRegionName = "MainRegion" -> string!
+ElegantSeries.Flow.Extensions.FlowServiceCollectionExtensions
+ElegantSeries.Flow.Navigation.INavigationAware
+ElegantSeries.Flow.Navigation.INavigationAware.OnNavigatedFrom() -> void
+ElegantSeries.Flow.Navigation.INavigationAware.OnNavigatedTo(object? parameter) -> void
+ElegantSeries.Flow.Navigation.INavigationAware<TParam>
+ElegantSeries.Flow.Navigation.INavigationAware<TParam>.OnNavigatedTo(TParam parameter) -> void
+ElegantSeries.Flow.Navigation.INavigationAwareAsync
+ElegantSeries.Flow.Navigation.INavigationAwareAsync.OnNavigatedFromAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ElegantSeries.Flow.Navigation.INavigationAwareAsync.OnNavigatedToAsync(object? parameter, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ElegantSeries.Flow.Navigation.INavigationAwareAsync<TParam>
+ElegantSeries.Flow.Navigation.INavigationAwareAsync<TParam>.OnNavigatedToAsync(TParam parameter, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ElegantSeries.Flow.Navigation.INavigationGuard
+ElegantSeries.Flow.Navigation.INavigationGuard.CanNavigateFromAsync(System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Navigation.INavigationGuardWithContext
+ElegantSeries.Flow.Navigation.INavigationGuardWithContext.CanNavigateFromAsync(ElegantSeries.Flow.Navigation.NavigationGuardContext! context, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Navigation.INavigationService
+ElegantSeries.Flow.Navigation.INavigationService.CanGoBack(string! regionName = "MainRegion") -> bool
+ElegantSeries.Flow.Navigation.INavigationService.ClearAllCache() -> void
+ElegantSeries.Flow.Navigation.INavigationService.ClearAllCacheAsync() -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Navigation.INavigationService.ClearCache(string! regionName) -> void
+ElegantSeries.Flow.Navigation.INavigationService.ClearCacheAsync(string! regionName) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Navigation.INavigationService.GetCurrentRetention(string! regionName = "MainRegion") -> ElegantSeries.Flow.Navigation.NavigationRetention?
+ElegantSeries.Flow.Navigation.INavigationService.GetCurrentViewModel(string! regionName = "MainRegion") -> ElegantSeries.Flow.Navigation.INavigationViewModel?
+ElegantSeries.Flow.Navigation.INavigationService.GetNavigationStack(string! regionName = "MainRegion") -> System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Navigation.INavigationViewModel!>!
+ElegantSeries.Flow.Navigation.INavigationService.GoBackAsync(string! regionName = "MainRegion", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Navigation.INavigationService.IsActive<TViewModel>(string! regionName = "MainRegion") -> bool
+ElegantSeries.Flow.Navigation.INavigationService.NavigateToAsync<TViewModel, TParam>(TParam parameter, string! regionName = "MainRegion", ElegantSeries.Flow.Navigation.NavigationOperation operation = ElegantSeries.Flow.Navigation.NavigationOperation.Push, ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy, bool refreshIfActive = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Navigation.INavigationService.NavigateToAsync<TViewModel>(string! regionName = "MainRegion", ElegantSeries.Flow.Navigation.NavigationOperation operation = ElegantSeries.Flow.Navigation.NavigationOperation.Push, ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy, bool refreshIfActive = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Navigation.INavigationService.RegionCacheCleared -> System.Action<string!>?
+ElegantSeries.Flow.Navigation.INavigationService.RegionNavigated -> System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>?
+ElegantSeries.Flow.Navigation.INavigationService.SubscribeRegionCacheCleared(System.Action<string!>! handler) -> System.IDisposable!
+ElegantSeries.Flow.Navigation.INavigationService.SubscribeRegionNavigated(System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>! handler) -> System.IDisposable!
+ElegantSeries.Flow.Navigation.INavigationService.SubscriberError -> System.Action<System.Exception!>?
+ElegantSeries.Flow.Navigation.INavigationService.SubscribeSubscriberError(System.Action<System.Exception!>! handler) -> System.IDisposable!
+ElegantSeries.Flow.Navigation.INavigationService.SubscribeViewModelReleased(System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>! handler) -> System.IDisposable!
+ElegantSeries.Flow.Navigation.INavigationService.ViewModelReleased -> System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>?
+ElegantSeries.Flow.Navigation.INavigationTargetAware
+ElegantSeries.Flow.Navigation.INavigationTargetAware.IsNavigationTarget(object? parameter) -> bool
+ElegantSeries.Flow.Navigation.INavigationViewModel
+ElegantSeries.Flow.Navigation.INavigationViewModel.Navigation.get -> ElegantSeries.Flow.Navigation.INavigationService?
+ElegantSeries.Flow.Navigation.NavigationDefaults
+ElegantSeries.Flow.Navigation.NavigationGuardContext
+ElegantSeries.Flow.Navigation.NavigationGuardContext.IsBack.get -> bool
+ElegantSeries.Flow.Navigation.NavigationGuardContext.NavigationGuardContext(string! regionName, System.Type! targetViewModelType, ElegantSeries.Flow.Navigation.NavigationOperation? operation, ElegantSeries.Flow.Navigation.NavigationRetention? retention, object? parameter, bool isBack) -> void
+ElegantSeries.Flow.Navigation.NavigationGuardContext.Operation.get -> ElegantSeries.Flow.Navigation.NavigationOperation?
+ElegantSeries.Flow.Navigation.NavigationGuardContext.Parameter.get -> object?
+ElegantSeries.Flow.Navigation.NavigationGuardContext.RegionName.get -> string!
+ElegantSeries.Flow.Navigation.NavigationGuardContext.Retention.get -> ElegantSeries.Flow.Navigation.NavigationRetention?
+ElegantSeries.Flow.Navigation.NavigationGuardContext.TargetViewModelType.get -> System.Type!
+ElegantSeries.Flow.Navigation.NavigationOperation
+ElegantSeries.Flow.Navigation.NavigationOperation.Push = 0 -> ElegantSeries.Flow.Navigation.NavigationOperation
+ElegantSeries.Flow.Navigation.NavigationOperation.Replace = 1 -> ElegantSeries.Flow.Navigation.NavigationOperation
+ElegantSeries.Flow.Navigation.NavigationOperation.Reset = 2 -> ElegantSeries.Flow.Navigation.NavigationOperation
+ElegantSeries.Flow.Navigation.NavigationOptions
+ElegantSeries.Flow.Navigation.NavigationOptions.DisposalGateTimeout.get -> System.TimeSpan
+ElegantSeries.Flow.Navigation.NavigationOptions.DisposalGateTimeout.set -> void
+ElegantSeries.Flow.Navigation.NavigationOptions.MaxNavigationChainLength.get -> int
+ElegantSeries.Flow.Navigation.NavigationOptions.MaxNavigationChainLength.set -> void
+ElegantSeries.Flow.Navigation.NavigationOptions.NavigationOptions() -> void
+ElegantSeries.Flow.Navigation.NavigationOptions.SyncLockTimeout.get -> System.TimeSpan
+ElegantSeries.Flow.Navigation.NavigationOptions.SyncLockTimeout.set -> void
+ElegantSeries.Flow.Navigation.NavigationRetention
+ElegantSeries.Flow.Navigation.NavigationRetention.Destroy = 0 -> ElegantSeries.Flow.Navigation.NavigationRetention
+ElegantSeries.Flow.Navigation.NavigationRetention.KeepAlive = 1 -> ElegantSeries.Flow.Navigation.NavigationRetention
+ElegantSeries.Flow.Navigation.NavigationService
+ElegantSeries.Flow.Navigation.NavigationService.CanGoBack(string! regionName = "MainRegion") -> bool
+ElegantSeries.Flow.Navigation.NavigationService.ClearAllCache() -> void
+ElegantSeries.Flow.Navigation.NavigationService.ClearAllCacheAsync() -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Navigation.NavigationService.ClearCache(string! regionName) -> void
+ElegantSeries.Flow.Navigation.NavigationService.ClearCacheAsync(string! regionName) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Navigation.NavigationService.Dispose() -> void
+ElegantSeries.Flow.Navigation.NavigationService.DisposeAsync() -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Navigation.NavigationService.GetCurrentRetention(string! regionName = "MainRegion") -> ElegantSeries.Flow.Navigation.NavigationRetention?
+ElegantSeries.Flow.Navigation.NavigationService.GetCurrentViewModel(string! regionName = "MainRegion") -> ElegantSeries.Flow.Navigation.INavigationViewModel?
+ElegantSeries.Flow.Navigation.NavigationService.GetNavigationStack(string! regionName = "MainRegion") -> System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Navigation.INavigationViewModel!>!
+ElegantSeries.Flow.Navigation.NavigationService.GoBackAsync(string! regionName = "MainRegion", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Navigation.NavigationService.IsActive<TViewModel>(string! regionName = "MainRegion") -> bool
+ElegantSeries.Flow.Navigation.NavigationService.NavigateToAsync<TViewModel, TParam>(TParam parameter, string! regionName = "MainRegion", ElegantSeries.Flow.Navigation.NavigationOperation operation = ElegantSeries.Flow.Navigation.NavigationOperation.Push, ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy, bool refreshIfActive = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Navigation.NavigationService.NavigateToAsync<TViewModel>(string! regionName = "MainRegion", ElegantSeries.Flow.Navigation.NavigationOperation operation = ElegantSeries.Flow.Navigation.NavigationOperation.Push, ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy, bool refreshIfActive = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Navigation.NavigationService.NavigationService(System.IServiceProvider! serviceProvider, ElegantSeries.Flow.Navigation.NavigationOptions? options = null) -> void
+ElegantSeries.Flow.Navigation.NavigationService.RegionCacheCleared -> System.Action<string!>?
+ElegantSeries.Flow.Navigation.NavigationService.RegionNavigated -> System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>?
+ElegantSeries.Flow.Navigation.NavigationService.SubscribeRegionCacheCleared(System.Action<string!>! handler) -> System.IDisposable!
+ElegantSeries.Flow.Navigation.NavigationService.SubscribeRegionNavigated(System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>! handler) -> System.IDisposable!
+ElegantSeries.Flow.Navigation.NavigationService.SubscriberError -> System.Action<System.Exception!>?
+ElegantSeries.Flow.Navigation.NavigationService.SubscribeSubscriberError(System.Action<System.Exception!>! handler) -> System.IDisposable!
+ElegantSeries.Flow.Navigation.NavigationService.SubscribeViewModelReleased(System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>! handler) -> System.IDisposable!
+ElegantSeries.Flow.Navigation.NavigationService.ViewModelReleased -> System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>?
+ElegantSeries.Flow.Routing.ViewForAttribute
+ElegantSeries.Flow.Routing.ViewForAttribute.Lifetime.get -> ElegantSeries.Flow.Routing.ViewModelLifetime
+ElegantSeries.Flow.Routing.ViewForAttribute.Lifetime.set -> void
+ElegantSeries.Flow.Routing.ViewForAttribute.ViewForAttribute() -> void
+ElegantSeries.Flow.Routing.ViewForAttribute.ViewForAttribute(System.Type! viewModelType) -> void
+ElegantSeries.Flow.Routing.ViewForAttribute.ViewModelType.get -> System.Type?
+ElegantSeries.Flow.Routing.ViewModelLifetime
+ElegantSeries.Flow.Routing.ViewModelLifetime.Singleton = 1 -> ElegantSeries.Flow.Routing.ViewModelLifetime
+ElegantSeries.Flow.Routing.ViewModelLifetime.Transient = 0 -> ElegantSeries.Flow.Routing.ViewModelLifetime
+ElegantSeries.Flow.Routing.ViewModelLifetime.ViewOnly = 2 -> ElegantSeries.Flow.Routing.ViewModelLifetime
+ElegantSeries.Flow.Threading.IDispatcher
+ElegantSeries.Flow.Threading.IDispatcher.CheckAccess() -> bool
+ElegantSeries.Flow.Threading.IDispatcher.Post(System.Action! action) -> void
+ElegantSeries.Flow.ViewModels.NavigationViewModelBase
+ElegantSeries.Flow.ViewModels.NavigationViewModelBase.GoBackAsync(string! regionName = "MainRegion", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.ViewModels.NavigationViewModelBase.NavigateToAsync<TViewModel, TParam>(TParam parameter, string! regionName = "MainRegion", ElegantSeries.Flow.Navigation.NavigationOperation operation = ElegantSeries.Flow.Navigation.NavigationOperation.Push, ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy, bool refreshIfActive = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.ViewModels.NavigationViewModelBase.NavigateToAsync<TViewModel>(string! regionName = "MainRegion", ElegantSeries.Flow.Navigation.NavigationOperation operation = ElegantSeries.Flow.Navigation.NavigationOperation.Push, ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy, bool refreshIfActive = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.ViewModels.NavigationViewModelBase.Navigation.get -> ElegantSeries.Flow.Navigation.INavigationService?
+ElegantSeries.Flow.ViewModels.NavigationViewModelBase.NavigationViewModelBase() -> void
+ElegantSeries.Flow.ViewModels.NavigationViewModelBase.OnPropertyChanged(string? propertyName = null) -> void
+ElegantSeries.Flow.ViewModels.NavigationViewModelBase.PropertyChanged -> System.ComponentModel.PropertyChangedEventHandler?
+ElegantSeries.Flow.ViewModels.NavigationViewModelBase.SetProperty<T>(ref T field, T value, string? propertyName = null) -> bool
+static ElegantSeries.Flow.Extensions.FlowServiceCollectionExtensions.AddElegantSeriesFlow(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.DependencyInjection.ServiceLifetime lifetime = Microsoft.Extensions.DependencyInjection.ServiceLifetime.Singleton) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static ElegantSeries.Flow.Extensions.FlowServiceCollectionExtensions.AddElegantSeriesFlow(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<ElegantSeries.Flow.Navigation.NavigationOptions!>! configure, Microsoft.Extensions.DependencyInjection.ServiceLifetime lifetime = Microsoft.Extensions.DependencyInjection.ServiceLifetime.Singleton) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!

@@ -25,13 +25,16 @@
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <!-- NU1902: known moderate vulnerability in Microsoft.Build.Tasks.Git, a build-time-only
          SourceLink dependency (PrivateAssets=All); it never ships to package consumers. -->
-    <NoWarn>$(NoWarn);NU1902</NoWarn>
+    <NoWarn>$(NoWarn);NU1902;RS0026</NoWarn>
     <ContinuousIntegrationBuild Condition="'$(ContinuousIntegrationBuild)' == ''">false</ContinuousIntegrationBuild>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.401" PrivateAssets="All" />
+    <!-- Public API baseline: RS0016/RS0017 guard the declared surface in
+         PublicAPI.Shipped.txt / PublicAPI.Unshipped.txt (build-time only). -->
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0" PrivateAssets="All" />
   </ItemGroup>
 
   <ItemGroup>
