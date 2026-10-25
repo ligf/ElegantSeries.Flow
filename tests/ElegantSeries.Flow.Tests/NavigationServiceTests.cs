@@ -5875,6 +5875,95 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task Remove_DetachThrowOnMatchedPages_StillRemovesAndDisposesEveryMatch()
+    {
+        StackMidViewModel.Reset();
+        StackTopViewModel.Reset();
+        DetachThrowingViewModel.Reset();
+
+        // Two covered instances of the throwing type with a normal page
+        // between them, under an unmatched top page. The stack is already
+        // rewritten when the removal loop runs, so the first detach throw
+        // must not abort the batch: the second match's deactivation plan
+        // must still be built and executed.
+        await _navigationService.NavigateToAsync<DetachThrowingViewModel>();
+        await _navigationService.NavigateToAsync<StackMidViewModel>();
+        await _navigationService.NavigateToAsync<DetachThrowingViewModel>();
+        await _navigationService.NavigateToAsync<StackTopViewModel>();
+        DetachThrowingViewModel.ThrowOnDetach = true;
+
+        var ex = Assert.Throws<AggregateException>(() => _navigationService.Remove<DetachThrowingViewModel>());
+        Assert.Equal(2, ex.InnerExceptions.Count);
+
+        // Both matched scopes were disposed; the unmatched pages remain.
+        Assert.Equal(2, DetachThrowingViewModel.DisposedCount);
+        Assert.Equal(0, StackMidViewModel.DisposedCount);
+        Assert.Equal(0, StackTopViewModel.DisposedCount);
+        Assert.Equal(
+            [typeof(StackMidViewModel), typeof(StackTopViewModel)],
+            _navigationService.GetNavigationStack().Select(vm => vm.GetType()).ToArray());
+        Assert.IsType<StackTopViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Dispose_DetachThrowOnOnePage_StillDisposesEveryScope()
+    {
+        StackMidViewModel.Reset();
+        StackTopViewModel.Reset();
+        DetachThrowingViewModel.Reset();
+
+        await _navigationService.NavigateToAsync<DetachThrowingViewModel>();
+        await _navigationService.NavigateToAsync<StackMidViewModel>();
+        await _navigationService.NavigateToAsync<StackTopViewModel>();
+        DetachThrowingViewModel.ThrowOnDetach = true;
+
+        // The detach exception is reported only after the shutdown has run
+        // to completion. Without per-item protection the throw escapes the
+        // detach loop and the token cancellations and scope disposals
+        // below it never run — and the service is already marked disposed,
+        // so nothing would ever retry them.
+        var svc = (NavigationService)_navigationService;
+        var ex = Assert.Throws<InvalidOperationException>(() => svc.Dispose());
+        Assert.Equal("Detach boom.", ex.Message);
+        Assert.Equal(1, DetachThrowingViewModel.DisposedCount);
+        Assert.Equal(1, StackMidViewModel.DisposedCount);
+        Assert.Equal(1, StackTopViewModel.DisposedCount);
+
+        // A second Dispose is a no-op: it neither throws nor disposes again.
+        svc.Dispose();
+        Assert.Equal(1, DetachThrowingViewModel.DisposedCount);
+        Assert.Equal(1, StackMidViewModel.DisposedCount);
+        Assert.Equal(1, StackTopViewModel.DisposedCount);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_DetachThrowOnOnePage_StillDisposesEveryScope()
+    {
+        StackMidViewModel.Reset();
+        StackTopViewModel.Reset();
+        DetachThrowingViewModel.Reset();
+
+        await _navigationService.NavigateToAsync<DetachThrowingViewModel>();
+        await _navigationService.NavigateToAsync<StackMidViewModel>();
+        await _navigationService.NavigateToAsync<StackTopViewModel>();
+        DetachThrowingViewModel.ThrowOnDetach = true;
+
+        var svc = (NavigationService)_navigationService;
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await svc.DisposeAsync());
+        Assert.Equal("Detach boom.", ex.Message);
+        Assert.Equal(1, DetachThrowingViewModel.DisposedCount);
+        Assert.Equal(1, StackMidViewModel.DisposedCount);
+        Assert.Equal(1, StackTopViewModel.DisposedCount);
+
+        // A second DisposeAsync is a no-op: it neither throws nor disposes again.
+        await svc.DisposeAsync();
+        Assert.Equal(1, DetachThrowingViewModel.DisposedCount);
+        Assert.Equal(1, StackMidViewModel.DisposedCount);
+        Assert.Equal(1, StackTopViewModel.DisposedCount);
+    }
+
+    [Fact]
     public async Task Window_DetachThrowWhileCovered_KeepsThePageAlive()
     {
         DetachThrowingViewModel.Reset();

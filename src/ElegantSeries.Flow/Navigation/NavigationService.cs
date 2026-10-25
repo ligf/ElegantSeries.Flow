@@ -27,13 +27,18 @@ namespace ElegantSeries.Flow.Navigation;
 /// <para>
 /// Because disposal is delegated to the container, the navigation service never calls
 /// <c>Dispose</c> on a ViewModel directly. A ViewModel <i>instance</i> never appears
-/// twice on one region's stack: navigating to the already-active type is a no-op that
-/// returns <see langword="true"/> (or a <i>refresh</i> when requested, which re-invokes
-/// the active instance's activation callbacks without creating a new page scope);
-/// navigating to a type whose instance lives deeper on the region's stack pops back to
-/// it and re-activates it with the new parameter. Only an instance that lives on a
-/// <i>different</i> region's stack is rejected with <see cref="InvalidOperationException"/>:
-/// a ViewModel has a single navigation reference and cannot be active in two regions at once.
+/// twice on one region's stack, though several instances of the same <i>type</i> may
+/// coexist there (a covered instance below a newer one). Navigating to the
+/// already-active type is a no-op that returns <see langword="true"/> (or a
+/// <i>refresh</i> when requested, which re-invokes the active instance's activation
+/// callbacks without creating a new page scope). A forward (Push) navigation that
+/// recognizes an existing KeepAlive entry — deeper on the stack, or held in the
+/// region's cache — as its target, by stored-parameter equality or the entry's
+/// <see cref="INavigationTargetAware"/> vote, re-activates that entry with the new
+/// parameter instead of creating a new instance; an unrecognized target creates a
+/// fresh instance. Only an instance that lives on a <i>different</i> region's stack
+/// is rejected with <see cref="InvalidOperationException"/>: a ViewModel has a single
+/// navigation reference and cannot be active in two regions at once.
 /// </para>
 /// <para>
 /// Thread safety: every public member is safe to call from any thread. Within
@@ -506,8 +511,18 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 // navigation reference (silently; the notification is raised
                 // after the lock is released), then run the deactivation
                 // plan — Destroy entries dispose, KeepAlive entries move
-                // into the cache (evicting as a pop would).
-                entry.ViewModel.SetNavigationSilent(null);
+                // into the cache (evicting as a pop would). A throwing
+                // detach is collected and must not abort the batch: the
+                // stack is already rewritten, so every removed entry's
+                // plan must still be built and executed.
+                try
+                {
+                    entry.ViewModel.SetNavigationSilent(null);
+                }
+                catch (Exception ex)
+                {
+                    CollectError(errors, ex);
+                }
                 var detachedViewModel = entry.ViewModel;
                 pendingEvents.Add(() => RaiseNavigationChangedNotification(detachedViewModel));
 
@@ -1013,7 +1028,18 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             foreach (var target in targets)
             {
                 // Terminal shutdown: set silently, no PropertyChanged notification needed.
-                target.ViewModel.SetNavigationSilent(null);
+                // A throwing detach is collected and must not abort the
+                // shutdown: the service is already marked disposed, so no
+                // later call would retry the skipped cancellations and
+                // scope disposals below.
+                try
+                {
+                    target.ViewModel.SetNavigationSilent(null);
+                }
+                catch (Exception ex)
+                {
+                    CollectError(errors, ex);
+                }
             }
         }
         finally
@@ -1092,7 +1118,18 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             foreach (var target in targets)
             {
                 // Terminal shutdown: set silently, no PropertyChanged notification needed.
-                target.ViewModel.SetNavigationSilent(null);
+                // A throwing detach is collected and must not abort the
+                // shutdown: the service is already marked disposed, so no
+                // later call would retry the skipped cancellations, gate
+                // waits and scope disposals below.
+                try
+                {
+                    target.ViewModel.SetNavigationSilent(null);
+                }
+                catch (Exception ex)
+                {
+                    CollectError(errors, ex);
+                }
             }
         }
         finally
