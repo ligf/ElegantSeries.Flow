@@ -372,6 +372,79 @@ public sealed class NavigationHostControllerTests
         Assert.Empty(shown); // stale VM-A must not be applied
     }
 
+    /// <summary>
+    /// Fake whose current-page answer carries the built-in service's
+    /// definitive guarantee, so at execution time a null answer means
+    /// "the region has no current page", not "unknown".
+    /// </summary>
+    private sealed class DefinitiveFakeNavigationService : FakeNavigationService, IDefinitiveCurrentPageQuery
+    {
+        INavigationViewModel? IDefinitiveCurrentPageQuery.GetDefinitiveCurrentViewModel(string regionName)
+            => GetCurrentViewModel(regionName);
+    }
+
+    [Fact]
+    public void QueuedCallback_WhenDefinitiveCurrentBecomesNull_SkippedAtExecutionTime()
+    {
+        // Same queueing shape as the stale-ViewModel test, but the region
+        // ends up with NO current page while the event is queued — the
+        // definitive null (for the built-in service: the stack emptied,
+        // or the service was disposed and its pages released). Applying
+        // the event would resurrect the released page's view.
+        var dispatcher = new FakeDispatcher(hasAccess: false);
+        var service = new DefinitiveFakeNavigationService();
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (view, vm) => shown.Add((view, vm)),
+            clearView: () => { },
+            onViewCreationFailed: (_, _) => { });
+        controller.Attach(service);
+
+        var vmA = new StubViewModel();
+        service.CurrentByRegion["MainRegion"] = vmA;
+        service.RaiseNavigated("MainRegion", vmA); // passes checks, queued
+
+        // The region loses its current page before the queue runs.
+        service.CurrentByRegion.Remove("MainRegion");
+
+        dispatcher.RunPosted();
+
+        Assert.Empty(shown); // the released page must not be resurrected
+    }
+
+    [Fact]
+    public void QueuedCallback_WhenUnknownCurrentBecomesNull_StillAppliedAtExecutionTime()
+    {
+        // Compatibility rule for implementations without the definitive
+        // guarantee: their null means "unknown", so the queued event is
+        // applied exactly as before.
+        var dispatcher = new FakeDispatcher(hasAccess: false);
+        var service = new FakeNavigationService();
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (view, vm) => shown.Add((view, vm)),
+            clearView: () => { },
+            onViewCreationFailed: (_, _) => { });
+        controller.Attach(service);
+
+        var vmA = new StubViewModel();
+        service.CurrentByRegion["MainRegion"] = vmA;
+        service.RaiseNavigated("MainRegion", vmA); // passes checks, queued
+
+        service.CurrentByRegion.Remove("MainRegion");
+
+        dispatcher.RunPosted();
+
+        var shownEntry = Assert.Single(shown);
+        Assert.Same(vmA, shownEntry.ViewModel);
+    }
+
     [Fact]
     public void Factory_ReceivesRegionAndParameterFromService()
     {

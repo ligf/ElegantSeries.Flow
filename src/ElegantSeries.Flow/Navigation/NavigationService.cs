@@ -59,7 +59,7 @@ namespace ElegantSeries.Flow.Navigation;
 /// around by the navigation service.
 /// </para>
 /// </remarks>
-public sealed partial class NavigationService(IServiceProvider serviceProvider, NavigationOptions? options = null) : INavigationService, IDisposable, IAsyncDisposable
+public sealed partial class NavigationService(IServiceProvider serviceProvider, NavigationOptions? options = null) : INavigationService, IDisposable, IAsyncDisposable, IDefinitiveCurrentPageQuery
 {
     // ────────────────────────────── Fields ──────────────────────────────
 
@@ -606,6 +606,13 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 : null;
         }
     }
+
+    // This service's answer is definitive (see the interface): the stacks
+    // are the whole truth — an empty or unknown region has no current page,
+    // and disposal clears every stack, so a disposed service answers null
+    // for every region rather than leaving the question open.
+    INavigationViewModel? IDefinitiveCurrentPageQuery.GetDefinitiveCurrentViewModel(string regionName)
+        => GetCurrentViewModel(regionName);
 
     /// <inheritdoc />
     public bool IsActive<TViewModel>(string regionName = DefaultRegionName) where TViewModel : INavigationViewModel
