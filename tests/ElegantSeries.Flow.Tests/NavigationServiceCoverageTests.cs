@@ -1642,6 +1642,124 @@ public class NavigationServiceCoverageTests
         }
     }
 
+    // ── Detached flows forked from a pump started inside a callback ──
+
+    /// <summary>
+    /// A pump started inline by an in-callback registration runs on the
+    /// callback's own flow, so its baseline AsyncLocal snapshot is the
+    /// callback's marker — and no restore on the callback's flow can ever
+    /// reach the pump's flow. Code the pump runs outside any lifecycle
+    /// invocation (here: resolving the landed page, whose constructor forks
+    /// a detached flow) inherits that baseline. Once the callback has
+    /// returned, its marker is expired, so the fork is an outside caller:
+    /// the synchronous management APIs must not trip the in-callback
+    /// reentrancy guard, and the call must do its real work.
+    /// </summary>
+    [Fact]
+    public async Task DetachedFlowForkedFromPumpStartedInCallback_IsNotClassifiedAsInCallback()
+    {
+        PumpLandedViewModel.Reset();
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<PumpStartingViewModel>();
+        services.AddTransient<PumpLandedViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        using var provider = services.BuildServiceProvider();
+        var service = provider.GetRequiredService<INavigationService>();
+        PumpLandedViewModel.Service = service;
+
+        string? cacheClearedRegion = null;
+        service.RegionCacheCleared += region => cacheClearedRegion = region;
+
+        // The starter's OnNavigatedToAsync registers the side-region
+        // navigation from inside the callback; the side region has no
+        // running pump, so the registration starts its pump inline on the
+        // callback's flow.
+        Assert.True(await service.NavigateToAsync<PumpStartingViewModel>());
+        await PumpLandedViewModel.Landed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.IsType<PumpLandedViewModel>(service.GetCurrentViewModel("SideRegion"));
+
+        // Replace the landed page so its KeepAlive instance leaves the
+        // stack into the side region's cache, then release the forked flow.
+        Assert.True(await service.NavigateToAsync<TestHomeViewModel>(
+            "SideRegion", operation: NavigationOperation.Replace));
+
+        PumpLandedViewModel.ReleaseFork.TrySetResult();
+        await PumpLandedViewModel.ForkDone.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Classified as an outside call: no guard exception, and the
+        // cached page was actually cleared.
+        Assert.Null(PumpLandedViewModel.ForkClearError);
+        Assert.Equal("SideRegion", cacheClearedRegion);
+    }
+
+    /// <summary>
+    /// Registers a navigation to the side region from inside its own
+    /// OnNavigatedToAsync, starting that region's pump inline on this
+    /// callback's flow.
+    /// </summary>
+    private sealed class PumpStartingViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            _ = Navigation!.NavigateToAsync<PumpLandedViewModel>(
+                "SideRegion", retention: NavigationRetention.KeepAlive);
+            return Task.CompletedTask;
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Forks a detached flow from its constructor. The constructor runs on
+    /// the side region's pump flow while the pump resolves the page —
+    /// outside any lifecycle invocation — so the fork's snapshot is the
+    /// pump's baseline: the marker of the callback that started the pump.
+    /// Once released, the fork calls ClearCache on the side region.
+    /// </summary>
+    private sealed class PumpLandedViewModel : NavigationViewModelBase, INavigationAware
+    {
+        public static INavigationService? Service { get; set; }
+        public static TaskCompletionSource Landed { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public static TaskCompletionSource ReleaseFork { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public static TaskCompletionSource ForkDone { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public static Exception? ForkClearError { get; private set; }
+
+        public static void Reset()
+        {
+            Landed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            ReleaseFork = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            ForkDone = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            ForkClearError = null;
+        }
+
+        public PumpLandedViewModel()
+        {
+            _ = DetachedAsync();
+        }
+
+        public void OnNavigatedTo(object? parameter) => Landed.TrySetResult();
+
+        public void OnNavigatedFrom() { }
+
+        private async Task DetachedAsync()
+        {
+            await ReleaseFork.Task.ConfigureAwait(false);
+            try
+            {
+                Service!.ClearCache("SideRegion");
+            }
+            catch (Exception ex)
+            {
+                ForkClearError = ex;
+            }
+            finally
+            {
+                ForkDone.TrySetResult();
+            }
+        }
+    }
+
     /// <summary>
     /// Calls ClearCacheAsync reentrantly from within its own OnNavigatedToAsync,
     /// while the page is still the active page on the stack.
