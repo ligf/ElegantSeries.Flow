@@ -77,7 +77,7 @@ internal sealed class FakeDispatcher : IDispatcher
 /// <see cref="INavigationService.RegionNavigated"/> is functional; all other
 /// members throw <see cref="NotImplementedException"/>.
 /// </summary>
-internal sealed class FakeNavigationService : INavigationService
+internal class FakeNavigationService : INavigationService
 {
     public event Action<string, INavigationViewModel>? RegionNavigated;
     public event Action<string, INavigationViewModel>? ViewModelReleased;

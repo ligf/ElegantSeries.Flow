@@ -3774,6 +3774,27 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task DefinitiveCurrentPageQuery_AnswersDefinitiveStates()
+    {
+        var query = (IDefinitiveCurrentPageQuery)_navigationService;
+
+        // No navigation yet: definitively none.
+        Assert.Null(query.GetDefinitiveCurrentViewModel("MainRegion"));
+
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        Assert.Same(
+            _navigationService.GetCurrentViewModel(),
+            query.GetDefinitiveCurrentViewModel("MainRegion"));
+
+        // A region that never had pages: definitively none.
+        Assert.Null(query.GetDefinitiveCurrentViewModel("OtherRegion"));
+
+        // After disposal every stack is cleared: definitively none again.
+        ((NavigationService)_navigationService).Dispose();
+        Assert.Null(query.GetDefinitiveCurrentViewModel("MainRegion"));
+    }
+
+    [Fact]
     public async Task ClearStack_ToSingletonAlreadyOnStack_ShouldActuallyClear()
     {
         // Home -> Settings(singleton) -> Detail, then ClearStack to Settings.

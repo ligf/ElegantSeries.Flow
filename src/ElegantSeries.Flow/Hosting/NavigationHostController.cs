@@ -171,11 +171,14 @@ internal sealed class NavigationHostController<TView> where TView : class
             return;
         }
 
-        // Defense against stale events (e.g. reentrant navigation): skip the event
-        // only when the service reports a *different* current page. A null return
-        // means "unknown" (e.g. test fakes) — the event is applied to stay
-        // backward compatible. The service itself already suppresses stale events
-        // at the source; this is defense in depth for third-party implementations.
+        // Defense against stale events (e.g. reentrant navigation): at receipt
+        // time, skip the event only when the service reports a *different*
+        // current page. A null return means "unknown" (e.g. test fakes) — the
+        // event is applied to stay backward compatible. (The queued path's
+        // execution-time re-check is stricter for services whose answer is
+        // definitive; see IsSupersededAtExecution.) The service itself already
+        // suppresses stale events at the source; this is defense in depth for
+        // third-party implementations.
         INavigationService? service;
         lock (_eventLock)
         {
@@ -217,8 +220,7 @@ internal sealed class NavigationHostController<TView> where TView : class
                     return;
                 }
 
-                var currentVm = capturedService?.GetCurrentViewModel(capturedRegion);
-                if (currentVm is not null && !ReferenceEquals(currentVm, capturedViewModel))
+                if (IsSupersededAtExecution(capturedService, capturedRegion, capturedViewModel))
                 {
                     return;
                 }
@@ -226,6 +228,28 @@ internal sealed class NavigationHostController<TView> where TView : class
                 ApplyNavigation(capturedViewModel, capturedService, capturedRegion);
             });
         }
+    }
+
+    /// <summary>
+    /// Execution-time staleness judgment for a queued event. When the
+    /// service's current-page answer is definitive
+    /// (<see cref="IDefinitiveCurrentPageQuery"/>), the event is stale
+    /// whenever that answer is no longer the event's ViewModel —
+    /// including the answer being null: the page was released while the
+    /// event sat in the dispatcher queue, and applying it would
+    /// resurrect a view for a page the region no longer has. Any other
+    /// implementation keeps the receipt-time rule: a null answer means
+    /// "unknown" and never marks the event stale.
+    /// </summary>
+    private static bool IsSupersededAtExecution(INavigationService? service, string regionName, INavigationViewModel viewModel)
+    {
+        if (service is IDefinitiveCurrentPageQuery definitive)
+        {
+            return !ReferenceEquals(definitive.GetDefinitiveCurrentViewModel(regionName), viewModel);
+        }
+
+        var current = service?.GetCurrentViewModel(regionName);
+        return current is not null && !ReferenceEquals(current, viewModel);
     }
 
     private void ApplyNavigation(INavigationViewModel viewModel, INavigationService? service, string? regionName)
