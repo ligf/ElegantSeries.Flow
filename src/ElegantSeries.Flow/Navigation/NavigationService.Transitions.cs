@@ -102,11 +102,22 @@ public sealed partial class NavigationService
         _currentLifecycleMarker.Value = null;
         try
         {
-            handlers.Invoke(error);
-        }
-        catch
-        {
-            // A faulty error handler must never break navigation.
+            // Subscriber-by-subscriber, as for the navigation events: one
+            // faulty error handler must neither break navigation nor
+            // prevent the remaining handlers from receiving the error.
+            // A handler's own exception has no further channel to go to
+            // and is swallowed.
+            foreach (var handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    ((Action<Exception>)handler)(error);
+                }
+                catch
+                {
+                    // A faulty error handler must never break navigation.
+                }
+            }
         }
         finally
         {
@@ -145,8 +156,7 @@ public sealed partial class NavigationService
                 }
                 catch (Exception ex)
                 {
-                    try { SubscriberError?.Invoke(ex); }
-                    catch { }
+                    ReportSubscriberError(ex);
                 }
             }
         }
@@ -180,8 +190,7 @@ public sealed partial class NavigationService
                 }
                 catch (Exception ex)
                 {
-                    try { SubscriberError?.Invoke(ex); }
-                    catch { }
+                    ReportSubscriberError(ex);
                 }
             }
         }
@@ -215,8 +224,7 @@ public sealed partial class NavigationService
                 }
                 catch (Exception ex)
                 {
-                    try { SubscriberError?.Invoke(ex); }
-                    catch { }
+                    ReportSubscriberError(ex);
                 }
             }
         }
@@ -606,6 +614,46 @@ public sealed partial class NavigationService
             $"Disposal gate timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
             $"'{entry.ViewModel.GetType().FullName}' async lifecycle to complete. " +
             "The page scope is being released anyway; the ViewModel ignored its cancellation token."));
+    }
+
+    /// <summary>
+    /// Delivers the errors a lifecycle runner appends to its error list
+    /// AFTER the pump step that owned it settled from a snapshot of the
+    /// list (the gate-timeout abandonment paths in the entering and
+    /// departure steps). The step's own delivery covers the first
+    /// <paramref name="deliveredCount"/> items; anything the abandoned
+    /// runner collects afterwards has no caller left to receive it, so
+    /// when the runner finishes, the remainder is reported through
+    /// <see cref="SubscriberError"/> — the same backstop the abandoned
+    /// guard path uses. The runner never faults (it collects), so a plain
+    /// completion continuation suffices; it is registered while the
+    /// runner is still running, and the boundary is read under the list's
+    /// own lock, so no late error is lost and none is reported twice.
+    /// </summary>
+    private void ReportLateRunnerErrors(Task runnerTask, List<Exception> runnerErrors, int deliveredCount)
+    {
+        _ = runnerTask.ContinueWith(
+            _ =>
+            {
+                List<Exception> late;
+                lock (runnerErrors)
+                {
+                    if (runnerErrors.Count <= deliveredCount)
+                    {
+                        return;
+                    }
+
+                    late = runnerErrors.GetRange(deliveredCount, runnerErrors.Count - deliveredCount);
+                }
+
+                foreach (var error in late)
+                {
+                    ReportSubscriberError(error);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     /// <summary>

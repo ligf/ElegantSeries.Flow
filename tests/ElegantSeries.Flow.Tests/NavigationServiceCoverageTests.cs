@@ -532,6 +532,156 @@ public class NavigationServiceCoverageTests
         public void Dispose() => Disposed = true;
     }
 
+    // ── Abandoned lifecycle callbacks: late exceptions ───────
+
+    /// <summary>
+    /// Page whose <c>OnNavigatedToAsync</c> hangs until released (ignoring
+    /// its cancellation token) and then throws. When a close request makes
+    /// the entering step abandon the callback after the gate timeout, the
+    /// step settles from a snapshot of the runner's error list — the late
+    /// throw lands after the snapshot.
+    /// </summary>
+    private sealed class LateThrowingEnterViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public static TaskCompletionSource EnterGate { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public static TaskCompletionSource EnterEntered { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public static void Reset()
+        {
+            EnterGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            EnterEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken)
+        {
+            EnterEntered.TrySetResult();
+            // Deliberately ignores the cancellation token.
+            await EnterGate.Task.ConfigureAwait(false);
+            throw new InvalidOperationException("Late To boom.");
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Page whose <c>OnNavigatedFromAsync</c> hangs until released
+    /// (ignoring its cancellation token) and then throws — the
+    /// leaving-side counterpart of <see cref="LateThrowingEnterViewModel"/>.
+    /// </summary>
+    private sealed class LateThrowingLeaveViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public TaskCompletionSource LeaveGate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource LeaveEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public async Task OnNavigatedFromAsync(CancellationToken cancellationToken)
+        {
+            LeaveEntered.TrySetResult();
+            // Deliberately ignores the cancellation token.
+            await LeaveGate.Task.ConfigureAwait(false);
+            throw new InvalidOperationException("Late From boom.");
+        }
+    }
+
+    [Fact]
+    public async Task AbandonedToCallback_LateException_IsReportedThroughSubscriberError()
+    {
+        LateThrowingEnterViewModel.Reset();
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow(o => o.DisposalGateTimeout = TimeSpan.FromMilliseconds(200));
+        services.AddTransient<LateThrowingEnterViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        using var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        var lateSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var lateCount = 0;
+        svc.SubscriberError += ex =>
+        {
+            if (ex is InvalidOperationException && ex.Message == "Late To boom.")
+            {
+                Interlocked.Increment(ref lateCount);
+                lateSeen.TrySetResult();
+            }
+        };
+
+        var entering = svc.NavigateToAsync<LateThrowingEnterViewModel>();
+        await LateThrowingEnterViewModel.EnterEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            // The close request makes the entering step cancel the page's
+            // token, wait out the gate timeout, and abandon the To runner;
+            // the departure to Home then executes and the entered intent
+            // settles from the (still empty) error snapshot.
+            Assert.True(await svc.NavigateToAsync<TestHomeViewModel>().WaitAsync(TimeSpan.FromSeconds(30)));
+            Assert.True(await entering.WaitAsync(TimeSpan.FromSeconds(30)));
+            Assert.IsType<TestHomeViewModel>(svc.GetCurrentViewModel());
+
+            // Only now does the abandoned callback throw. The error is in
+            // nobody's snapshot: it must still be reported, exactly once.
+            LateThrowingEnterViewModel.EnterGate.TrySetResult();
+            await lateSeen.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Equal(1, Volatile.Read(ref lateCount));
+        }
+        finally
+        {
+            LateThrowingEnterViewModel.EnterGate.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task AbandonedFromCallback_LateException_IsReportedThroughSubscriberError()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow(o => o.DisposalGateTimeout = TimeSpan.FromMilliseconds(200));
+        services.AddTransient<LateThrowingLeaveViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        // No using: disposing the provider would run the service's sync
+        // Dispose, which cannot release the async-only detail page —
+        // the same reason the gate-timeout scenario above does not
+        // dispose its provider.
+        var provider = services.BuildServiceProvider();
+        var svc = provider.GetRequiredService<INavigationService>();
+
+        var lateSeen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var lateCount = 0;
+        svc.SubscriberError += ex =>
+        {
+            if (ex is InvalidOperationException && ex.Message == "Late From boom.")
+            {
+                Interlocked.Increment(ref lateCount);
+                lateSeen.TrySetResult();
+            }
+        };
+
+        await svc.NavigateToAsync<LateThrowingLeaveViewModel>(retention: NavigationRetention.KeepAlive);
+        var vm = Assert.IsType<LateThrowingLeaveViewModel>(svc.GetCurrentViewModel());
+        try
+        {
+            // Replace away: the From callback starts and hangs. A further
+            // intent makes the leaving step wait out the gate timeout and
+            // abandon the From runner; the sampled departure then commits
+            // and the departure errors settle from the snapshot.
+            var away = svc.NavigateToAsync<TestHomeViewModel>(operation: NavigationOperation.Replace);
+            await vm.LeaveEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(await svc.NavigateToAsync<TestDetailViewModel>(operation: NavigationOperation.Replace)
+                .WaitAsync(TimeSpan.FromSeconds(30)));
+            await away.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.IsType<TestDetailViewModel>(svc.GetCurrentViewModel());
+
+            // Only now does the abandoned callback throw.
+            vm.LeaveGate.TrySetResult();
+            await lateSeen.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Equal(1, Volatile.Read(ref lateCount));
+        }
+        finally
+        {
+            vm.LeaveGate.TrySetResult();
+        }
+    }
+
     /// <summary>
     /// Guard that blocks until released, then throws. Used to verify the
     /// fault-observation path when navigation is cancelled mid-guard.

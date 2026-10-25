@@ -3756,6 +3756,24 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task SubscriberError_ThrowingSubscriber_DoesNotStarveLaterSubscribers()
+    {
+        var received = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _navigationService.SubscriberError += _ => throw new InvalidOperationException("handler boom");
+        _navigationService.SubscriberError += ex => received.TrySetResult(ex);
+        _navigationService.RegionNavigated += (_, _) => throw new InvalidOperationException("boom");
+
+        var result = await _navigationService.NavigateToAsync<TestHomeViewModel>();
+
+        Assert.True(result);
+        // The RegionNavigated handler's failure is forwarded to
+        // SubscriberError: the first error subscriber throws, and the
+        // second must still receive the same error.
+        var error = await received.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("boom", error.Message);
+    }
+
+    [Fact]
     public async Task ClearStack_ToSingletonAlreadyOnStack_ShouldActuallyClear()
     {
         // Home -> Settings(singleton) -> Detail, then ClearStack to Settings.

@@ -1139,10 +1139,21 @@ public sealed partial class NavigationService
         }
 
         // Snapshot under the list's lock: after a gate-timeout abandonment the
-        // runner may still be appending to toErrors in the background.
+        // runner may still be appending to toErrors in the background. If it
+        // is still running, everything it appends past this snapshot is
+        // delivered late through SubscriberError instead of being dropped.
+        int deliveredToErrorCount;
+        bool toRunnerSettled;
         lock (toErrors)
         {
+            deliveredToErrorCount = toErrors.Count;
+            toRunnerSettled = toTask.IsCompleted;
             errors.AddRange(toErrors);
+        }
+
+        if (!toRunnerSettled)
+        {
+            ReportLateRunnerErrors(toTask, toErrors, deliveredToErrorCount);
         }
 
         // PropertyChanged notifications for the hop's attach/detach, then the
@@ -1882,11 +1893,22 @@ public sealed partial class NavigationService
 
         // Snapshot: after a gate-timeout abandonment the From runner may still
         // be appending to departureErrors in the background; downstream steps
-        // work on this settled copy.
+        // work on this settled copy. If the runner is still running, anything
+        // it appends past this snapshot is delivered late through
+        // SubscriberError instead of being dropped.
         List<Exception> settledDepartureErrors;
+        int deliveredDepartureErrorCount;
+        bool fromRunnerSettled;
         lock (departureErrors)
         {
             settledDepartureErrors = [.. departureErrors];
+            deliveredDepartureErrorCount = departureErrors.Count;
+            fromRunnerSettled = fromTask.IsCompleted;
+        }
+
+        if (!fromRunnerSettled)
+        {
+            ReportLateRunnerErrors(fromTask, departureErrors, deliveredDepartureErrorCount);
         }
 
         departureErrors = settledDepartureErrors;
