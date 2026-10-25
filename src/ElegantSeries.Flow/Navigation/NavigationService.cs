@@ -562,7 +562,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         }
 
         DisposeLifecycleSources(disposedEntries);
-        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
+        RaiseEvents(pendingEvents, ReportSubscriberError);
         ThrowCollectedErrors(errors);
         return removedCount;
     }
@@ -743,7 +743,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
         }
 
-        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
+        RaiseEvents(pendingEvents, ReportSubscriberError);
         ThrowCollectedErrors(errors);
     }
 
@@ -796,7 +796,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         DisposeScopesSync(targets, pendingEvents, errors);
         DisposeLifecycleSources(unreferencedEntries);
 
-        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
+        RaiseEvents(pendingEvents, ReportSubscriberError);
         ThrowCollectedErrors(errors);
     }
 
@@ -868,13 +868,9 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             }
             else
             {
-                try
-                {
-                    SubscriberError?.Invoke(new TimeoutException(
-                        $"ClearCacheAsync timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
+                ReportSubscriberError(new TimeoutException(
+                    $"ClearCacheAsync timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
                         "cached page async lifecycle to complete. The scopes are being released anyway."));
-                }
-                catch { }
             }
         }
 
@@ -886,7 +882,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             pendingEvents.Add(() => RaiseRegionCacheCleared(regionName));
         }
 
-        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
+        RaiseEvents(pendingEvents, ReportSubscriberError);
         ThrowCollectedErrors(errors);
     }
 
@@ -947,20 +943,16 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             }
             else
             {
-                try
-                {
-                    SubscriberError?.Invoke(new TimeoutException(
-                        $"ClearAllCacheAsync timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
+                ReportSubscriberError(new TimeoutException(
+                    $"ClearAllCacheAsync timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
                         "cached page async lifecycle to complete. The scopes are being released anyway."));
-                }
-                catch { }
             }
         }
 
         await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
         DisposeLifecycleSources(unreferencedEntries);
 
-        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
+        RaiseEvents(pendingEvents, ReportSubscriberError);
         ThrowCollectedErrors(errors);
     }
 
@@ -1067,7 +1059,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         DisposeScopesSync(targets, pendingEvents, errors);
         DisposeLifecycleSources(allEntries);
         QueueCacheClearedEvents(targets, pendingEvents);
-        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
+        RaiseEvents(pendingEvents, ReportSubscriberError);
 
         // Note: _disposedScopes needs no clearing here. Deferred disposal
         // tasks (from reentrant navigation) continue running in the background and
@@ -1173,13 +1165,9 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             }
             else
             {
-                try
-                {
-                    SubscriberError?.Invoke(new TimeoutException(
-                        $"DisposeAsync timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
+                ReportSubscriberError(new TimeoutException(
+                    $"DisposeAsync timed out after {DisposalGateTimeout.TotalSeconds:F0}s waiting for " +
                         "in-flight lifecycle callbacks. Scopes are being released anyway."));
-                }
-                catch { }
             }
         }
 
@@ -1202,7 +1190,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         // weakly and is released with the service itself.
 
         QueueCacheClearedEvents(targets, pendingEvents);
-        RaiseEvents(pendingEvents, ex => SubscriberError?.Invoke(ex));
+        RaiseEvents(pendingEvents, ReportSubscriberError);
 
         ThrowCollectedErrors(errors);
     }
