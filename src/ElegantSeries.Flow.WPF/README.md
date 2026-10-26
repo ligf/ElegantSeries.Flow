@@ -108,14 +108,18 @@ View factories and `OnViewModelChanged` always run on the UI thread.
 
 If a view cannot be created (ViewModel type not registered, `ViewLocator` not
 set, or a throwing view factory), the host keeps showing the previous content
-and calls the protected `OnViewCreationFailed` hook. Override it to log the
-error — rethrow there during development to fail fast on misconfiguration:
+and calls the protected `OnViewCreationFailed` hook. Override it to log or
+record the error. The hook is the terminal failure channel: an exception
+thrown by an override is swallowed by design, so record the failure inside
+the override instead of rethrowing it:
 
 ```csharp
-public sealed class StrictHost : NavigationHost
+public sealed class LoggingHost : NavigationHost
 {
     protected override void OnViewCreationFailed(INavigationViewModel vm, Exception ex)
-        => throw new InvalidOperationException($"No view for {vm.GetType().Name}.", ex);
+    {
+        // Record the failure here, with your logging of choice.
+    }
 }
 ```
 

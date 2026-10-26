@@ -209,7 +209,9 @@ public class NavigationHost : ContentControl, IDisposable
     /// </param>
     /// <remarks>
     /// Runs on the UI thread. The default implementation does nothing. Override to
-    /// log the error, and rethrow during development to fail fast on misconfiguration.
+    /// log or record the error. Exceptions thrown by an override are swallowed by
+    /// design — this hook is the terminal failure channel — so record the failure
+    /// inside the override instead of rethrowing it.
     /// </remarks>
     protected virtual void OnViewCreationFailed(INavigationViewModel viewModel, Exception exception)
     {

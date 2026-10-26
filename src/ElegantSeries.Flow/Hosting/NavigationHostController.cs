@@ -30,6 +30,9 @@ namespace ElegantSeries.Flow.Hosting;
 /// <c>onViewCreationFailed</c> hook. They are deliberately not rethrown: the
 /// navigation service isolates event subscribers and swallows their exceptions
 /// by design, so throwing could never fail fast — the hook is the observable channel.
+/// The hook is also the terminal channel: an exception thrown by the hook
+/// itself is swallowed and never propagates to the event raiser, a property
+/// setter, or the dispatcher.
 /// </para>
 /// <para>
 /// Threading: <see cref="Attach(INavigationService)"/>/<see cref="Detach"/> are
@@ -69,7 +72,7 @@ internal sealed class NavigationHostController<TView> where TView : class
     /// </param>
     /// <param name="showView">Displays a view for a ViewModel. Always runs on the UI thread.</param>
     /// <param name="clearView">Clears the displayed content. Always runs on the UI thread.</param>
-    /// <param name="onViewCreationFailed">Optional hook invoked when <paramref name="viewFactory"/> throws.</param>
+    /// <param name="onViewCreationFailed">Optional hook invoked when <paramref name="viewFactory"/> throws. Exceptions thrown by the hook are swallowed: the hook is the terminal failure channel.</param>
     public NavigationHostController(
         IDispatcher dispatcher,
         Func<string> regionNameProvider,
@@ -271,8 +274,21 @@ internal sealed class NavigationHostController<TView> where TView : class
         catch (Exception ex)
         {
             // One bad view must not corrupt the host: keep showing the previous
-            // content and report the failure through the hook.
-            _onViewCreationFailed?.Invoke(viewModel, ex);
+            // content and report the failure through the hook. The hook is the
+            // terminal channel: an exception thrown by the hook itself is
+            // swallowed, so one failure cannot surface as three different
+            // outcomes — a subscriber error on the synchronous path, an
+            // unhandled dispatcher exception on the queued path, or a throw
+            // out of a property setter on the refresh path.
+            try
+            {
+                _onViewCreationFailed?.Invoke(viewModel, ex);
+            }
+            catch
+            {
+                // Terminal channel: nowhere further to report.
+            }
+
             return;
         }
 

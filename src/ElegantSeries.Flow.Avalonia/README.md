@@ -95,7 +95,10 @@ reuses its view when you navigate back to it; when the navigation service releas
 a ViewModel, its view becomes garbage-collectable with no manual cleanup.
 
 If a view factory throws, the host keeps showing the previous page — a failing
-factory can never leave the host in a half-updated state.
+factory can never leave the host in a half-updated state. The failure is
+reported through the protected `OnViewCreationFailed` hook; the hook is the
+terminal failure channel, so an exception thrown by an override is swallowed
+by design.
 
 The host unsubscribes from `INavigationService.RegionNavigated` when detached
 from the visual tree and on `Dispose()`, so a discarded host is never kept alive
