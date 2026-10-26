@@ -284,6 +284,93 @@ public sealed class NavigationHostTests
         Assert.Null(host.Content);
     }
 
+    private sealed class AttachAwareNavigationHost : NavigationHost
+    {
+        public AttachAwareNavigationHost(IDispatcher dispatcher)
+            : base(dispatcher)
+        {
+        }
+
+        // Drives the host's attach/detach bookkeeping directly: the real
+        // overrides require a visual tree, which these tests do not have.
+        public void SimulateAttachedToVisualTree() => HandleAttachedToVisualTree();
+
+        public void SimulateDetachedFromVisualTree() => HandleDetachedFromVisualTree();
+    }
+
+    [Fact]
+    public void Detached_ServiceChange_DeferredUntilReattach()
+    {
+        var dispatcher = new FakeDispatcher();
+        var firstService = new FakeNavigationService();
+        var secondService = new FakeNavigationService();
+        using var host = new AttachAwareNavigationHost(dispatcher)
+        {
+            RegionName = "MainRegion",
+            NavigationService = firstService,
+            ViewLocator = CreateLocator(),
+        };
+        host.SimulateAttachedToVisualTree();
+        var firstVm = new TestViewModel();
+        firstService.RaiseRegionNavigated("MainRegion", firstVm);
+        var firstView = Assert.IsType<TestView>(host.Content);
+
+        host.SimulateDetachedFromVisualTree();
+        host.NavigationService = secondService;
+
+        // While detached, the change must not resubscribe the host: the
+        // detach dropped the subscription precisely so the service cannot
+        // keep the host alive or drive view creation on an invisible host.
+        secondService.RaiseRegionNavigated("MainRegion", new TestViewModel());
+        Assert.Same(firstView, host.Content);
+
+        // Reattaching applies the deferred change: the new service now
+        // drives the host, the old one no longer does.
+        host.SimulateAttachedToVisualTree();
+        var secondVm = new TestViewModel();
+        secondService.RaiseRegionNavigated("MainRegion", secondVm);
+        var secondView = Assert.IsType<TestView>(host.Content);
+        Assert.Same(secondVm, secondView.DataContext);
+
+        firstService.RaiseRegionNavigated("MainRegion", new TestViewModel());
+        Assert.Same(secondView, host.Content);
+    }
+
+    [Fact]
+    public void Detached_SameServiceReassigned_DoesNotResubscribeUntilReattach()
+    {
+        var dispatcher = new FakeDispatcher();
+        var service = new FakeNavigationService();
+        using var host = new AttachAwareNavigationHost(dispatcher)
+        {
+            RegionName = "MainRegion",
+            NavigationService = service,
+            ViewLocator = CreateLocator(),
+        };
+        host.SimulateAttachedToVisualTree();
+        var firstVm = new TestViewModel();
+        service.RaiseRegionNavigated("MainRegion", firstVm);
+        var firstView = Assert.IsType<TestView>(host.Content);
+
+        host.SimulateDetachedFromVisualTree();
+
+        // Reassigning the very same service while detached must not
+        // resurrect the subscription the detach dropped (the detach nulled
+        // the tracked subscription, so without the gate this looks like a
+        // service change).
+        host.NavigationService = null;
+        host.NavigationService = service;
+        service.RaiseRegionNavigated("MainRegion", new TestViewModel());
+        Assert.Same(firstView, host.Content);
+
+        // After reattach, the same service drives the host again.
+        host.SimulateAttachedToVisualTree();
+        var secondVm = new TestViewModel();
+        service.RaiseRegionNavigated("MainRegion", secondVm);
+        var secondView = Assert.IsType<TestView>(host.Content);
+        Assert.Same(secondVm, secondView.DataContext);
+    }
+
     [Fact]
     public void Dispose_UnsubscribesFromService()
     {

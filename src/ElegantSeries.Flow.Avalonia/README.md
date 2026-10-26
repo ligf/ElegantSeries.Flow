@@ -99,7 +99,10 @@ factory can never leave the host in a half-updated state.
 
 The host unsubscribes from `INavigationService.RegionNavigated` when detached
 from the visual tree and on `Dispose()`, so a discarded host is never kept alive
-by the (typically singleton) service.
+by the (typically singleton) service. A `NavigationService` change made while
+the host is detached does not resubscribe it; the change takes effect when the
+host is attached again. (A host that has never been attached subscribes
+immediately.)
 
 ## AOT / trimming
 

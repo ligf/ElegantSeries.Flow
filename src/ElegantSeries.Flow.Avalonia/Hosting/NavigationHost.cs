@@ -52,7 +52,9 @@ namespace ElegantSeries.Flow.Avalonia.Hosting;
 /// Lifetime: the navigation service is typically a singleton while the host is a view.
 /// The host unsubscribes from <c>RegionNavigated</c> when it is detached from the visual
 /// tree and when <see cref="Dispose"/> is called, so a discarded host is never kept alive
-/// by the service's event.
+/// by the service's event. A <see cref="NavigationService"/> change made while the host
+/// is detached does not resubscribe it: the change takes effect when the host is
+/// attached again. (A host that has never been attached subscribes immediately.)
 /// </para>
 /// </remarks>
 public class NavigationHost : ContentControl, IDisposable
@@ -78,6 +80,14 @@ public class NavigationHost : ContentControl, IDisposable
     private readonly NavigationHostController<Control> _controller;
     private INavigationService? _subscribedService;
     private bool _disposed;
+
+    // Set while the host sits detached from the visual tree after having been
+    // attached. In that state subscription updates are deferred until the
+    // next attach: the detach dropped the subscription so the (typically
+    // singleton) service cannot keep a possibly discarded host alive, and a
+    // property change in the meantime must not quietly resurrect it. A host
+    // that has never been attached is not gated.
+    private bool _detachedFromVisualTree;
 
     // Mirrors RegionNameProperty in a plain field: the navigation service may raise
     // RegionNavigated on a thread-pool thread, and GetValue(StyledProperty<T>) calls
@@ -143,7 +153,9 @@ public class NavigationHost : ContentControl, IDisposable
 
     /// <summary>
     /// Gets or sets the navigation service to observe. Changing the value
-    /// unsubscribes the previous service and subscribes the new one.
+    /// unsubscribes the previous service and subscribes the new one — except
+    /// while the host is detached from the visual tree, where the change is
+    /// deferred and takes effect when the host is attached again.
     /// </summary>
     /// <exception cref="ObjectDisposedException">The host has been disposed.</exception>
     public INavigationService? NavigationService
@@ -249,17 +261,32 @@ public class NavigationHost : ContentControl, IDisposable
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        UpdateSubscription();
+        HandleAttachedToVisualTree();
     }
 
     /// <inheritdoc />
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        HandleDetachedFromVisualTree();
+    }
+
+    // The attach/detach bookkeeping, split from the overrides above so the
+    // test project can drive it without a visual tree (the event-args type
+    // cannot be constructed outside one).
+    internal void HandleAttachedToVisualTree()
+    {
+        _detachedFromVisualTree = false;
+        UpdateSubscription();
+    }
+
+    internal void HandleDetachedFromVisualTree()
+    {
         // The host may be discarded while the (singleton) service lives on;
         // dropping the subscription here prevents the service from keeping the host alive.
         _controller.Detach();
         _subscribedService = null;
+        _detachedFromVisualTree = true;
     }
 
     private Control CreateView(ViewCreationContext context)
@@ -278,6 +305,13 @@ public class NavigationHost : ContentControl, IDisposable
     {
         if (_disposed)
         {
+            return;
+        }
+
+        if (_detachedFromVisualTree)
+        {
+            // Deferred: OnAttachedToVisualTree re-runs this method and
+            // applies the then-current NavigationService value.
             return;
         }
 
