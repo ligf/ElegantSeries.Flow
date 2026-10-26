@@ -6464,6 +6464,194 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task Recognition_CacheCandidateClearedDuringVote_VoteFailureReportedAndFreshInstancePushed()
+    {
+        // Target recognition is documented to run without serialization
+        // against page disposal: a candidate's scope can be released while
+        // its IsNavigationTarget vote is still executing. This test stages
+        // that interleaving deterministically — the vote blocks, the cache
+        // is cleared (releasing the candidate's scope), then the vote is
+        // released and touches its captured scoped service. The framework
+        // must not crash and must not end up inconsistent: the vote's
+        // ObjectDisposedException is reported through SubscriberError, the
+        // candidate counts as not recognized, a fresh instance is pushed,
+        // and the released scope was disposed exactly once.
+        BlockingVoteViewModel.DisposeCount = 0;
+        VoteProbe.DisposeCount = 0;
+
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<BlockingVoteViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        services.AddScoped<VoteProbe>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var subscriberErrors = new List<Exception>();
+        nav.SubscriberError += ex =>
+        {
+            lock (subscriberErrors)
+            {
+                subscriberErrors.Add(ex);
+            }
+        };
+
+        await nav.NavigateToAsync<BlockingVoteViewModel>(retention: NavigationRetention.KeepAlive);
+        var candidate = Assert.IsType<BlockingVoteViewModel>(nav.GetCurrentViewModel());
+
+        // Move the candidate into the KeepAlive cache.
+        await nav.NavigateToAsync<TestDetailViewModel>(operation: NavigationOperation.Replace);
+
+        // The next navigation classifies the cached candidate: its vote blocks.
+        var navTask = Task.Run(() => nav.NavigateToAsync<BlockingVoteViewModel, object>(
+            new object(), retention: NavigationRetention.KeepAlive));
+        await candidate.VoteEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            // While the vote is in flight, the candidate's cache entry is cleared
+            // and its page scope is released.
+            nav.ClearCache("MainRegion");
+            Assert.Equal(1, VoteProbe.DisposeCount);
+        }
+        finally
+        {
+            // Never leave the vote blocked on a failed assertion path.
+            candidate.ReleaseVote();
+        }
+
+        var result = await navTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(result);
+        var current = Assert.IsType<BlockingVoteViewModel>(nav.GetCurrentViewModel());
+        Assert.NotSame(candidate, current);
+        Assert.Equal(1, BlockingVoteViewModel.DisposeCount);
+        Assert.Equal(1, VoteProbe.DisposeCount);
+        lock (subscriberErrors)
+        {
+            var error = Assert.Single(subscriberErrors);
+            Assert.IsType<ObjectDisposedException>(error);
+        }
+    }
+
+    [Fact]
+    public async Task Recognition_StackCandidateServiceDisposedDuringVote_VoteFailureReportedAndNavigationDiscarded()
+    {
+        // The stack-classification twin of the cache scenario: a covered
+        // KeepAlive entry is being voted on when the navigation service
+        // itself is disposed, releasing every page scope including the
+        // candidate's. (Remove cannot play this role: removing a KeepAlive
+        // entry caches it instead of disposing its scope.) Same
+        // expectations: the vote's ObjectDisposedException is reported
+        // through SubscriberError, the candidate counts as not recognized,
+        // the in-flight navigation is discarded as disposed, and the
+        // candidate's scope was disposed exactly once.
+        BlockingVoteViewModel.DisposeCount = 0;
+        VoteProbe.DisposeCount = 0;
+
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<BlockingVoteViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        services.AddScoped<VoteProbe>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var subscriberErrors = new List<Exception>();
+        nav.SubscriberError += ex =>
+        {
+            lock (subscriberErrors)
+            {
+                subscriberErrors.Add(ex);
+            }
+        };
+
+        await nav.NavigateToAsync<BlockingVoteViewModel>(retention: NavigationRetention.KeepAlive);
+        var candidate = Assert.IsType<BlockingVoteViewModel>(nav.GetCurrentViewModel());
+
+        // Cover the candidate with another page; it stays on the stack.
+        await nav.NavigateToAsync<TestDetailViewModel>();
+
+        // The next navigation classifies the covered candidate: its vote blocks.
+        var navTask = Task.Run(() => nav.NavigateToAsync<BlockingVoteViewModel, object>(
+            new object(), retention: NavigationRetention.KeepAlive));
+        await candidate.VoteEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            // While the vote is in flight, the service is disposed: every page
+            // scope, including the candidate's, is released.
+            await ((IAsyncDisposable)nav).DisposeAsync();
+            Assert.Equal(1, VoteProbe.DisposeCount);
+        }
+        finally
+        {
+            // Never leave the vote blocked on a failed assertion path.
+            candidate.ReleaseVote();
+        }
+
+        var result = await navTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(result);
+        Assert.Null(nav.GetCurrentViewModel());
+        // Two scopes were released, each exactly once: the candidate's (by
+        // DisposeAsync above) and the discarded navigation's tentative
+        // resolution scope (released when the navigation was dropped).
+        Assert.Equal(2, BlockingVoteViewModel.DisposeCount);
+        Assert.Equal(2, VoteProbe.DisposeCount);
+        lock (subscriberErrors)
+        {
+            var error = Assert.Single(subscriberErrors);
+            Assert.IsType<ObjectDisposedException>(error);
+        }
+    }
+
+    private sealed class BlockingVoteViewModel : NavigationViewModelBase, INavigationTargetAware, IDisposable
+    {
+        public static int DisposeCount;
+        private readonly VoteProbe _probe;
+        private int _voteCalls;
+        public readonly TaskCompletionSource VoteEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _voteRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public BlockingVoteViewModel(VoteProbe probe) => _probe = probe;
+
+        public bool IsNavigationTarget(object? parameter)
+        {
+            if (Interlocked.Increment(ref _voteCalls) == 1)
+            {
+                VoteEntered.TrySetResult();
+                _voteRelease.Task.GetAwaiter().GetResult();
+            }
+
+            // Touch a service captured from this page's own scope. If the
+            // page was disposed while this vote was in flight, the scope is
+            // gone and this throws ObjectDisposedException — the documented
+            // hazard of voting from captured scoped services.
+            _probe.Ping();
+            return true;
+        }
+
+        public void ReleaseVote() => _voteRelease.TrySetResult();
+
+        public void Dispose() => Interlocked.Increment(ref DisposeCount);
+    }
+
+    private sealed class VoteProbe : IDisposable
+    {
+        public static int DisposeCount;
+        private volatile bool _disposed;
+
+        public void Ping() => ObjectDisposedException.ThrowIf(_disposed, this);
+
+        public void Dispose()
+        {
+            _disposed = true;
+            Interlocked.Increment(ref DisposeCount);
+        }
+    }
+
+    [Fact]
     public async Task RetiredCts_DoesNotAccumulateForSyncOnlyViewModel()
     {
         // For entries with only synchronous (or no) lifecycle callbacks,
