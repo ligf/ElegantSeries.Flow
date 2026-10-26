@@ -78,7 +78,7 @@ public class NavigationHost : ContentControl, IDisposable
             new PropertyMetadata(null, OnViewLocatorChanged));
 
     private readonly NavigationHostController<FrameworkElement> _controller;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     // Mirrors RegionNameProperty in a plain field: the navigation service may raise
     // events on a thread-pool thread, and DependencyObject.GetValue must only be
@@ -209,7 +209,10 @@ public class NavigationHost : ContentControl, IDisposable
         }
 
         _disposed = true;
-        _controller.Detach();
+        // Close (not Detach): a property change already in flight on the UI
+        // thread may still call Attach after this returns, and it must not
+        // re-subscribe a disposed host.
+        _controller.Close();
     }
 
     private FrameworkElement CreateView(ViewCreationContext context)

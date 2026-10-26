@@ -79,7 +79,7 @@ public class NavigationHost : ContentControl, IDisposable
 
     private readonly NavigationHostController<Control> _controller;
     private INavigationService? _subscribedService;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     // Set while the host sits detached from the visual tree after having been
     // attached. In that state subscription updates are deferred until the
@@ -204,7 +204,10 @@ public class NavigationHost : ContentControl, IDisposable
         }
 
         _disposed = true;
-        _controller.Detach();
+        // Close (not Detach): a property change already in flight on the UI
+        // thread may still reach UpdateSubscription after this returns, and
+        // it must not re-subscribe a disposed host.
+        _controller.Close();
         _subscribedService = null;
     }
 
