@@ -446,6 +446,88 @@ public sealed class NavigationHostControllerTests
     }
 
     [Fact]
+    public void SyncCallback_WhenDefinitiveCurrentIsNull_SkippedAtReceiptTime()
+    {
+        // The dispatcher has access, so the event is applied synchronously —
+        // no queue, no execution-time re-check. The handler observes a
+        // definitive null: an earlier subscriber of the same event disposed
+        // the service mid-dispatch, emptying the region before this handler
+        // ran. Applying the event would resurrect the released page's view,
+        // so the receipt-time check must judge it stale, exactly as the
+        // queued path's execution-time re-check does.
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var service = new DefinitiveFakeNavigationService();
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (view, vm) => shown.Add((view, vm)),
+            clearView: () => { },
+            onViewCreationFailed: (_, _) => { });
+        controller.Attach(service);
+
+        var vmA = new StubViewModel();
+        // CurrentByRegion has no entry for MainRegion: the handler observes
+        // the region after it lost its page.
+        service.RaiseNavigated("MainRegion", vmA);
+
+        Assert.Empty(shown); // the released page must not be resurrected
+    }
+
+    [Fact]
+    public void SyncCallback_WhenDefinitiveCurrentIsEventViewModel_AppliedAtReceiptTime()
+    {
+        // Happy path for a definitive service on the synchronous path: the
+        // current page IS the event's ViewModel, so the event is applied —
+        // the definitive check must only drop events that no longer name
+        // the current page, never live ones.
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var service = new DefinitiveFakeNavigationService();
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (view, vm) => shown.Add((view, vm)),
+            clearView: () => { },
+            onViewCreationFailed: (_, _) => { });
+        controller.Attach(service);
+
+        var vmA = new StubViewModel();
+        service.CurrentByRegion["MainRegion"] = vmA;
+        service.RaiseNavigated("MainRegion", vmA);
+
+        var shownEntry = Assert.Single(shown);
+        Assert.Same(vmA, shownEntry.ViewModel);
+    }
+
+    [Fact]
+    public void SyncCallback_WhenUnknownCurrentIsNull_StillAppliedAtReceiptTime()
+    {
+        // Compatibility rule on the synchronous path: for implementations
+        // without the definitive guarantee, a null current means "unknown",
+        // so the event is applied exactly as before.
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var service = new FakeNavigationService();
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (view, vm) => shown.Add((view, vm)),
+            clearView: () => { },
+            onViewCreationFailed: (_, _) => { });
+        controller.Attach(service);
+
+        var vmA = new StubViewModel();
+        service.RaiseNavigated("MainRegion", vmA);
+
+        var shownEntry = Assert.Single(shown);
+        Assert.Same(vmA, shownEntry.ViewModel);
+    }
+
+    [Fact]
     public void Factory_ReceivesRegionAndParameterFromService()
     {
         var dispatcher = new FakeDispatcher(hasAccess: true);
