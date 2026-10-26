@@ -67,6 +67,11 @@ public interface INavigationTargetAware
     /// detached while the page is inactive — so implementations must decide
     /// from their own state (or services captured while active), not from
     /// the <see cref="INavigationViewModel.Navigation"/> property.
+    /// Classification is not serialized with page disposal: the candidate's
+    /// page scope may be disposed concurrently on another thread — by a
+    /// concurrent <c>Remove</c>, cache clear, or service disposal — while
+    /// this method runs. A service captured from the page scope may
+    /// therefore already be disposed when used here.
     /// An exception thrown by the implementation is reported through
     /// <see cref="INavigationService.SubscriberError"/> and the candidate is
     /// treated as not recognized.
