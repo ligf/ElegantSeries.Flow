@@ -199,6 +199,34 @@ ViewModel 必须实现 `INavigationViewModel`（或从 `BaseViewModel` /
 可运行的 WPF/Avalonia 演示见 [samples](samples/)（多 region 布局、强类型参数、
 KeepAlive、单例 ViewModel）。
 
+### 视图工厂
+
+当视图需要构造参数、或构造方式取决于页面显示的位置时，可以注册工厂而不是视图类型：
+
+```csharp
+services.AddElegantSeriesFlowViews(locator =>
+{
+    // 简单工厂：只接收 ViewModel。
+    locator.Register<ChartViewModel>(vm => new ChartView(vm));
+
+    // 上下文工厂：还接收 region 与页面最近一次激活时的参数。
+    locator.RegisterFactory<DetailViewModel>(context =>
+        context.RegionName == "Sidebar"
+            ? new DetailSidebarView()
+            : new DetailView());
+});
+```
+
+上下文工厂接收一个 `ViewCreationContext`（`ElegantSeries.Flow.Locating`）：
+ViewModel 实例、region 名（仅经旧式 `CreateView(viewModel)` 路径创建视图时为 `null`）、
+以及页面最近一次激活时所带的参数。该上下文刻意不携带 `IServiceProvider` 与页面
+作用域——页面作用域在页面离开时即被释放；视图若需要服务，应在工厂闭包中捕获
+应用的根 provider，或经其 ViewModel 获取。
+
+工厂在 UI 线程运行、每个 ViewModel 实例只运行一次：宿主按实例缓存已创建的
+视图，因此工厂决定的是页面首次创建时得到哪个视图。KeepAlive 页面重新激活时
+不会再咨询工厂，也无法在此时更换视图。
+
 ## 导航操作与保留策略
 
 每次导航由两个正交的选择组合而成：`NavigationOperation`（对栈做什么）

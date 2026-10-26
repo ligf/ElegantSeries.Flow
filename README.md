@@ -208,6 +208,40 @@ See [ElegantSeries.Flow.WPF](src/ElegantSeries.Flow.WPF/README.md) and
 and [samples](samples/) for runnable WPF/Avalonia demos (multi-region layout,
 typed parameters, KeepAlive, singleton ViewModel).
 
+### View factories
+
+When a view needs constructor arguments, or its construction depends on where the
+page is shown, register a factory instead of a view type:
+
+```csharp
+services.AddElegantSeriesFlowViews(locator =>
+{
+    // Simple factory: receives the ViewModel only.
+    locator.Register<ChartViewModel>(vm => new ChartView(vm));
+
+    // Context-aware factory: also receives the region and the parameter the
+    // page was most recently activated with.
+    locator.RegisterFactory<DetailViewModel>(context =>
+        context.RegionName == "Sidebar"
+            ? new DetailSidebarView()
+            : new DetailView());
+});
+```
+
+The context-aware factory receives a `ViewCreationContext`
+(`ElegantSeries.Flow.Locating`): the ViewModel instance, the region name
+(`null` only when a view is created through the legacy `CreateView(viewModel)`
+path), and the parameter the page was most recently activated with. The context
+deliberately carries no `IServiceProvider` and no page scope — a page's scope is
+disposed when the page leaves, so a view that needs services should capture the
+application's root provider in the factory closure, or receive them through its
+ViewModel.
+
+Factories run on the UI thread, once per ViewModel instance: the host caches the
+created view per instance, so a factory decides which view a page gets when it
+is first created. It is not consulted again when a kept-alive page is
+re-activated, and cannot swap the view at that point.
+
 ## Navigation operations and retention
 
 Every navigation composes two independent choices: a `NavigationOperation`

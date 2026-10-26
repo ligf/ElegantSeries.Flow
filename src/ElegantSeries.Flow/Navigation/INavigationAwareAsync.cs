@@ -25,7 +25,10 @@ namespace ElegantSeries.Flow.Navigation;
 /// stop touching the page's dependencies once it fires. The navigation service waits
 /// for an in-flight async callback to complete (up to 5 seconds) before releasing the
 /// page scope; a callback that ignores cancellation cannot block navigation forever,
-/// but the scope <i>will</i> be released while it is still running.
+/// but the scope <i>will</i> be released while it is still running. If such an abandoned
+/// callback throws a non-cancellation exception after the navigation it belonged to
+/// has completed, the exception can no longer be delivered to a navigation caller
+/// and is reported through <see cref="INavigationService.SubscriberError"/> instead.
 /// </para>
 /// </remarks>
 public interface INavigationAwareAsync
