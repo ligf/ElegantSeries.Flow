@@ -165,6 +165,82 @@ public sealed class NavigationHostControllerTests
     }
 
     [Fact]
+    public void FailureHookThrows_OnSynchronousPath_SwallowedAndContentKept()
+    {
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        int hookCalls = 0;
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => throw new InvalidOperationException("factory boom"),
+            showView: (view, vm) => shown.Add((view, vm)),
+            clearView: () => { },
+            onViewCreationFailed: (_, _) => { hookCalls++; throw new InvalidOperationException("hook boom"); });
+        var service = new FakeNavigationService();
+        controller.Attach(service);
+
+        // The hook is the terminal channel: its exception must not escape
+        // into the event raiser (where the real service would isolate it as
+        // a subscriber error, disguising a view failure as a hook failure).
+        var escaped = Record.Exception(() => service.RaiseNavigated("MainRegion", new StubViewModel()));
+
+        Assert.Null(escaped);
+        Assert.Equal(1, hookCalls);
+        Assert.Empty(shown);
+    }
+
+    [Fact]
+    public void FailureHookThrows_OnQueuedPath_SwallowedInPostedCallback()
+    {
+        var dispatcher = new FakeDispatcher(hasAccess: false);
+        int hookCalls = 0;
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => throw new InvalidOperationException("factory boom"),
+            showView: (_, _) => { },
+            clearView: () => { },
+            onViewCreationFailed: (_, _) => { hookCalls++; throw new InvalidOperationException("hook boom"); });
+        var service = new FakeNavigationService();
+        controller.Attach(service);
+
+        service.RaiseNavigated("MainRegion", new StubViewModel());
+        Assert.Equal(1, dispatcher.PostedCount);
+
+        // The hook's exception must not escape the posted callback (where
+        // it would become an unhandled dispatcher exception).
+        var escaped = Record.Exception(() => dispatcher.RunPosted());
+
+        Assert.Null(escaped);
+        Assert.Equal(1, hookCalls);
+    }
+
+    [Fact]
+    public void FailureHookThrows_OnRefreshPath_Swallowed()
+    {
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        int hookCalls = 0;
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => throw new InvalidOperationException("factory boom"),
+            showView: (_, _) => { },
+            clearView: () => { },
+            onViewCreationFailed: (_, _) => { hookCalls++; throw new InvalidOperationException("hook boom"); });
+        var service = new FakeNavigationService();
+        service.CurrentByRegion["MainRegion"] = new StubViewModel();
+        controller.Attach(service);
+
+        // Refresh is invoked from property setters on the platform hosts:
+        // the hook's exception must not leak to the setter's caller.
+        var escaped = Record.Exception(() => controller.Refresh());
+
+        Assert.Null(escaped);
+        Assert.Equal(1, hookCalls);
+    }
+
+    [Fact]
     public void ViewFactoryReturnsNull_ReportedAsFailure_AndRetriedNextTime()
     {
         var harness = new Harness();
