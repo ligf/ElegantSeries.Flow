@@ -571,6 +571,10 @@ public sealed partial class NavigationService
             if (pending is not null)
             {
                 regions.UnionWith(pending.Regions);
+                // Record this entry against the pending scope: if a shutdown
+                // takes the scope after this entry has left the stack, it must
+                // find this entry's gate.
+                AddPendingEntry(pending.Entries, entry);
             }
 
             if (IsScopeReferencedLocked(entry.Scope))
@@ -585,7 +589,7 @@ public sealed partial class NavigationService
                     else
                     {
                         _pendingScopeDisposals[entry.Scope] =
-                            new PendingDisposal(entry.ViewModel, regions);
+                            new PendingDisposal(entry.ViewModel, regions, [entry]);
                     }
                 }
             }
@@ -725,9 +729,13 @@ public sealed partial class NavigationService
                         }
                     }
                 }
-                // Ownership transfers atomically to the deferred task: TrackDeferredDisposal
-                // removes the scope from _pendingScopeDisposals, so a concurrent Dispose/
-                // DisposeAsync cannot collect and double-dispose it.
+                // Ownership transfers to the deferred task: TrackDeferredDisposal
+                // removes the scope from _pendingScopeDisposals. If a concurrent
+                // Dispose/DisposeAsync collects it first, the deactivation plan
+                // has already recorded this entry against the pending scope, so
+                // the shutdown cancels and waits for this entry's gate before
+                // releasing the scope — and _disposedScopes keeps the release
+                // exactly-once either way.
             }
             else
             {
@@ -781,6 +789,10 @@ public sealed partial class NavigationService
             if (_pendingScopeDisposals.TryGetValue(entry.Scope, out var pending))
             {
                 regionsToNotify.UnionWith(pending.Regions);
+                // Record this entry against the pending scope: if a shutdown
+                // takes the scope after this entry has left the stack, it must
+                // find this entry's gate.
+                AddPendingEntry(pending.Entries, entry);
             }
 
             if (IsScopeReferencedLocked(entry.Scope))
@@ -796,11 +808,12 @@ public sealed partial class NavigationService
                     if (_pendingScopeDisposals.TryGetValue(entry.Scope, out var existing))
                     {
                         existing.Regions.UnionWith(regionsToNotify);
+                        AddPendingEntry(existing.Entries, entry);
                     }
                     else
                     {
                         _pendingScopeDisposals[entry.Scope] =
-                            new PendingDisposal(entry.ViewModel, new HashSet<string>(regionsToNotify));
+                            new PendingDisposal(entry.ViewModel, new HashSet<string>(regionsToNotify), [entry]);
                     }
                 }
             }
@@ -831,11 +844,12 @@ public sealed partial class NavigationService
                         if (_pendingScopeDisposals.TryGetValue(evictedEntry.Scope, out var existingPending))
                         {
                             existingPending.Regions.UnionWith(evictedRegions);
+                            AddPendingEntry(existingPending.Entries, evictedEntry);
                         }
                         else
                         {
                             _pendingScopeDisposals[evictedEntry.Scope] =
-                                new PendingDisposal(evictedEntry.ViewModel, evictedRegions);
+                                new PendingDisposal(evictedEntry.ViewModel, evictedRegions, [evictedEntry]);
                         }
                     }
                     else
