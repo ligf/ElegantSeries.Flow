@@ -5175,6 +5175,67 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task Remove_TwoKeepAlivePagesOfOneKind_DeepestWinsCacheSlot()
+    {
+        // Two covered KeepAlive pages of one kind on the stack.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "a", retention: NavigationRetention.KeepAlive));
+        var pageA = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "b", retention: NavigationRetention.KeepAlive));
+        var pageB = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.NotSame(pageA, pageB);
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        // One call removes both. They are deactivated top first: page B
+        // moves into the cache slot first, then page A moves in and evicts
+        // it — the deepest removed page wins the slot, the other is
+        // disposed.
+        Assert.Equal(2, _navigationService.Remove<ParamAwareKeepAliveViewModel>());
+        Assert.False(pageA.Disposed);
+        Assert.True(pageB.Disposed);
+        Assert.Equal(3, _navigationService.GetNavigationStack().Count);
+
+        // The cache holds page A.
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "a", retention: NavigationRetention.KeepAlive));
+        Assert.Same(pageA, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Remove_Parameterized_TwoClaimedKeepAlivePages_DeepestWinsCacheSlot()
+    {
+        // Two covered KeepAlive pages of one kind claimed by one parameter.
+        // The second instance is created with Replace, which performs no
+        // stack recognition — a Push for "a" would be claimed by page A.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "a", retention: NavigationRetention.KeepAlive));
+        var pageA = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "a", operation: NavigationOperation.Replace, retention: NavigationRetention.KeepAlive));
+        var pageB = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.NotSame(pageA, pageB);
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        // One parameterized call claims and removes both; deactivation is
+        // top first, so page A — processed last — wins the cache slot and
+        // page B is evicted and disposed.
+        Assert.Equal(2, _navigationService.Remove<ParamAwareKeepAliveViewModel, string>("a"));
+        Assert.False(pageA.Disposed);
+        Assert.True(pageB.Disposed);
+        Assert.Equal(2, _navigationService.GetNavigationStack().Count);
+
+        // The cache holds page A.
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "a", retention: NavigationRetention.KeepAlive));
+        Assert.Same(pageA, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
     public async Task GoBackTo_RegisteredInCallback_ExecutesAfterWindowCloses()
     {
         Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());

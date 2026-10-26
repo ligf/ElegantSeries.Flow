@@ -96,9 +96,9 @@ public class ModelWalkTests
             var m = model.Region(region);
             int roll = rng.Next(100);
 
-            if (roll < 40 && m.Stack.Count <= 40)
+            if (roll < 34 && m.Stack.Count <= 40)
             {
-                // Push (40%)
+                // Push (34%)
                 var (kind, param) = RandomTarget(rng);
                 var retention = rng.Next(5) < 2 ? NavigationRetention.KeepAlive : NavigationRetention.Destroy;
                 history.Add($"#{step} Push {kind}({param.Id}) [{retention}] -> {region}");
@@ -108,9 +108,9 @@ public class ModelWalkTests
                 Require(fate == plan.Fate, $"Push fate: model {plan.Fate}, actual {fate}.");
                 model.ReconcileLanding(m, plan, service, ledger, createdBefore, Require);
             }
-            else if (roll < 52)
+            else if (roll < 44)
             {
-                // Replace (12%)
+                // Replace (10%)
                 var (kind, param) = RandomTarget(rng);
                 var retention = rng.Next(5) < 2 ? NavigationRetention.KeepAlive : NavigationRetention.Destroy;
                 history.Add($"#{step} Replace {kind}({param.Id}) [{retention}] -> {region}");
@@ -120,9 +120,9 @@ public class ModelWalkTests
                 Require(fate == plan.Fate, $"Replace fate: model {plan.Fate}, actual {fate}.");
                 model.ReconcileLanding(m, plan, service, ledger, createdBefore, Require);
             }
-            else if (roll < 60)
+            else if (roll < 51)
             {
-                // Reset (8%)
+                // Reset (7%)
                 var (kind, param) = RandomTarget(rng);
                 var retention = rng.Next(5) < 2 ? NavigationRetention.KeepAlive : NavigationRetention.Destroy;
                 history.Add($"#{step} Reset {kind}({param.Id}) [{retention}] -> {region}");
@@ -132,15 +132,51 @@ public class ModelWalkTests
                 Require(fate == plan.Fate, $"Reset fate: model {plan.Fate}, actual {fate}.");
                 model.ReconcileLanding(m, plan, service, ledger, createdBefore, Require);
             }
-            else if (roll < 82)
+            else if (roll < 69)
             {
-                // GoBack (22%)
+                // GoBack (18%)
                 history.Add($"#{step} GoBack -> {region}");
                 bool expected = model.PredictGoBack(m);
                 bool fate = await service.GoBackAsync(region);
                 Require(fate == expected, $"GoBack fate: model {expected}, actual {fate}.");
             }
-            else if (roll < 88)
+            else if (roll < 78)
+            {
+                // GoBackTo (9%): type-only or parameterized, chosen per call.
+                var kind = (PageKind)rng.Next(3);
+                bool parameterized = rng.Next(2) == 0;
+                var param = new P(rng.Next(3));
+                history.Add(parameterized
+                    ? $"#{step} GoBackTo {kind}({param.Id}) -> {region}"
+                    : $"#{step} GoBackTo {kind} -> {region}");
+                bool expected = model.PredictGoBackTo(m, kind, parameterized ? param : null);
+                bool fate = await GoBackToAsync(service, kind, parameterized ? param : null, region);
+                Require(fate == expected, $"GoBackTo fate: model {expected}, actual {fate}.");
+            }
+            else if (roll < 83)
+            {
+                // Remove (5%): synchronous covered-page surgery, type-only
+                // or parameterized. State-guided steering: when the stack
+                // holds two or more covered KeepAlive pages of one kind,
+                // the type-only form is aimed at that kind, so a single
+                // call moves several same-kind pages into the cache — the
+                // batch cache contest (deepest wins the slot) that a
+                // uniform-random kind choice reaches too rarely at the
+                // default step count. (The contest's processing order is
+                // additionally pinned by a directed test.)
+                var contestKind = CoveredKeepAliveContestKind(m);
+                bool steered = contestKind is not null;
+                var kind = steered ? contestKind!.Value : (PageKind)rng.Next(3);
+                bool parameterized = !steered && rng.Next(2) == 0;
+                var param = new P(rng.Next(3));
+                history.Add(parameterized
+                    ? $"#{step} Remove {kind}({param.Id}) -> {region}"
+                    : $"#{step} Remove {kind}{(steered ? " (steered)" : "")} -> {region}");
+                int expected = model.PredictRemove(m, kind, parameterized ? param : null);
+                int removed = Remove(service, kind, parameterized ? param : null, region);
+                Require(removed == expected, $"Remove count: model {expected}, actual {removed}.");
+            }
+            else if (roll < 89)
             {
                 // ClearCache (6%), sync/async alternating
                 bool sync = step % 2 == 0;
@@ -155,7 +191,7 @@ public class ModelWalkTests
                     await service.ClearCacheAsync(region);
                 }
             }
-            else if (roll < 91)
+            else if (roll < 92)
             {
                 // ClearAllCache (3%), sync/async alternating
                 bool sync = step % 2 == 0;
@@ -172,7 +208,7 @@ public class ModelWalkTests
             }
             else
             {
-                // Self-navigation (9%): Push+Destroy to the current page's own
+                // Self-navigation (8%): Push+Destroy to the current page's own
                 // type, with or without refresh; degrades to a plain Push on
                 // an empty stack.
                 var top = m.Stack.LastOrDefault();
@@ -223,6 +259,62 @@ public class ModelWalkTests
             PageKind.B => service.NavigateToAsync<ModelPageB, P>(param, region, operation, retention, refresh),
             _ => service.NavigateToAsync<ModelGuardedPage, P>(param, region, operation, retention, refresh),
         };
+
+    /// <summary>
+    /// The first page kind holding two or more covered (non-active)
+    /// KeepAlive entries on the model stack, or null when no kind does.
+    /// Removing that kind in one call contests the kind's cache slot.
+    /// </summary>
+    private static PageKind? CoveredKeepAliveContestKind(RegionModel m)
+    {
+        var counts = new Dictionary<PageKind, int>();
+        for (int i = 0; i < m.Stack.Count - 1; i++)
+        {
+            var e = m.Stack[i];
+            if (e.Retention != NavigationRetention.KeepAlive)
+            {
+                continue;
+            }
+
+            counts[e.Kind] = counts.GetValueOrDefault(e.Kind) + 1;
+            if (counts[e.Kind] >= 2)
+            {
+                return e.Kind;
+            }
+        }
+
+        return null;
+    }
+
+    private static Task<bool> GoBackToAsync(INavigationService service, PageKind kind, P? param, string region) =>
+        param is null
+            ? kind switch
+            {
+                PageKind.A => service.GoBackToAsync<ModelPageA>(region),
+                PageKind.B => service.GoBackToAsync<ModelPageB>(region),
+                _ => service.GoBackToAsync<ModelGuardedPage>(region),
+            }
+            : kind switch
+            {
+                PageKind.A => service.GoBackToAsync<ModelPageA, P>(param, region),
+                PageKind.B => service.GoBackToAsync<ModelPageB, P>(param, region),
+                _ => service.GoBackToAsync<ModelGuardedPage, P>(param, region),
+            };
+
+    private static int Remove(INavigationService service, PageKind kind, P? param, string region) =>
+        param is null
+            ? kind switch
+            {
+                PageKind.A => service.Remove<ModelPageA>(region),
+                PageKind.B => service.Remove<ModelPageB>(region),
+                _ => service.Remove<ModelGuardedPage>(region),
+            }
+            : kind switch
+            {
+                PageKind.A => service.Remove<ModelPageA, P>(param, region),
+                PageKind.B => service.Remove<ModelPageB, P>(param, region),
+                _ => service.Remove<ModelGuardedPage, P>(param, region),
+            };
 
     // ── Model ─────────────────────────────────────────────────
 
@@ -488,6 +580,104 @@ public class ModelWalkTests
             m.EventCount++;
             m.LastEventInstance = revealed.Id;
             return true;
+        }
+
+        /// <summary>
+        /// Predicts a GoBackTo: the target is the nearest entry of the kind
+        /// from the top (parameterized: the nearest the recognition gate
+        /// claims, i.e. whose stored parameter equals). No target, or the
+        /// target already being the active page, never starts a departure:
+        /// fate false with no observable change — the guard is not even
+        /// consulted, so an armed veto stays armed. Otherwise the departing
+        /// page's guard decides; on a pass the departing page runs From
+        /// once, every page above the target leaves without callbacks under
+        /// its own retention (top first), and the target is re-activated
+        /// (the parameterized form also rewrites its stored parameter).
+        /// </summary>
+        public bool PredictGoBackTo(RegionModel m, PageKind kind, P? param)
+        {
+            int targetIndex = -1;
+            for (int i = m.Stack.Count - 1; i >= 0; i--)
+            {
+                var e = m.Stack[i];
+                if (e.Kind != kind)
+                {
+                    continue;
+                }
+
+                if (param is not null && !Equals(e.Param, param))
+                {
+                    continue;
+                }
+
+                targetIndex = i;
+                break;
+            }
+
+            if (targetIndex < 0 || targetIndex == m.Stack.Count - 1)
+            {
+                return false;
+            }
+
+            var top = m.Stack.Last();
+            if (IsVeto(top))
+            {
+                top.VetoArmed = false;
+                return false;
+            }
+
+            BumpFrom(top);
+            var target = m.Stack[targetIndex];
+            while (!ReferenceEquals(m.Stack.Last(), target))
+            {
+                var popped = m.Stack.Last();
+                m.Stack.RemoveAt(m.Stack.Count - 1);
+                PopDisposeOrCache(m, popped);
+            }
+
+            if (param is not null)
+            {
+                target.Param = param;
+            }
+
+            target.VetoArmed = target.Kind == PageKind.Guarded && target.Param.Id == -1;
+            BumpTo(target);
+            m.EventCount++;
+            m.LastEventInstance = target.Id;
+            return true;
+        }
+
+        /// <summary>
+        /// Predicts a Remove: every covered page of the kind (parameterized:
+        /// every claimed one) is removed; the active page is never removed.
+        /// No lifecycle callbacks and no guard run. Removed pages are
+        /// deactivated top first under their own retention, so when several
+        /// KeepAlive pages of one kind move into the cache in one call, the
+        /// deepest of them — processed last — wins the cache slot and the
+        /// ones processed before it are evicted and disposed.
+        /// </summary>
+        public int PredictRemove(RegionModel m, PageKind kind, P? param)
+        {
+            int removed = 0;
+            for (int i = m.Stack.Count - 2; i >= 0; i--)
+            {
+                var e = m.Stack[i];
+                if (e.Kind != kind)
+                {
+                    continue;
+                }
+
+                if (param is not null && !Equals(e.Param, param))
+                {
+                    continue;
+                }
+
+                m.Stack.RemoveAt(i);
+                PopDisposeOrCache(m, e);
+                removed++;
+            }
+
+            return removed;
         }
 
         public void PredictClearCache(RegionModel m)
