@@ -353,7 +353,11 @@ two ways:
   refuse — a navigation. Its verdict is final for that candidate. Use it
   when identity lives in the instance's current state rather than in the
   stored parameter, e.g. a document whose file was renamed through Save As
-  after it was opened.
+  after it was opened. Recognition is not serialized with page disposal:
+  a candidate's page scope may be disposed concurrently on another thread
+  (a concurrent `Remove`, cache clear, or service disposal) while the
+  method runs, so it must not rely on services captured from its page
+  scope still being alive — decide from the instance's own state.
 
 If no candidate is recognized, a new instance is created. An existing
 instance is never reused just because it has the right type — that is what
