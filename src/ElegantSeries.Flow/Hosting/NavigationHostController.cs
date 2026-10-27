@@ -35,10 +35,11 @@ namespace ElegantSeries.Flow.Hosting;
 /// setter, or the dispatcher.
 /// </para>
 /// <para>
-/// Threading: <see cref="Attach(INavigationService)"/>/<see cref="Detach"/> are
-/// serialized; the navigation callback is filtered and then marshaled to the UI
-/// thread through <see cref="IDispatcher"/>. No lock is held while user code
-/// (the view factory or the show callback) runs.
+/// Threading: <see cref="Attach(INavigationService)"/>/<see cref="Detach"/>/
+/// <see cref="Close"/> are serialized under one lock; the navigation callback
+/// is filtered and then marshaled to the UI thread through
+/// <see cref="IDispatcher"/>. No lock is held while user code (the view
+/// factory or the show callback) runs.
 /// </para>
 /// </remarks>
 /// <typeparam name="TView">The view type.</typeparam>
@@ -57,6 +58,7 @@ internal sealed class NavigationHostController<TView> where TView : class
     private readonly Lock _eventLock = new();
     private INavigationService? _navigationService;
     private IDisposable? _navigatedSubscription;
+    private bool _closed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="NavigationHostController{TView}"/> class.
@@ -91,7 +93,9 @@ internal sealed class NavigationHostController<TView> where TView : class
 
     /// <summary>
     /// Subscribes to the navigation service's <see cref="INavigationService.RegionNavigated"/>
-    /// event, replacing any previous subscription.
+    /// event, replacing any previous subscription. After <see cref="Close"/> has
+    /// been called, <see cref="Attach"/> is a no-op: a closed controller can
+    /// never be subscribed again.
     /// </summary>
     /// <param name="navigationService">The navigation service to observe.</param>
     /// <exception cref="ArgumentNullException"><paramref name="navigationService"/> is <see langword="null"/>.</exception>
@@ -101,6 +105,11 @@ internal sealed class NavigationHostController<TView> where TView : class
 
         lock (_eventLock)
         {
+            if (_closed)
+            {
+                return;
+            }
+
             DetachLocked();
             _navigationService = navigationService;
             _navigatedSubscription = navigationService.SubscribeRegionNavigated(OnRegionNavigated);
@@ -109,11 +118,31 @@ internal sealed class NavigationHostController<TView> where TView : class
 
     /// <summary>
     /// Unsubscribes from the navigation service. Safe to call multiple times.
+    /// The controller can be attached again afterwards; for a permanent,
+    /// irreversible shutdown use <see cref="Close"/>.
     /// </summary>
     public void Detach()
     {
         lock (_eventLock)
         {
+            DetachLocked();
+        }
+    }
+
+    /// <summary>
+    /// Unsubscribes from the navigation service and permanently closes the
+    /// controller: later <see cref="Attach"/> calls are ignored. Safe to call
+    /// multiple times, from any thread. The platform hosts call this from
+    /// their <c>Dispose</c>: because the closed check and the subscription
+    /// change run under the same lock, a property change that passed the
+    /// host's own disposed check just before disposal cannot re-subscribe
+    /// the controller after disposal completes.
+    /// </summary>
+    public void Close()
+    {
+        lock (_eventLock)
+        {
+            _closed = true;
             DetachLocked();
         }
     }
@@ -143,18 +172,32 @@ internal sealed class NavigationHostController<TView> where TView : class
         {
             // A transient empty binding value clears the host instead of
             // throwing from GetCurrentViewModel's argument validation.
-            _clearView();
+            if (!IsClosed())
+            {
+                _clearView();
+            }
             return;
         }
 
         var viewModel = service.GetCurrentViewModel(regionName);
         if (viewModel is null)
         {
-            _clearView();
+            if (!IsClosed())
+            {
+                _clearView();
+            }
             return;
         }
 
         ApplyNavigation(viewModel, service, regionName);
+    }
+
+    private bool IsClosed()
+    {
+        lock (_eventLock)
+        {
+            return _closed;
+        }
     }
 
     private void DetachLocked()
@@ -257,6 +300,14 @@ internal sealed class NavigationHostController<TView> where TView : class
 
     private void ApplyNavigation(INavigationViewModel viewModel, INavigationService? service, string? regionName)
     {
+        if (IsClosed())
+        {
+            // The host was disposed after this navigation was captured but
+            // before it could be applied: no view factory, no failure hook —
+            // no user code runs on a disposed host.
+            return;
+        }
+
         TView view;
         try
         {
@@ -279,16 +330,30 @@ internal sealed class NavigationHostController<TView> where TView : class
             // swallowed, so one failure cannot surface as three different
             // outcomes — a subscriber error on the synchronous path, an
             // unhandled dispatcher exception on the queued path, or a throw
-            // out of a property setter on the refresh path.
-            try
+            // out of a property setter on the refresh path. A failure that
+            // lands after closure is not reported at all: the hook is user
+            // code and must not run on a disposed host.
+            if (!IsClosed())
             {
-                _onViewCreationFailed?.Invoke(viewModel, ex);
-            }
-            catch
-            {
-                // Terminal channel: nowhere further to report.
+                try
+                {
+                    _onViewCreationFailed?.Invoke(viewModel, ex);
+                }
+                catch
+                {
+                    // Terminal channel: nowhere further to report.
+                }
             }
 
+            return;
+        }
+
+        if (IsClosed())
+        {
+            // The host was disposed while this navigation was being applied
+            // (a cross-thread Dispose racing an in-flight refresh, property
+            // change or dispatcher callback): the created view is dropped
+            // instead of being shown on the disposed host.
             return;
         }
 

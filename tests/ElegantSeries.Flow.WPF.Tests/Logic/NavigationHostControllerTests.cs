@@ -325,6 +325,195 @@ public sealed class NavigationHostControllerTests
     }
 
     [Fact]
+    public void Detach_ThenAttach_Resubscribes()
+    {
+        // Detach is the reversible unsubscribe (visual-tree detach, service
+        // switch): attaching again afterwards must work exactly as before.
+        var harness = new Harness();
+        harness.Attach();
+        harness.Controller.Detach();
+        harness.Attach();
+
+        harness.Service.RaiseNavigated("MainRegion", new StubViewModel());
+
+        Assert.Single(harness.Shown);
+    }
+
+    [Fact]
+    public void Close_UnsubscribesAndBlocksLaterAttach()
+    {
+        // Close models host disposal racing an in-flight property change:
+        // the change passed the host's disposed check just before Dispose
+        // ran and calls Attach afterwards. The disposed host must stay
+        // unsubscribed, or the (usually singleton) service keeps it alive
+        // and keeps delivering events to it.
+        var harness = new Harness();
+        harness.Attach();
+        harness.Controller.Close();
+
+        harness.Attach(); // The racing property change lands after disposal.
+
+        harness.Service.RaiseNavigated("MainRegion", new StubViewModel());
+
+        Assert.Empty(harness.Shown);
+    }
+
+    [Fact]
+    public void Close_IsIdempotent()
+    {
+        var harness = new Harness();
+        harness.Attach();
+
+        harness.Controller.Close();
+        harness.Controller.Close(); // Must not throw.
+
+        harness.Service.RaiseNavigated("MainRegion", new StubViewModel());
+        Assert.Empty(harness.Shown);
+    }
+
+    [Fact]
+    public async Task Refresh_RacingClose_ViewNotShown()
+    {
+        // A refresh (or property change) already in flight when the host is
+        // disposed from another thread has captured the service and is busy
+        // creating the view. When creation finishes, the closed check must
+        // drop the view instead of showing it on the disposed host.
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var service = new FakeNavigationService();
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var factoryEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factoryRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ =>
+            {
+                factoryEntered.TrySetResult();
+                factoryRelease.Task.GetAwaiter().GetResult();
+                return new object();
+            },
+            showView: (view, vm) => shown.Add((view, vm)),
+            clearView: () => { });
+        controller.Attach(service);
+        service.CurrentByRegion["MainRegion"] = new StubViewModel();
+
+        var refreshTask = Task.Run(() => controller.Refresh(), TestContext.Current.CancellationToken);
+        await factoryEntered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        controller.Close();
+        factoryRelease.TrySetResult();
+        await refreshTask.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        Assert.Empty(shown);
+    }
+
+    [Fact]
+    public async Task EventCapturedBeforeClose_FactoryNotInvoked()
+    {
+        // The event handler is already running (blocked in the region-name
+        // provider, its first step) when the host is disposed from another
+        // thread. When the handler resumes, it must not reach the view
+        // factory: no user code runs on a disposed host.
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var service = new FakeNavigationService();
+        int factoryCalls = 0;
+        var providerEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var providerRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int providerCalls = 0;
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () =>
+            {
+                if (Interlocked.Increment(ref providerCalls) == 1)
+                {
+                    providerEntered.TrySetResult();
+                    providerRelease.Task.GetAwaiter().GetResult();
+                }
+                return "MainRegion";
+            },
+            viewFactory: _ => { factoryCalls++; return new object(); },
+            showView: (_, _) => { },
+            clearView: () => { });
+        controller.Attach(service);
+
+        var raiseTask = Task.Run(
+            () => service.RaiseNavigated("MainRegion", new StubViewModel()),
+            TestContext.Current.CancellationToken);
+        await providerEntered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        controller.Close();
+        providerRelease.TrySetResult();
+        await raiseTask.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, factoryCalls);
+    }
+
+    [Fact]
+    public async Task FactoryThrowsAfterClose_FailureHookNotInvoked()
+    {
+        // View creation is in flight when the host is disposed, and the
+        // factory then throws. The failure hook is user code: after closure
+        // it must not run on the disposed host.
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var service = new FakeNavigationService();
+        int hookCalls = 0;
+        var factoryEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factoryRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ =>
+            {
+                factoryEntered.TrySetResult();
+                factoryRelease.Task.GetAwaiter().GetResult();
+                throw new InvalidOperationException("factory boom");
+            },
+            showView: (_, _) => { },
+            clearView: () => { },
+            onViewCreationFailed: (_, _) => hookCalls++);
+        controller.Attach(service);
+        service.CurrentByRegion["MainRegion"] = new StubViewModel();
+
+        var refreshTask = Task.Run(() => controller.Refresh(), TestContext.Current.CancellationToken);
+        await factoryEntered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        controller.Close();
+        factoryRelease.TrySetResult();
+        await refreshTask.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, hookCalls);
+    }
+
+    [Fact]
+    public void QueuedCallback_AfterClose_NotApplied()
+    {
+        // An event already posted to the dispatcher when the host is
+        // disposed must not apply its (stale) page afterwards: Close drops
+        // the current service, so the execution-time re-check sees the
+        // callback as superseded.
+        var dispatcher = new FakeDispatcher(hasAccess: false);
+        var service = new FakeNavigationService();
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (view, vm) => shown.Add((view, vm)),
+            clearView: () => { });
+        controller.Attach(service);
+
+        var vm = new StubViewModel();
+        service.CurrentByRegion["MainRegion"] = vm;
+        service.RaiseNavigated("MainRegion", vm); // passes checks, queued
+        Assert.Equal(1, dispatcher.PostedCount);
+
+        controller.Close();
+        dispatcher.RunPosted();
+
+        Assert.Empty(shown);
+    }
+
+    [Fact]
     public void Constructor_NullArguments_ThrowArgumentNullException()
     {
         var dispatcher = new FakeDispatcher();
