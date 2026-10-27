@@ -138,6 +138,20 @@ internal sealed class NavigationHostController<TView> where TView : class
     /// host's own disposed check just before disposal cannot re-subscribe
     /// the controller after disposal completes.
     /// </summary>
+    /// <remarks>
+    /// The guarantee boundary: closure stops every application of a
+    /// navigation that has not already passed its final closed check —
+    /// applications starting after closure, and dispatcher callbacks
+    /// queued before it, are dropped at those checks and run no user code.
+    /// An application that passed its final check on another thread just
+    /// before <see cref="Close"/> runs may still deliver its one show,
+    /// clear, or failure callback: the checks and the UI callbacks are
+    /// deliberately not serialized under a single lock (no lock is held
+    /// while user code runs), so closure is not a barrier over operations
+    /// already in flight. The platform hosts tolerate that single late
+    /// callback: it only sets or clears the content of a host that is
+    /// already being discarded, and no subscription survives it.
+    /// </remarks>
     public void Close()
     {
         lock (_eventLock)
