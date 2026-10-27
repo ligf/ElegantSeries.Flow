@@ -6378,12 +6378,20 @@ public class NavigationServiceTests
         var enterMethod = entryType.GetMethod("EnterInFlightLifecycle")!;
         var gate = (Task)enterMethod.Invoke(entry, null)!;
 
-        var disposeTask = Task.Run(async () => await ((IAsyncDisposable)nav).DisposeAsync());
+        var disposeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var disposeTask = Task.Run(async () =>
+        {
+            disposeStarted.TrySetResult();
+            await ((IAsyncDisposable)nav).DisposeAsync();
+        });
 
         // DisposeAsync must wait for the pending entry's gate before releasing
         // its scope: no completion and no disposal while the gate is open.
-        await Task.Delay(300);
-        Assert.False(disposeTask.IsCompleted);
+        // The wait is staged on the started signal plus a bounded window so
+        // the assertion cannot pass vacuously on a starved scheduler.
+        await disposeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var completedFirst = await Task.WhenAny(disposeTask, Task.Delay(300));
+        Assert.NotSame(disposeTask, completedFirst);
         Assert.Equal(0, PendingGateViewModel.DisposeCount);
 
         var exitMethod = entryType.GetMethod("ExitInFlightLifecycle")!;
@@ -6424,11 +6432,19 @@ public class NavigationServiceTests
         var navTask = Task.Run(() => nav.NavigateToAsync<TestDetailViewModel>());
         await vm.CallbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
-        var disposeTask = Task.Run(async () => await ((IAsyncDisposable)nav).DisposeAsync());
+        var disposeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var disposeTask = Task.Run(async () =>
+        {
+            disposeStarted.TrySetResult();
+            await ((IAsyncDisposable)nav).DisposeAsync();
+        });
 
         // The From callback is still running: its page scope must not have
-        // been released underneath it.
-        await Task.Delay(300);
+        // been released underneath it. Staged on the started signal plus a
+        // bounded window, like the pending-gate test above.
+        await disposeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var completedFirst = await Task.WhenAny(disposeTask, Task.Delay(300));
+        Assert.NotSame(disposeTask, completedFirst);
         Assert.Equal(0, GateOrderingViewModel.DisposeCount);
 
         vm.ReleaseCallback();
@@ -6460,6 +6476,102 @@ public class NavigationServiceTests
         {
             DisposedBeforeCallbackRelease = !_release.Task.IsCompleted;
             Interlocked.Increment(ref DisposeCount);
+        }
+    }
+
+    [Fact]
+    public async Task DisposeAsync_DeferredDisposalRegisteredDuringDrain_IsAwaitedBeforeReturn()
+    {
+        // Shutdown drains deferred scope disposals until none are in flight:
+        // a deferral registered while DisposeAsync is already waiting (work
+        // that was in flight when disposal began — staged here by invoking
+        // the tracker directly, as a self-disposing page would) must also
+        // complete before DisposeAsync returns. With a one-time snapshot,
+        // the second deferral would be missed and DisposeAsync would return
+        // as soon as the first one finished.
+        DrainProbe.DisposeCount = 0;
+        DrainProbe.OnDisposed = null;
+
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddScoped<DrainProbe>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        var trackMethod = typeof(NavigationService).GetMethod("TrackDeferredDisposal",
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+        var scopes = new List<IServiceScope>();
+        void RegisterDeferred(TaskCompletionSource gate)
+        {
+            var scope = scopeFactory.CreateScope();
+            scopes.Add(scope);
+            // Force the probe's creation so its disposal is observable.
+            _ = scope.ServiceProvider.GetRequiredService<DrainProbe>();
+            trackMethod.Invoke(nav, [gate.Task, scope, new TestHomeViewModel(), "MainRegion", null]);
+        }
+
+        // First deferral: registered before disposal, its gate holds it open.
+        var gate1 = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        RegisterDeferred(gate1);
+
+        // The second deferral is registered from inside the first scope's
+        // disposal: that runs on the first deferral's own task, while the
+        // drain is parked awaiting exactly that task (see the staging
+        // below) and before the task completes — so once the drain is
+        // parked, the registration lands strictly after its first snapshot.
+        var gate2 = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        DrainProbe.OnDisposed = () =>
+        {
+            // One-shot: the second scope's disposal must not register a third.
+            DrainProbe.OnDisposed = null;
+            RegisterDeferred(gate2);
+        };
+
+        try
+        {
+            var disposeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var disposeTask = Task.Run(async () =>
+            {
+                disposeStarted.TrySetResult();
+                await ((IAsyncDisposable)nav).DisposeAsync();
+            });
+
+            // Park DisposeAsync in the drain first: everything between the
+            // started signal and the drain in an empty service is synchronous
+            // in-memory work, and the drain cannot pass the first deferral
+            // while its gate is closed. Only then release the gate.
+            await disposeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await Task.Delay(300);
+
+            // Releasing the first gate finishes the first deferral, which
+            // registers the second one on its way. DisposeAsync must not
+            // return yet: the drain has to pick up the second deferral.
+            gate1.TrySetResult();
+            var completedFirst = await Task.WhenAny(disposeTask, Task.Delay(300));
+            Assert.NotSame(disposeTask, completedFirst);
+            Assert.Equal(1, DrainProbe.DisposeCount);
+
+            // Releasing the second gate lets the drain empty and DisposeAsync return.
+            gate2.TrySetResult();
+            await disposeTask.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(2, DrainProbe.DisposeCount);
+        }
+        finally
+        {
+            DrainProbe.OnDisposed = null;
+        }
+    }
+
+    private sealed class DrainProbe : IDisposable
+    {
+        public static int DisposeCount;
+        public static Action? OnDisposed;
+
+        public void Dispose()
+        {
+            Interlocked.Increment(ref DisposeCount);
+            OnDisposed?.Invoke();
         }
     }
 

@@ -146,8 +146,9 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <summary>
     /// Tracks deferred scope disposals (from reentrant navigation or sync APIs
     /// that cannot block). Each task waits for its gate then disposes the scope.
-    /// Guarded by <see cref="_deferredLock"/>. <see cref="DisposeAsync"/> waits
-    /// for all tracked tasks.
+    /// Guarded by <see cref="_deferredLock"/>. <see cref="DisposeAsync"/> drains
+    /// the tracked set until no incomplete task remains at its final check; a
+    /// task registered after that check still completes in the background.
     /// </summary>
     private readonly List<Task> _deferredDisposalTasks = [];
     private readonly Lock _deferredLock = new();
@@ -227,8 +228,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         });
 
         // Register the task BEFORE removing from _pendingScopeDisposals: DisposeAsync
-        // snapshots _deferredDisposalTasks; if the scope becomes invisible first,
-        // DisposeAsync could miss both the scope and the task.
+        // drains _deferredDisposalTasks; if the scope becomes invisible first,
+        // the drain could miss both the scope and the task.
         lock (_deferredLock)
         {
             _deferredDisposalTasks.Add(task);
@@ -250,18 +251,38 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     }
 
     /// <summary>
-    /// Waits for all tracked deferred disposals to complete.
+    /// Waits for all tracked deferred disposals to complete, including any
+    /// registered while waiting: the tracked set is drained until a full
+    /// snapshot shows no incomplete task left. Registrations can only come
+    /// from work already in flight when disposal began (a page disposing
+    /// its own scope from within a lifecycle callback); that work stops at
+    /// its next phase boundary once the service is disposed, so the drain
+    /// converges. A deferral registered only after the final snapshot is
+    /// not waited for: it still completes in the background and claims its
+    /// scope through the disposed-scope table exactly once.
     /// </summary>
     private async Task WaitForDeferredDisposalsAsync()
     {
-        Task[] tasks;
-        lock (_deferredLock)
+        while (true)
         {
-            tasks = [.. _deferredDisposalTasks];
-        }
-        if (tasks.Length > 0)
-        {
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+            List<Task> incomplete = [];
+            lock (_deferredLock)
+            {
+                foreach (var task in _deferredDisposalTasks)
+                {
+                    if (!task.IsCompleted)
+                    {
+                        incomplete.Add(task);
+                    }
+                }
+            }
+
+            if (incomplete.Count == 0)
+            {
+                return;
+            }
+
+            await Task.WhenAll(incomplete).ConfigureAwait(false);
         }
     }
 
@@ -1089,6 +1110,17 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// Best-effort: every page scope is attempted even if one of them throws.
     /// Collected exceptions are rethrown after cleanup and events.
     /// <para>
+    /// Completion: when the returned task completes, every page scope
+    /// collected at disposal has been released, and every deferred scope
+    /// disposal registered before the final drain check has finished. A
+    /// deferred disposal registered after that check by work that was
+    /// already in flight — only possible for a page disposing its own scope
+    /// from within a lifecycle callback — is not waited for; it still runs
+    /// to completion in the background, exactly once, and its
+    /// <see cref="INavigationService.ViewModelReleased"/> notification may
+    /// arrive after disposal.
+    /// </para>
+    /// <para>
     /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
     /// within a page lifecycle callback. Call it outside the callback instead.
     /// </para>
@@ -1208,10 +1240,12 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         DisposeLifecycleSources(entriesToCancel);
 
         // Note: _disposedScopes needs no clearing. A navigation that was
-        // in-flight during DisposeAsync may call TrackDeferredDisposal after the
-        // WaitForDeferredDisposalsAsync snapshot; its task still claims scopes
-        // through the table for exactly-once coordination. The table holds scopes
-        // weakly and is released with the service itself.
+        // in-flight during DisposeAsync may call TrackDeferredDisposal while
+        // the drain above is running; the drain waits for registrations that
+        // land before its final snapshot. One registered only afterwards
+        // still claims its scope through the table for exactly-once
+        // coordination. The table holds scopes weakly and is released with
+        // the service itself.
 
         QueueCacheClearedEvents(targets, pendingEvents);
         RaiseEvents(pendingEvents, ReportSubscriberError);

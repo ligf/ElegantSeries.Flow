@@ -123,7 +123,10 @@ namespace ElegantSeries.Flow.Navigation;
 /// activity is raised, but work already in flight at disposal — a deferred
 /// scope disposal, or a guard fault the pump had abandoned — can still
 /// deliver its <c>ViewModelReleased</c> or <c>SubscriberError</c>
-/// notification afterwards.
+/// notification afterwards. Deferred scope disposals are waited for by
+/// <c>DisposeAsync</c> when they are registered before its final drain
+/// check; one registered afterwards by work that was already in flight
+/// still completes in the background, exactly once.
 /// </para>
 /// <para>
 /// This interface does not extend <see cref="IDisposable"/> or
