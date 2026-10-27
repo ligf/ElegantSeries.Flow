@@ -146,8 +146,9 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <summary>
     /// Tracks deferred scope disposals (from reentrant navigation or sync APIs
     /// that cannot block). Each task waits for its gate then disposes the scope.
-    /// Guarded by <see cref="_deferredLock"/>. <see cref="DisposeAsync"/> waits
-    /// for all tracked tasks.
+    /// Guarded by <see cref="_deferredLock"/>. <see cref="DisposeAsync"/> drains
+    /// the tracked set until no incomplete task remains at its final check; a
+    /// task registered after that check still completes in the background.
     /// </summary>
     private readonly List<Task> _deferredDisposalTasks = [];
     private readonly Lock _deferredLock = new();
@@ -227,8 +228,8 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         });
 
         // Register the task BEFORE removing from _pendingScopeDisposals: DisposeAsync
-        // snapshots _deferredDisposalTasks; if the scope becomes invisible first,
-        // DisposeAsync could miss both the scope and the task.
+        // drains _deferredDisposalTasks; if the scope becomes invisible first,
+        // the drain could miss both the scope and the task.
         lock (_deferredLock)
         {
             _deferredDisposalTasks.Add(task);
