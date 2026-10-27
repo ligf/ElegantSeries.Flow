@@ -6323,6 +6323,147 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task DisposeAsync_PendingScopeEntryGateOpen_WaitsForGateBeforeDisposingScope()
+    {
+        // A scope whose disposal is recorded as pending (its last cache/stack
+        // reference went away while a destroy was outstanding) is collected by
+        // DisposeAsync through the pending records — its entry is on no stack
+        // and in no cache anymore. If that entry still has a lifecycle callback
+        // in flight, DisposeAsync must cancel and wait for its gate exactly
+        // like for stacked entries, or it releases the scope while the callback
+        // still uses it. The pending state is staged directly (reflection):
+        // the record a deactivation plan leaves behind for a popped entry,
+        // with the entry's gate held open.
+        PendingGateViewModel.DisposeCount = 0;
+
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<PendingGateViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<PendingGateViewModel>(retention: NavigationRetention.KeepAlive);
+        var entry = GetNavigationEntry(nav, "MainRegion", typeof(PendingGateViewModel));
+        Assert.NotNull(entry);
+        var entryType = entry.GetType();
+        var scope = entryType.GetProperty("Scope")!.GetValue(entry)!;
+        var viewModel = entryType.GetProperty("ViewModel")!.GetValue(entry)!;
+
+        // Detach the entry from its stack (the state a completed hop leaves
+        // behind) and record its scope as pending, as BuildDeactivatePlan does
+        // for a destroyed entry whose scope outlives its stack presence.
+        var stacksField = typeof(NavigationService).GetField("_regionStacks",
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var stacks = (System.Collections.IDictionary)stacksField.GetValue(nav)!;
+        var existingStack = stacks["MainRegion"]!;
+        var rebuilt = Activator.CreateInstance(existingStack.GetType())!;
+        stacks["MainRegion"] = rebuilt;
+
+        var pendingType = typeof(NavigationService).GetNestedType("PendingDisposal",
+            BindingFlags.NonPublic)!;
+        var entriesList = Activator.CreateInstance(
+            typeof(List<>).MakeGenericType(entryType))!;
+        ((System.Collections.IList)entriesList).Add(entry);
+        var record = Activator.CreateInstance(pendingType,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null,
+            args: [viewModel, new HashSet<string> { "MainRegion" }, entriesList],
+            culture: null)!;
+        var pendingField = typeof(NavigationService).GetField("_pendingScopeDisposals",
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var pending = (System.Collections.IDictionary)pendingField.GetValue(nav)!;
+        pending[scope] = record;
+
+        // A lifecycle callback of the pending entry is still in flight.
+        var enterMethod = entryType.GetMethod("EnterInFlightLifecycle")!;
+        var gate = (Task)enterMethod.Invoke(entry, null)!;
+
+        var disposeTask = Task.Run(async () => await ((IAsyncDisposable)nav).DisposeAsync());
+
+        // DisposeAsync must wait for the pending entry's gate before releasing
+        // its scope: no completion and no disposal while the gate is open.
+        await Task.Delay(300);
+        Assert.False(disposeTask.IsCompleted);
+        Assert.Equal(0, PendingGateViewModel.DisposeCount);
+
+        var exitMethod = entryType.GetMethod("ExitInFlightLifecycle")!;
+        exitMethod.Invoke(entry, new object[] { gate });
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(1, PendingGateViewModel.DisposeCount);
+    }
+
+    private sealed class PendingGateViewModel : NavigationViewModelBase, IDisposable
+    {
+        public static int DisposeCount;
+
+        public void Dispose() => Interlocked.Increment(ref DisposeCount);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_InFlightCallback_ScopeDisposedOnlyAfterCallbackCompletes()
+    {
+        // DisposeAsync's declared semantics: in-flight lifecycle callbacks are
+        // waited for (with a timeout) before their page scopes are released.
+        // The exactly-once tests cannot catch an ordering violation, so this
+        // test asserts the scope is untouched while the callback is blocked
+        // and that disposal happens only after it completed.
+        GateOrderingViewModel.DisposeCount = 0;
+        GateOrderingViewModel.DisposedBeforeCallbackRelease = false;
+
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<GateOrderingViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<GateOrderingViewModel>();
+        var vm = Assert.IsType<GateOrderingViewModel>(nav.GetCurrentViewModel());
+
+        var navTask = Task.Run(() => nav.NavigateToAsync<TestDetailViewModel>());
+        await vm.CallbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var disposeTask = Task.Run(async () => await ((IAsyncDisposable)nav).DisposeAsync());
+
+        // The From callback is still running: its page scope must not have
+        // been released underneath it.
+        await Task.Delay(300);
+        Assert.Equal(0, GateOrderingViewModel.DisposeCount);
+
+        vm.ReleaseCallback();
+        await navTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(1, GateOrderingViewModel.DisposeCount);
+        Assert.False(GateOrderingViewModel.DisposedBeforeCallbackRelease);
+    }
+
+    private sealed class GateOrderingViewModel : NavigationViewModelBase, INavigationAwareAsync, IDisposable
+    {
+        public static int DisposeCount;
+        public static bool DisposedBeforeCallbackRelease;
+        public readonly TaskCompletionSource CallbackEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public async Task OnNavigatedFromAsync(CancellationToken cancellationToken)
+        {
+            CallbackEntered.TrySetResult();
+            await _release.Task.ConfigureAwait(false);
+        }
+
+        public void ReleaseCallback() => _release.TrySetResult();
+
+        public void Dispose()
+        {
+            DisposedBeforeCallbackRelease = !_release.Task.IsCompleted;
+            Interlocked.Increment(ref DisposeCount);
+        }
+    }
+
+    [Fact]
     public async Task RetiredCts_DoesNotAccumulateForSyncOnlyViewModel()
     {
         // For entries with only synchronous (or no) lifecycle callbacks,

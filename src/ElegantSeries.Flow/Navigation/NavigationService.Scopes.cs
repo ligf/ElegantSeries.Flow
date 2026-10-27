@@ -59,6 +59,7 @@ public sealed partial class NavigationService
     {
         var regionsByScope = new Dictionary<IServiceScope, HashSet<string>>(ReferenceEqualityComparer.Instance);
         var viewModelByScope = new Dictionary<IServiceScope, INavigationViewModel>(ReferenceEqualityComparer.Instance);
+        var entriesByScope = new Dictionary<IServiceScope, List<NavigationEntry>>(ReferenceEqualityComparer.Instance);
         foreach (var entry in removedEntries)
         {
             var scope = entry.Value.Scope;
@@ -67,9 +68,11 @@ public sealed partial class NavigationService
                 regions = [];
                 regionsByScope.Add(scope, regions);
                 viewModelByScope.Add(scope, entry.Value.ViewModel);
+                entriesByScope.Add(scope, []);
             }
 
             regions.Add(entry.Key.Region);
+            AddPendingEntry(entriesByScope[scope], entry.Value);
         }
 
         List<ScopeDisposalTarget> readyToDispose = [];
@@ -80,10 +83,15 @@ public sealed partial class NavigationService
                 if (_pendingScopeDisposals.TryGetValue(scope, out var pending))
                 {
                     pending.Regions.UnionWith(regions);
+                    foreach (var removedEntry in entriesByScope[scope])
+                    {
+                        AddPendingEntry(pending.Entries, removedEntry);
+                    }
                 }
                 else
                 {
-                    _pendingScopeDisposals.Add(scope, new PendingDisposal(viewModelByScope[scope], new HashSet<string>(regions)));
+                    _pendingScopeDisposals.Add(scope, new PendingDisposal(
+                        viewModelByScope[scope], new HashSet<string>(regions), entriesByScope[scope]));
                 }
 
                 continue;
@@ -295,10 +303,16 @@ public sealed partial class NavigationService
     /// <summary>
     /// Takes every page scope owned by the service (region stacks, KeepAlive cache and
     /// deferred disposals) and clears all of them. Each distinct scope is returned once.
-    /// The caller must not hold <see cref="_stateLock"/>.
+    /// <paramref name="pendingEntries"/> receives every entry recorded against a
+    /// pending scope: those entries are no longer on a stack or in the cache, but
+    /// their lifecycle callbacks may still be in flight, so a shutdown that takes
+    /// their scopes must cancel their tokens and wait for their gates exactly as
+    /// it does for stacked and cached entries. The caller must not hold
+    /// <see cref="_stateLock"/>.
     /// </summary>
-    private List<ScopeDisposalTarget> TakeAllScopesForDisposal()
+    private List<ScopeDisposalTarget> TakeAllScopesForDisposal(out List<NavigationEntry> pendingEntries)
     {
+        pendingEntries = [];
         var regionsByScope = new Dictionary<IServiceScope, HashSet<string>>(ReferenceEqualityComparer.Instance);
         var viewModelByScope = new Dictionary<IServiceScope, INavigationViewModel>(ReferenceEqualityComparer.Instance);
 
@@ -335,6 +349,11 @@ public sealed partial class NavigationService
                 foreach (var region in pending.Regions)
                 {
                     AddReference(scope, pending.ViewModel, region);
+                }
+
+                foreach (var pendingEntry in pending.Entries)
+                {
+                    AddPendingEntry(pendingEntries, pendingEntry);
                 }
             }
 
@@ -512,8 +531,28 @@ public sealed partial class NavigationService
 
     // ────────────────────── Nested types ──────────────────────
 
-    /// <summary>A page scope whose cache entry was removed while still referenced elsewhere.</summary>
-    private sealed record PendingDisposal(INavigationViewModel ViewModel, HashSet<string> Regions);
+    /// <summary>
+    /// Adds <paramref name="entry"/> to a pending-disposal entry list unless already
+    /// present (reference equality). Lists are shared by reference, so the helper
+    /// serves both a record's own list and a collected shutdown list.
+    /// </summary>
+    private static void AddPendingEntry(List<NavigationEntry> entries, NavigationEntry entry)
+    {
+        if (!entries.Contains(entry))
+        {
+            entries.Add(entry);
+        }
+    }
+
+    /// <summary>
+    /// A page scope whose cache entry was removed while still referenced elsewhere.
+    /// <see cref="Entries"/> tracks every entry object associated with the scope
+    /// (the removed cache entry, an adopting stack entry, an evicted entry), so a
+    /// shutdown taking the scope can find their lifecycle gates even after the
+    /// entries themselves have left every stack and the cache.
+    /// </summary>
+    private sealed record PendingDisposal(
+        INavigationViewModel ViewModel, HashSet<string> Regions, List<NavigationEntry> Entries);
 
     /// <summary>A page scope selected for disposal, with the regions to notify.</summary>
     private sealed record ScopeDisposalTarget(IServiceScope Scope, INavigationViewModel ViewModel, string[] Regions);

@@ -1021,9 +1021,17 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             // risk deadlock on UI threads), but it must signal them to stop before
             // their scopes are released below.
             allEntries = CollectAllEntriesLocked();
-            ctsToCancel = allEntries.Select(e => e.LifecycleCts).ToList();
 
-            targets = TakeAllScopesForDisposal();
+            targets = TakeAllScopesForDisposal(out var pendingEntries);
+            foreach (var pendingEntry in pendingEntries)
+            {
+                // Entries recorded against pending scopes are on no stack or
+                // cache anymore, but their callbacks may still be in flight:
+                // signal them too, like every collected entry.
+                AddPendingEntry(allEntries, pendingEntry);
+            }
+
+            ctsToCancel = allEntries.Select(e => e.LifecycleCts).ToList();
             foreach (var target in targets)
             {
                 // Terminal shutdown: set silently, no PropertyChanged notification needed.
@@ -1113,7 +1121,16 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
             // holding locks (deadlock risk).
             entriesToCancel = CollectAllEntriesLocked();
 
-            targets = TakeAllScopesForDisposal();
+            targets = TakeAllScopesForDisposal(out var pendingEntries);
+            foreach (var pendingEntry in pendingEntries)
+            {
+                // Entries recorded against pending scopes are on no stack or
+                // cache anymore, but their scopes are being taken below: their
+                // in-flight callbacks must be cancelled and waited for exactly
+                // like stacked and cached entries, or their scope could be
+                // released while a callback still uses it.
+                AddPendingEntry(entriesToCancel, pendingEntry);
+            }
             foreach (var target in targets)
             {
                 // Terminal shutdown: set silently, no PropertyChanged notification needed.
