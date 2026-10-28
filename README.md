@@ -494,6 +494,14 @@ possible; if a page owns several critical resources that must all be released, c
 their teardown in the ViewModel (e.g. `OnNavigatedFromAsync` or the ViewModel's own
 `Dispose`) rather than relying on container order.
 
+**Best practice:** prefer `DisposeAsync` when pages use `INavigationAwareAsync`.
+Synchronous `Dispose` cancels lifecycle tokens but does not wait for the callbacks to
+finish before scopes are released; `DisposeAsync` waits for them (bounded by the
+disposal-gate timeout) — and concurrent `DisposeAsync` calls join the same disposal,
+so awaiting any of them means the cleanup has finished, unless a synchronous
+`Dispose` races it: the synchronous path never joins, takes over with its weaker
+guarantee, and the asynchronous operation then completes without waiting for it.
+
 ## Thread safety
 
 All public members are safe to call from any thread. Navigation requests within a

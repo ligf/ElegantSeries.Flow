@@ -444,6 +444,13 @@ navigation.ClearAllCache();            // 或 await navigation.ClearAllCacheAsyn
 **注意：***单个*页面作用域内，DI 容器在第一个抛异常的 disposable 之后就会停下，
 不再释放剩下的服务（平台行为，同步异步都一样）。导航服务只提供跨页面的隔离。
 
+**最佳实践：**页面用了 `INavigationAwareAsync` 时优先用 `DisposeAsync`。
+同步 `Dispose` 只取消生命周期令牌，不等回调结束就释放作用域；`DisposeAsync`
+会等回调结束（上限为释放门超时）——而且并发的 `DisposeAsync` 调用会加入
+同一轮释放，await 其中任何一个都意味着清理已完成；但同步 `Dispose` 若同时
+在跑则除外：同步路径从不加入，它会以较弱的保证接管清理，异步操作随之
+完成、不再等它。
+
 ## 线程安全
 
 所有公开成员都可以在任意线程调用。同一 region 内的导航请求由该 region 的
