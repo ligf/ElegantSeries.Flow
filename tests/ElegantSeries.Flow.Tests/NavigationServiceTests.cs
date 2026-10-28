@@ -475,6 +475,7 @@ public class DisposeInCallbackViewModel : NavigationViewModelBase, INavigationAw
 {
     public Exception? DisposeError { get; private set; }
     public Exception? DisposeAsyncError { get; private set; }
+    public bool DisposeAsyncThrewSynchronously { get; private set; }
 
     public void OnNavigatedTo(object? parameter)
     {
@@ -495,6 +496,17 @@ public class DisposeInCallbackViewModel : NavigationViewModelBase, INavigationAw
         catch (Exception ex)
         {
             DisposeAsyncError = ex;
+        }
+
+        try
+        {
+            // Fire-and-forget: the reentrancy failure is carried by the
+            // returned ValueTask, so discarding it must not throw here.
+            _ = svc.DisposeAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            DisposeAsyncThrewSynchronously = true;
         }
     }
 
@@ -2049,6 +2061,7 @@ public class NavigationServiceTests
         Assert.Contains("Dispose cannot be called from within a page lifecycle callback", disposeError.Message);
         var disposeAsyncError = Assert.IsType<InvalidOperationException>(vm.DisposeAsyncError);
         Assert.Contains("DisposeAsync cannot be called from within a page lifecycle callback", disposeAsyncError.Message);
+        Assert.False(vm.DisposeAsyncThrewSynchronously);
 
         // Neither call disposed the service: it is still usable.
         Assert.True(await nav.NavigateToAsync<TestHomeViewModel>());
@@ -6573,6 +6586,269 @@ public class NavigationServiceTests
             Interlocked.Increment(ref DisposeCount);
             OnDisposed?.Invoke();
         }
+    }
+
+    [Fact]
+    public async Task DisposeAsync_ConcurrentCall_JoinsInFlightDisposal()
+    {
+        // Concurrent DisposeAsync calls share one disposal: the first call
+        // performs the cleanup, and a call that arrives while it is in
+        // flight must not complete before the cleanup has finished — the
+        // documented completion guarantee belongs to every caller, not
+        // only the one doing the work. The first call is parked
+        // deterministically inside the page's own DisposeAsync.
+        BlockingAsyncDisposeViewModel.DisposeAsyncCount = 0;
+
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<BlockingAsyncDisposeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<BlockingAsyncDisposeViewModel>();
+        var vm = Assert.IsType<BlockingAsyncDisposeViewModel>(nav.GetCurrentViewModel());
+
+        var first = Task.Run(async () => await ((IAsyncDisposable)nav).DisposeAsync());
+        await vm.DisposalEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = Task.Run(async () =>
+        {
+            secondStarted.TrySetResult();
+            await ((IAsyncDisposable)nav).DisposeAsync();
+        });
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var completedFirst = await Task.WhenAny(second, Task.Delay(300));
+        Assert.NotSame(second, completedFirst);
+
+        vm.ReleaseDisposal();
+        await first.WaitAsync(TimeSpan.FromSeconds(10));
+        await second.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, BlockingAsyncDisposeViewModel.DisposeAsyncCount);
+
+        // After completion, further calls return immediately and do no work.
+        var third = Task.Run(async () => await ((IAsyncDisposable)nav).DisposeAsync());
+        await third.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, BlockingAsyncDisposeViewModel.DisposeAsyncCount);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_ConcurrentCallers_ObserveSameCollectedError()
+    {
+        // Joining callers do not merely wait for the same completion: they
+        // observe the same collected errors the first caller's cleanup
+        // produced. The first disposal is parked inside the page's
+        // DisposeAsync, the second joins, and both must surface the page's
+        // failure — the same exception object, not two copies.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ThrowingDisposeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<ThrowingDisposeViewModel>();
+        var vm = Assert.IsType<ThrowingDisposeViewModel>(nav.GetCurrentViewModel());
+
+        var first = Task.Run(async () => await ((IAsyncDisposable)nav).DisposeAsync());
+        await vm.DisposalEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = Task.Run(async () =>
+        {
+            secondStarted.TrySetResult();
+            await ((IAsyncDisposable)nav).DisposeAsync();
+        });
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        vm.ReleaseDisposal();
+        var firstError = await Assert.ThrowsAsync<InvalidOperationException>(() => first);
+        var secondError = await Assert.ThrowsAsync<InvalidOperationException>(() => second);
+        Assert.Same(firstError, secondError);
+    }
+
+    private sealed class ThrowingDisposeViewModel : NavigationViewModelBase, IAsyncDisposable
+    {
+        public readonly TaskCompletionSource DisposalEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask DisposeAsync()
+        {
+            DisposalEntered.TrySetResult();
+            await _release.Task.ConfigureAwait(false);
+            throw new InvalidOperationException("ThrowingDisposeViewModel disposal failed.");
+        }
+
+        public void ReleaseDisposal() => _release.TrySetResult();
+    }
+
+    [Fact]
+    public async Task DisposeAsync_AfterSyncDispose_ReturnsImmediatelyAndPerformsNoCleanup()
+    {
+        // A synchronous Dispose performs the cleanup itself (synchronously,
+        // with its weaker callback guarantee). A DisposeAsync that arrives
+        // afterwards has nothing to join and nothing to do.
+        DualDisposeViewModel.SyncDisposeCount = 0;
+        DualDisposeViewModel.AsyncDisposeCount = 0;
+
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<DualDisposeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<DualDisposeViewModel>();
+
+        ((IDisposable)nav).Dispose();
+        Assert.Equal(1, DualDisposeViewModel.SyncDisposeCount);
+        Assert.Equal(0, DualDisposeViewModel.AsyncDisposeCount);
+
+        await ((IAsyncDisposable)nav).DisposeAsync();
+        Assert.Equal(1, DualDisposeViewModel.SyncDisposeCount);
+        Assert.Equal(0, DualDisposeViewModel.AsyncDisposeCount);
+    }
+
+    private sealed class DualDisposeViewModel : NavigationViewModelBase, IDisposable, IAsyncDisposable
+    {
+        public static int SyncDisposeCount;
+        public static int AsyncDisposeCount;
+
+        public void Dispose() => Interlocked.Increment(ref SyncDisposeCount);
+
+        public ValueTask DisposeAsync()
+        {
+            Interlocked.Increment(ref AsyncDisposeCount);
+            return default;
+        }
+    }
+
+    [Fact]
+    public async Task Dispose_SyncCallDuringAsyncDisposal_ReturnsWithoutWaiting()
+    {
+        // The synchronous Dispose never joins an asynchronous disposal: it
+        // returns as soon as the service is marked disposed, even while
+        // the asynchronous cleanup is parked inside a page's disposal.
+        BlockingAsyncDisposeViewModel.DisposeAsyncCount = 0;
+
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<BlockingAsyncDisposeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<BlockingAsyncDisposeViewModel>();
+        var vm = Assert.IsType<BlockingAsyncDisposeViewModel>(nav.GetCurrentViewModel());
+
+        var disposeTask = Task.Run(async () => await ((IAsyncDisposable)nav).DisposeAsync());
+        await vm.DisposalEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var syncStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var syncTask = Task.Run(() =>
+        {
+            syncStarted.TrySetResult();
+            ((IDisposable)nav).Dispose();
+        });
+        await syncStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var syncFinishedFirst = await Task.WhenAny(syncTask, Task.Delay(300));
+        Assert.Same(syncTask, syncFinishedFirst);
+
+        vm.ReleaseDisposal();
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, BlockingAsyncDisposeViewModel.DisposeAsyncCount);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_FromCallbackWhileDisposalInFlight_ReturnsSilently()
+    {
+        // Once an asynchronous disposal has begun, it waits on the gates
+        // of in-flight callbacks. A callback that itself calls DisposeAsync
+        // in that window must neither be thrown into (its remaining code
+        // still matters) nor made to await the operation that is waiting
+        // on it: the call returns silently, as it did when the disposed
+        // flag short-circuited every later call.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ReentrantCallbackViewModel>();
+        services.AddTransient<TestDetailViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<ReentrantCallbackViewModel>();
+        var vm = Assert.IsType<ReentrantCallbackViewModel>(nav.GetCurrentViewModel());
+
+        var navTask = Task.Run(() => nav.NavigateToAsync<TestDetailViewModel>());
+        await vm.CallbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var disposeTask = Task.Run(async () => await ((IAsyncDisposable)nav).DisposeAsync());
+
+        // Wait until the disposal has actually begun — it clears the
+        // current page when it claims the scopes — before letting the
+        // callback call back into DisposeAsync.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (nav.GetCurrentViewModel() is not null)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "The disposal did not begin in time.");
+            await Task.Delay(10);
+        }
+
+        vm.ReleaseCallback();
+        var releasedAt = DateTime.UtcNow;
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await navTask.WaitAsync(TimeSpan.FromSeconds(10));
+        var elapsed = DateTime.UtcNow - releasedAt;
+
+        Assert.True(vm.InnerCallReturned);
+        Assert.False(vm.InnerCallThrew);
+        // The silent return is immediate: had the callback instead joined
+        // the disposal that waits on it, the cleanup would only proceed
+        // after the 5-second disposal-gate timeout (and report it).
+        Assert.True(elapsed < TimeSpan.FromSeconds(4),
+            $"The disposal took {elapsed}; the callback's call appears to have joined it.");
+    }
+
+    private sealed class ReentrantCallbackViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public readonly TaskCompletionSource CallbackEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool InnerCallReturned { get; private set; }
+        public bool InnerCallThrew { get; private set; }
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public async Task OnNavigatedFromAsync(CancellationToken cancellationToken)
+        {
+            // Capture the service now: disposal detaches it (Navigation
+            // becomes null) when it claims the scopes.
+            var service = (NavigationService)Navigation!;
+            CallbackEntered.TrySetResult();
+            await _release.Task.ConfigureAwait(false);
+            try
+            {
+                await service.DisposeAsync().ConfigureAwait(false);
+                InnerCallReturned = true;
+            }
+            catch (InvalidOperationException)
+            {
+                InnerCallThrew = true;
+            }
+        }
+
+        public void ReleaseCallback() => _release.TrySetResult();
+    }
+
+    private sealed class BlockingAsyncDisposeViewModel : NavigationViewModelBase, IAsyncDisposable
+    {
+        public static int DisposeAsyncCount;
+        public readonly TaskCompletionSource DisposalEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask DisposeAsync()
+        {
+            DisposalEntered.TrySetResult();
+            await _release.Task.ConfigureAwait(false);
+            Interlocked.Increment(ref DisposeAsyncCount);
+        }
+
+        public void ReleaseDisposal() => _release.TrySetResult();
     }
 
     [Fact]

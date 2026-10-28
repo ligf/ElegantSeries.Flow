@@ -154,6 +154,18 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     private readonly Lock _deferredLock = new();
 
     /// <summary>
+    /// The single asynchronous disposal operation, shared by every
+    /// <see cref="DisposeAsync"/> caller: the first caller starts it, calls
+    /// that arrive while it is in flight join it, and calls that arrive
+    /// after it has completed return immediately. Guarded by
+    /// <see cref="_disposeTaskLock"/>. Null until the first
+    /// <see cref="DisposeAsync"/> call; a synchronous <see cref="Dispose"/>
+    /// performs its own cleanup and never sets this.
+    /// </summary>
+    private Task? _disposeTask;
+    private readonly Lock _disposeTaskLock = new();
+
+    /// <summary>
     /// Defers a scope disposal until the given gate task completes, then disposes
     /// the scope on the thread pool. The returned task is tracked so
     /// <see cref="DisposeAsync"/> can wait for all deferred disposals.
@@ -996,7 +1008,12 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// callbacks to complete (blocking would risk deadlock on UI threads).
     /// Callers must ensure their <c>INavigationAwareAsync</c> callbacks observe
     /// cancellation promptly and stop touching page dependencies once cancelled.
-    /// For a guaranteed wait, use <see cref="DisposeAsync"/> instead.
+    /// For a guaranteed wait, use <see cref="DisposeAsync"/> instead. This
+    /// method also does not join an asynchronous disposal already in flight:
+    /// it returns as soon as the service is marked disposed, without
+    /// waiting for it — and if it wins the race to the scopes, it takes
+    /// over the cleanup from the asynchronous operation (see the
+    /// concurrency remarks on <see cref="DisposeAsync"/>).
     /// </para>
     /// <para>
     /// Lock timeout: this method waits up to
@@ -1121,18 +1138,114 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// arrive after disposal.
     /// </para>
     /// <para>
+    /// Concurrency: concurrent calls join a single disposal — the first
+    /// call performs the cleanup, every call that arrives while it is in
+    /// flight awaits the same operation (and observes the same collected
+    /// errors), and calls that arrive after it has completed return
+    /// immediately. The one exception is a call from within a page
+    /// lifecycle callback after cleanup has begun, which returns silently
+    /// instead of joining (see Reentrancy). The synchronous
+    /// <see cref="Dispose"/> never joins an
+    /// asynchronous disposal and is never joined by one: it returns as
+    /// soon as the service is marked disposed. If a synchronous
+    /// <see cref="Dispose"/> races an asynchronous disposal, the
+    /// synchronous path takes over the cleanup with its weaker callback
+    /// guarantee, and the asynchronous operation then completes once the
+    /// synchronous path has claimed the scopes — awaiting it no longer
+    /// means every scope has been released. A <see cref="DisposeAsync"/>
+    /// call that arrives while a synchronous <see cref="Dispose"/> is
+    /// still cleaning up, or after it, likewise returns immediately,
+    /// without waiting for the synchronous cleanup.
+    /// </para>
+    /// <para>
     /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
     /// within a page lifecycle callback. Call it outside the callback instead.
+    /// Exception: once cleanup has begun, a call from within a callback
+    /// returns silently instead of throwing — the disposal is already
+    /// waiting on that callback's gate, so throwing into the callback, or
+    /// awaiting the operation that waits on it, would stall the cleanup.
     /// </para>
     /// </remarks>
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (_disposed) return;
-        if (CurrentOwnLifecycleEntry is not null)
-            throw new InvalidOperationException(
-                "DisposeAsync cannot be called from within a page lifecycle callback. " +
-                "Call it outside the callback instead.");
+        TaskCompletionSource? starter = null;
+        Task shared;
+        lock (_disposeTaskLock)
+        {
+            if (_disposeTask is { IsCompleted: true } || (_disposeTask is null && _disposed))
+            {
+                // Disposal already completed — asynchronously, or through a
+                // synchronous Dispose, which never starts this task. Nothing
+                // is left to wait for.
+                return default;
+            }
 
+            if (_disposeTask is { IsCompleted: false } inFlight)
+            {
+                if (CurrentOwnLifecycleEntry is null)
+                {
+                    // A disposal is already in flight: join it instead of
+                    // returning early, so this caller's completion means the
+                    // cleanup has actually finished.
+                    return new ValueTask(inFlight);
+                }
+
+                if (!_disposed)
+                {
+                    // The first caller has not begun cleaning up yet (it is
+                    // still waiting for the navigation lock): the reentrancy
+                    // rule applies exactly as if no disposal was requested.
+                    return ReentrancyFault();
+                }
+
+                // Cleanup has begun, so the disposal is already waiting on
+                // this callback's gate among others: throwing into the
+                // callback, or awaiting the operation that is waiting on
+                // it, would punish the cleanup for the callback's own call.
+                // Return silently, as every call did once the disposed flag
+                // was set before concurrent calls learned to join.
+                return default;
+            }
+
+            if (CurrentOwnLifecycleEntry is not null)
+                return ReentrancyFault();
+
+            starter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _disposeTask = starter.Task;
+            shared = starter.Task;
+        }
+
+        // The core starts OUTSIDE the lock: its synchronous prologue runs
+        // user code (cancellation callbacks, scope disposal, event
+        // subscribers) and must never hold the join lock while doing so —
+        // a joining caller would block on it for the whole cleanup.
+        _ = RunDisposalAsync(starter!);
+        return new ValueTask(shared);
+    }
+
+    // The reentrancy failure travels in the returned ValueTask rather than
+    // throwing synchronously — the same shape this method had when it was
+    // an async method, so a caller that discards the result without
+    // awaiting it is not faulted at the call site.
+    private static ValueTask ReentrancyFault() => new(Task.FromException(new InvalidOperationException(
+        "DisposeAsync cannot be called from within a page lifecycle callback. " +
+        "Call it outside the callback instead.")));
+
+    private async Task RunDisposalAsync(TaskCompletionSource completion)
+    {
+        try
+        {
+            await DisposeAsyncCore().ConfigureAwait(false);
+            completion.TrySetResult();
+        }
+        catch (Exception ex)
+        {
+            completion.TrySetException(ex);
+        }
+    }
+
+    private async Task DisposeAsyncCore()
+    {
         List<Action> pendingEvents = [];
         var errors = new List<Exception>();
         List<ScopeDisposalTarget> targets;
