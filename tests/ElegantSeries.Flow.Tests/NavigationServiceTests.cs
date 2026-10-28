@@ -6633,6 +6633,55 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task DisposeAsync_ConcurrentCallers_ObserveSameCollectedError()
+    {
+        // Joining callers do not merely wait for the same completion: they
+        // observe the same collected errors the first caller's cleanup
+        // produced. The first disposal is parked inside the page's
+        // DisposeAsync, the second joins, and both must surface the page's
+        // failure — the same exception object, not two copies.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<ThrowingDisposeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        await nav.NavigateToAsync<ThrowingDisposeViewModel>();
+        var vm = Assert.IsType<ThrowingDisposeViewModel>(nav.GetCurrentViewModel());
+
+        var first = Task.Run(async () => await ((IAsyncDisposable)nav).DisposeAsync());
+        await vm.DisposalEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = Task.Run(async () =>
+        {
+            secondStarted.TrySetResult();
+            await ((IAsyncDisposable)nav).DisposeAsync();
+        });
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        vm.ReleaseDisposal();
+        var firstError = await Assert.ThrowsAsync<InvalidOperationException>(() => first);
+        var secondError = await Assert.ThrowsAsync<InvalidOperationException>(() => second);
+        Assert.Same(firstError, secondError);
+    }
+
+    private sealed class ThrowingDisposeViewModel : NavigationViewModelBase, IAsyncDisposable
+    {
+        public readonly TaskCompletionSource DisposalEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask DisposeAsync()
+        {
+            DisposalEntered.TrySetResult();
+            await _release.Task.ConfigureAwait(false);
+            throw new InvalidOperationException("ThrowingDisposeViewModel disposal failed.");
+        }
+
+        public void ReleaseDisposal() => _release.TrySetResult();
+    }
+
+    [Fact]
     public async Task DisposeAsync_AfterSyncDispose_ReturnsImmediatelyAndPerformsNoCleanup()
     {
         // A synchronous Dispose performs the cleanup itself (synchronously,

@@ -1142,7 +1142,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// call performs the cleanup, every call that arrives while it is in
     /// flight awaits the same operation (and observes the same collected
     /// errors), and calls that arrive after it has completed return
-    /// immediately. The synchronous <see cref="Dispose"/> never joins an
+    /// immediately. The one exception is a call from within a page
+    /// lifecycle callback after cleanup has begun, which returns silently
+    /// instead of joining (see Reentrancy). The synchronous
+    /// <see cref="Dispose"/> never joins an
     /// asynchronous disposal and is never joined by one: it returns as
     /// soon as the service is marked disposed. If a synchronous
     /// <see cref="Dispose"/> races an asynchronous disposal, the
@@ -1157,6 +1160,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <para>
     /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
     /// within a page lifecycle callback. Call it outside the callback instead.
+    /// Exception: once cleanup has begun, a call from within a callback
+    /// returns silently instead of throwing — the disposal is already
+    /// waiting on that callback's gate, so throwing into the callback, or
+    /// awaiting the operation that waits on it, would stall the cleanup.
     /// </para>
     /// </remarks>
     public ValueTask DisposeAsync()
