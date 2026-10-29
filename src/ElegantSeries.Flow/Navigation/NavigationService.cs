@@ -114,7 +114,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 : "Call it off the UI thread to avoid blocking.";
             throw new TimeoutException(
                 $"{caller} timed out after {_options.SyncLockTimeout.TotalSeconds:F0}s waiting for the navigation lock. " +
-                $"A navigation is likely running a slow lifecycle callback. {advice}");
+                $"Other navigation operations are likely contending for the lock. {advice}");
         }
     }
 
@@ -1018,9 +1018,12 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <para>
     /// Lock timeout: this method waits up to
     /// <see cref="NavigationOptions.SyncLockTimeout"/> (default 2 seconds) for the
-    /// navigation lock. If a navigation is running a slow lifecycle callback, a
-    /// <see cref="TimeoutException"/> is thrown and the service is NOT disposed.
-    /// Prefer <see cref="DisposeAsync"/> on UI threads.
+    /// navigation lock. The lock is only ever held for operations' internal
+    /// bookkeeping — lifecycle callbacks, leave guards and page-scope disposal
+    /// all run outside it — so a timeout means sustained contention for the
+    /// lock. When the wait expires, a <see cref="TimeoutException"/> is thrown
+    /// and the service is NOT disposed. Prefer <see cref="DisposeAsync"/> on
+    /// UI threads.
     /// </para>
     /// <para>
     /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
