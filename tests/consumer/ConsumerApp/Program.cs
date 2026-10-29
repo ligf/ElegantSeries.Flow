@@ -28,9 +28,17 @@ void Check(bool condition, string name)
     }
 }
 
+string? capturedRouteName = null;
 var services = new ServiceCollection();
 services.AddElegantSeriesFlow();
 services.AddElegantSeriesFlowDiagnostics();
+services.AddElegantSeriesFlowRouting(routes => routes
+    .Map<BetaViewModel>("beta")
+    .Map<AlphaViewModel, string>("alpha/{name}", match =>
+    {
+        capturedRouteName = match.Values["name"];
+        return capturedRouteName;
+    }));
 services.AddTransient<AlphaViewModel>();
 services.AddTransient<BetaViewModel>();
 services.AddElegantSeriesFlowViews(views => views.RegisterAttributedViews());
@@ -82,6 +90,15 @@ meterListener.SetMeasurementEventCallback<long>((_, value, _, _) => completedNav
 meterListener.Start();
 Check(await navigation.NavigateToAsync<AlphaViewModel>(), "navigate to Alpha (observed)");
 Check(completedNavigations == 1, "Diagnostics counted the completed navigation");
+
+// The Routing package resolves its router from the same container and
+// navigates by URI through the packaged core.
+var router = provider.GetRequiredService<IRouter>();
+Check(await router.NavigateAsync("beta"), "Routing navigates to Beta by URI");
+Check(navigation.GetCurrentViewModel() is BetaViewModel, "Routing landed on Beta");
+Check(await router.NavigateAsync("alpha/consumer"), "Routing placeholder route navigates");
+Check(capturedRouteName == "consumer", "Routing parameter factory received the placeholder value");
+Check(!await router.TryNavigateAsync("no/such/route"), "Routing TryNavigate returns false for an unknown URI");
 
 Console.WriteLine(failures == 0 ? "CONSUMER PASS" : $"CONSUMER FAIL ({failures} checks failed)");
 return failures == 0 ? 0 : 1;
