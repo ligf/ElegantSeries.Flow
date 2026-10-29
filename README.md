@@ -155,6 +155,7 @@ duplicates throw `InvalidOperationException` at startup.)
 | `ElegantSeries.Flow.WPF` | WPF host: `NavigationHost`, `BaseView<TViewModel>`, `ViewLocator` |
 | `ElegantSeries.Flow.Avalonia` | Avalonia host: `NavigationHost`, `BaseView<TViewModel>`, `ViewLocator` |
 | `ElegantSeries.Flow.Generator` | Roslyn source generator: emits `IViewLocator` registrations from `[ViewFor]` attributes (Analyzer-only, no runtime dependency) |
+| `ElegantSeries.Flow.Diagnostics` | Optional metrics observer: turns navigation events into counters on the `ElegantSeries.Flow.Diagnostics` meter (`navigation.completed`, `viewmodel.released`, `cache.cleared`, `subscriber.errors`) for MeterListener / OpenTelemetry |
 
 ## UI integration
 

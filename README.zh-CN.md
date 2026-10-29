@@ -146,6 +146,7 @@ source generator 在编译期生成等价的注册代码，生成一个 `Registe
 | `ElegantSeries.Flow.WPF` | WPF host：`NavigationHost`、`BaseView<TViewModel>`、`ViewLocator` |
 | `ElegantSeries.Flow.Avalonia` | Avalonia host：`NavigationHost`、`BaseView<TViewModel>`、`ViewLocator` |
 | `ElegantSeries.Flow.Generator` | Roslyn source generator：从 `[ViewFor]` attribute 生成 `IViewLocator` 注册代码（纯 Analyzer，无运行时依赖） |
+| `ElegantSeries.Flow.Diagnostics` | 可选的指标观察器：把导航事件变成 `ElegantSeries.Flow.Diagnostics` meter 上的计数器（`navigation.completed`、`viewmodel.released`、`cache.cleared`、`subscriber.errors`），供 MeterListener / OpenTelemetry 读取 |
 
 ## UI 集成
 
