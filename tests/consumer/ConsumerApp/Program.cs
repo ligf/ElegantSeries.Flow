@@ -1,6 +1,8 @@
+using System.Diagnostics.Metrics;
 using Avalonia.Controls;
 using Microsoft.Extensions.DependencyInjection;
 using ElegantSeries.Flow.Avalonia.Extensions;
+using ElegantSeries.Flow.Diagnostics;
 using ElegantSeries.Flow.Avalonia.Locating;
 using ElegantSeries.Flow.Avalonia.Views;
 using ElegantSeries.Flow.Extensions;
@@ -28,6 +30,7 @@ void Check(bool condition, string name)
 
 var services = new ServiceCollection();
 services.AddElegantSeriesFlow();
+services.AddElegantSeriesFlowDiagnostics();
 services.AddTransient<AlphaViewModel>();
 services.AddTransient<BetaViewModel>();
 services.AddElegantSeriesFlowViews(views => views.RegisterAttributedViews());
@@ -62,6 +65,23 @@ var keptBeta = navigation.GetCurrentViewModel();
 Check(await navigation.GoBackAsync(), "go back from kept Beta");
 Check(await navigation.NavigateToAsync<BetaViewModel>(retention: NavigationRetention.KeepAlive), "navigate to Beta again");
 Check(ReferenceEquals(keptBeta, navigation.GetCurrentViewModel()), "KeepAlive reuses the cached Beta instance");
+
+// The Diagnostics package observes the packaged core's events:
+// resolving NavigationDiagnostics starts its subscriptions, and a
+// MeterListener on its meter sees the next navigation counted.
+var diagnostics = provider.GetRequiredService<NavigationDiagnostics>();
+Check(ReferenceEquals(diagnostics, provider.GetRequiredService<NavigationDiagnostics>()), "Diagnostics resolves as a singleton");
+long completedNavigations = 0;
+using var meterListener = new MeterListener();
+meterListener.InstrumentPublished = (instrument, listener) =>
+{
+    if (instrument.Meter.Name == NavigationDiagnostics.MeterName && instrument.Name == "navigation.completed")
+        listener.EnableMeasurementEvents(instrument);
+};
+meterListener.SetMeasurementEventCallback<long>((_, value, _, _) => completedNavigations += value);
+meterListener.Start();
+Check(await navigation.NavigateToAsync<AlphaViewModel>(), "navigate to Alpha (observed)");
+Check(completedNavigations == 1, "Diagnostics counted the completed navigation");
 
 Console.WriteLine(failures == 0 ? "CONSUMER PASS" : $"CONSUMER FAIL ({failures} checks failed)");
 return failures == 0 ? 0 : 1;

@@ -20,6 +20,7 @@
     <PackageReference Include="ElegantSeries.Flow" Version="$(FlowVersion)" />
     <PackageReference Include="ElegantSeries.Flow.Avalonia" Version="$(FlowVersion)" />
     <PackageReference Include="ElegantSeries.Flow.Mvvm" Version="$(FlowVersion)" />
+    <PackageReference Include="ElegantSeries.Flow.Diagnostics" Version="$(FlowVersion)" />
   </ItemGroup>
 
 </Project>

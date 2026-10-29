@@ -11,9 +11,10 @@ mask. This harness is the independent consumer (roadmap Phase 2C
 
 `verify.sh`:
 
-1. Packs the four packages (`ElegantSeries.Flow`,
+1. Packs the five packages (`ElegantSeries.Flow`,
    `ElegantSeries.Flow.Mvvm`, `ElegantSeries.Flow.Avalonia`,
-   `ElegantSeries.Flow.WPF`) into `feed/`.
+   `ElegantSeries.Flow.WPF`, `ElegantSeries.Flow.Diagnostics`)
+   into `feed/`.
 2. Restores `ConsumerApp/` — a standalone console app that is **not**
    part of the solution — with `nuget.config` source mapping that
    resolves every `ElegantSeries.Flow*` package **only** from that
@@ -29,9 +30,11 @@ mask. This harness is the independent consumer (roadmap Phase 2C
    `AddElegantSeriesFlowViews(views => views.RegisterAttributedViews())`
    with `[ViewFor]`-declared Avalonia views — then navigates
    (including an Mvvm `BaseViewModel` page and a KeepAlive round
-   trip) and asserts the generator-produced view registrations
-   resolve the right view types. It prints one `PASS`/`FAIL` line
-   per check and exits non-zero on any failure.
+   trip), asserts the generator-produced view registrations
+   resolve the right view types, and verifies the Diagnostics
+   package counts a completed navigation on its meter. It prints
+   one `PASS`/`FAIL` line per check and exits non-zero on any
+   failure.
 4. Publishes the same consumer with NativeAOT
    (`-p:PublishAot=true`, RID from `FLOW_VERIFY_RID`, default
    `linux-x64`) and runs the native binary through the same checks.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NuGet consumer verification: packs the four packages, restores the
+# NuGet consumer verification: packs the five packages, restores the
 # standalone ConsumerApp against ONLY the freshly packed feed (plus
 # nuget.org for third-party dependencies), then builds and runs it —
 # once as a normal build and once published with NativeAOT.
@@ -36,7 +36,7 @@ mkdir -p "$FEED" "$WORK"
 export NUGET_PACKAGES="$WORK/nuget-packages"
 
 echo "==> Packing packages"
-for project in ElegantSeries.Flow ElegantSeries.Flow.Mvvm ElegantSeries.Flow.Avalonia ElegantSeries.Flow.WPF; do
+for project in ElegantSeries.Flow ElegantSeries.Flow.Mvvm ElegantSeries.Flow.Avalonia ElegantSeries.Flow.WPF ElegantSeries.Flow.Diagnostics; do
     "$DOTNET" pack "$REPO_ROOT/src/$project" -c Release -o "$FEED" --nologo -v q > /dev/null
 done
 
