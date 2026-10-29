@@ -252,7 +252,6 @@ public class NavigationDiagnosticsTests
 
         var diagnostics = provider.GetRequiredService<NavigationDiagnostics>();
         Assert.Same(diagnostics, provider.GetRequiredService<NavigationDiagnostics>());
-        Assert.Equal(NavigationDiagnostics.MeterName, diagnostics.Meter.Name);
 
         var nav = provider.GetRequiredService<INavigationService>();
         await nav.NavigateToAsync<PageAViewModel>();

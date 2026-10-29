@@ -115,9 +115,6 @@ public sealed class NavigationDiagnostics : IDisposable
         }
     }
 
-    /// <summary>The meter the four counters are published on.</summary>
-    public Meter Meter => _meter;
-
     /// <summary>
     /// Unsubscribes from the navigation service and disposes the meter.
     /// Safe to call more than once.

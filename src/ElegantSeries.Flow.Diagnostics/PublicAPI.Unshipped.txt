@@ -2,7 +2,6 @@
 const ElegantSeries.Flow.Diagnostics.NavigationDiagnostics.MeterName = "ElegantSeries.Flow.Diagnostics" -> string!
 ElegantSeries.Flow.Diagnostics.NavigationDiagnostics
 ElegantSeries.Flow.Diagnostics.NavigationDiagnostics.Dispose() -> void
-ElegantSeries.Flow.Diagnostics.NavigationDiagnostics.Meter.get -> System.Diagnostics.Metrics.Meter!
 ElegantSeries.Flow.Diagnostics.NavigationDiagnostics.NavigationDiagnostics(ElegantSeries.Flow.Navigation.INavigationService! navigation) -> void
 ElegantSeries.Flow.Diagnostics.ServiceCollectionExtensions
 static ElegantSeries.Flow.Diagnostics.ServiceCollectionExtensions.AddElegantSeriesFlowDiagnostics(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
