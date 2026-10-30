@@ -72,7 +72,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
     private sealed class ViewMapping
     {
-        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType, bool isOpenGenericView, bool isOpenGenericViewModel, string? viewModelNotImplementingInterface)
+        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType, bool isOpenGenericView, bool isOpenGenericViewModel, string? viewModelNotImplementingInterface, ImmutableArray<string> viewConstraintViolations, string? viewModelNotReferenceType)
         {
             ViewName = viewName;
             ViewModelName = viewModelName;
@@ -85,6 +85,8 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             IsOpenGenericView = isOpenGenericView;
             IsOpenGenericViewModel = isOpenGenericViewModel;
             ViewModelNotImplementingInterface = viewModelNotImplementingInterface;
+            ViewConstraintViolations = viewConstraintViolations;
+            ViewModelNotReferenceType = viewModelNotReferenceType;
         }
 
         public string ViewName { get; }
@@ -136,6 +138,23 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         /// (FLOWGEN010); otherwise <see langword="null"/>.
         /// </summary>
         public string? ViewModelNotImplementingInterface { get; }
+
+        /// <summary>
+        /// One entry per view-side requirement of the platform view locator that
+        /// the view type fails (FLOWGEN011): platform base-type derivation,
+        /// non-abstract, public parameterless constructor, accessibility from
+        /// the generated registration code. Empty when the view can be registered.
+        /// </summary>
+        public ImmutableArray<string> ViewConstraintViolations { get; }
+
+        /// <summary>
+        /// The ViewModel type name when it is a value type registered via
+        /// RegisterTransient/RegisterSingleton, whose ViewModel type parameter
+        /// requires a reference type (FLOWGEN012); otherwise
+        /// <see langword="null"/>. A value-type ViewModel is legal with
+        /// ViewOnly (Register has no reference-type requirement).
+        /// </summary>
+        public string? ViewModelNotReferenceType { get; }
     }
 
     private static ViewMapping? GetMapping(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
@@ -154,6 +173,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         // The ViewModel type is either explicit ([ViewFor(typeof(VM))]) or inferred
         // from the view's BaseView<TViewModel> base class ([ViewFor]).
         var baseViewModel = FindBaseViewModel(viewType);
+        INamedTypeSymbol? explicitViewModelSymbol = null;
         string? viewModelName = null;
         var cannotInfer = false;
         string? conflictingBaseViewModel = null;
@@ -174,6 +194,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         }
         else if (attribute.ConstructorArguments[0].Value is INamedTypeSymbol explicitViewModel)
         {
+            explicitViewModelSymbol = explicitViewModel;
             viewModelName = explicitViewModel.ToDisplayString(format);
             // Open generic ViewModels (e.g. DetailViewModel<>) cannot be registered:
             // the generated code would reference an undefined type parameter.
@@ -257,6 +278,101 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             cannotInfer = false;
         }
 
+        // View-side requirements of the generated Register* call (FLOWGEN011).
+        // The locator's TView parameter requires, on both platforms, derivation
+        // from the platform view base type plus a public parameterless
+        // constructor (the new() constraint also excludes abstract types), and
+        // the generated code must be able to name the view type. Without these
+        // checks the failure surfaces as a raw compiler error (CS0310/CS0311/
+        // CS0122) inside the generated file. Skipped for open generic views:
+        // FLOWGEN008 already rejects them, and constraint questions about an
+        // unbound type have no meaningful answer.
+        var viewConstraintViolations = ImmutableArray.CreateBuilder<string>();
+        if (!isOpenGenericView)
+        {
+            var compilation = ctx.SemanticModel.Compilation;
+
+            // The platform is identified by which Flow locator the compilation
+            // references (mirrors Generate); the base type follows from it.
+            // When neither locator is referenced, Generate reports nothing at
+            // all, so skipping the derivation check loses no diagnostic; when
+            // both are referenced, FLOWGEN002 suppresses per-mapping reports.
+            INamedTypeSymbol? platformBaseType = null;
+            string? platformBaseTypeName = null;
+            if (compilation.GetTypeByMetadataName(AvaloniaLocatorMetadataName) is not null)
+            {
+                platformBaseType = compilation.GetTypeByMetadataName("Avalonia.Controls.Control");
+                platformBaseTypeName = "Avalonia.Controls.Control";
+            }
+            else if (compilation.GetTypeByMetadataName(WpfLocatorMetadataName) is not null)
+            {
+                platformBaseType = compilation.GetTypeByMetadataName("System.Windows.FrameworkElement");
+                platformBaseTypeName = "System.Windows.FrameworkElement";
+            }
+
+            // Skipped when the base chain contains an error type (a typo'd or
+            // missing base class): whether the view derives from the platform
+            // base is then unknowable — the intended base may well derive —
+            // and the compiler already reports the user's own error.
+            if (platformBaseType is not null &&
+                !BaseChainContainsError(viewType) &&
+                !DerivesFrom(viewType, platformBaseType))
+            {
+                viewConstraintViolations.Add($"it does not derive from '{platformBaseTypeName}'");
+            }
+
+            // Static classes group with abstract ones (neither can be
+            // instantiated); note IsAbstract is false for a static class
+            // symbol, so IsStatic must be tested explicitly.
+            if (viewType.IsAbstract || viewType.IsStatic)
+            {
+                viewConstraintViolations.Add("it is abstract or static and cannot be instantiated");
+            }
+
+            // Skipped for abstract/static views: their implicit constructor
+            // is protected (or absent), so the check would stack a derivative
+            // "no public parameterless constructor" on top of the abstract
+            // report even though abstractness alone already explains the
+            // new() failure.
+            if (!viewType.IsAbstract && !viewType.IsStatic &&
+                !viewType.InstanceConstructors.Any(c =>
+                    c.Parameters.Length == 0 &&
+                    c.DeclaredAccessibility == Accessibility.Public))
+            {
+                viewConstraintViolations.Add("it does not declare a public parameterless constructor");
+            }
+
+            if (!IsAccessibleFromGeneratedCode(viewType))
+            {
+                viewConstraintViolations.Add("it is not accessible from the generated registration code (the view and any containing types must be public or internal)");
+            }
+
+            if (IsFileLocal(viewType))
+            {
+                viewConstraintViolations.Add("it is file-local (or nested in a file-local type) and cannot be referenced from the generated registration code");
+            }
+
+            if (HasGenericContainingType(viewType))
+            {
+                viewConstraintViolations.Add("it is nested in a generic type and cannot be named by the generated registration code");
+            }
+        }
+
+        // RegisterTransient/RegisterSingleton require a reference-type ViewModel
+        // (FLOWGEN012); Register (ViewOnly) does not, so a value-type ViewModel
+        // is legal there. Only the explicit form can reach this: an inferred
+        // ViewModel comes from BaseView<TViewModel>, whose own constraint
+        // already requires a reference type. Error types are skipped (the
+        // compiler already reports them), as are open generic ViewModels
+        // (FLOWGEN009).
+        string? viewModelNotReferenceType = null;
+        if (explicitViewModelSymbol is { IsValueType: true, TypeKind: not TypeKind.Error } &&
+            !isOpenGenericViewModel &&
+            registerMethod is "RegisterTransient" or "RegisterSingleton")
+        {
+            viewModelNotReferenceType = viewModelName;
+        }
+
         return new ViewMapping(
             viewName,
             viewModelName ?? string.Empty,
@@ -268,7 +384,99 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             unresolvableViewModelType,
             isOpenGenericView,
             isOpenGenericViewModel,
-            viewModelNotImplementingInterface);
+            viewModelNotImplementingInterface,
+            viewConstraintViolations.ToImmutable(),
+            viewModelNotReferenceType);
+    }
+
+    /// <summary>
+    /// True when <paramref name="viewType"/>'s base-type chain contains
+    /// <paramref name="baseType"/> (the platform view base type).
+    /// </summary>
+    private static bool DerivesFrom(INamedTypeSymbol viewType, INamedTypeSymbol baseType)
+    {
+        for (var current = viewType.BaseType; current is not null; current = current.BaseType)
+        {
+            if (SymbolEqualityComparer.Default.Equals(current, baseType))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when any type in <paramref name="viewType"/>'s base-type chain is
+    /// an error type (an unresolvable base class).
+    /// </summary>
+    private static bool BaseChainContainsError(INamedTypeSymbol viewType)
+    {
+        for (var current = viewType.BaseType; current is not null; current = current.BaseType)
+        {
+            if (current.TypeKind == TypeKind.Error)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when the view or any containing type is file-local: the generated
+    /// registration code lives in a different file and cannot reference it.
+    /// </summary>
+    private static bool IsFileLocal(INamedTypeSymbol viewType)
+    {
+        for (INamedTypeSymbol? current = viewType; current is not null; current = current.ContainingType)
+        {
+            if (current.IsFileLocal)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when any containing type of <paramref name="viewType"/> is generic:
+    /// the view's fully qualified name would then contain an unbound type
+    /// parameter, which the generated registration code cannot name.
+    /// </summary>
+    private static bool HasGenericContainingType(INamedTypeSymbol viewType)
+    {
+        for (var current = viewType.ContainingType; current is not null; current = current.ContainingType)
+        {
+            if (current.IsGenericType)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when the generated registration class (a public class in the same
+    /// assembly, in an unrelated namespace) can name <paramref name="viewType"/>:
+    /// neither the view nor any containing type may be private or protected.
+    /// Internal and public are both fine (same assembly); protected internal is
+    /// fine through its internal part.
+    /// </summary>
+    private static bool IsAccessibleFromGeneratedCode(INamedTypeSymbol viewType)
+    {
+        for (INamedTypeSymbol? current = viewType; current is not null; current = current.ContainingType)
+        {
+            if (current.DeclaredAccessibility is
+                Accessibility.Private or Accessibility.Protected or Accessibility.ProtectedAndInternal)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -340,7 +548,9 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         mapping.InvalidLifetime is not null ||
         mapping.IsOpenGenericView ||
         mapping.IsOpenGenericViewModel ||
-        mapping.ViewModelNotImplementingInterface is not null;
+        mapping.ViewModelNotImplementingInterface is not null ||
+        !mapping.ViewConstraintViolations.IsEmpty ||
+        mapping.ViewModelNotReferenceType is not null;
 
     private static void Generate(
         SourceProductionContext spc,
@@ -427,6 +637,20 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             {
                 spc.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticDescriptors.ViewModelNotImplementingInterface, mapping.Location, mapping.ViewName, mapping.ViewModelNotImplementingInterface));
+                hasMappingErrors = true;
+            }
+
+            foreach (var violation in mapping.ViewConstraintViolations)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.ViewConstraintViolation, mapping.Location, mapping.ViewName, violation));
+                hasMappingErrors = true;
+            }
+
+            if (mapping.ViewModelNotReferenceType is not null)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.ViewModelNotReferenceType, mapping.Location, mapping.ViewName, mapping.ViewModelNotReferenceType, mapping.RegisterMethod));
                 hasMappingErrors = true;
             }
         }
@@ -572,6 +796,22 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             id: "FLOWGEN010",
             title: "ViewModel does not implement INavigationViewModel",
             messageFormat: "[ViewFor] on view '{0}' specifies ViewModel type '{1}' which does not implement INavigationViewModel",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor ViewConstraintViolation = new DiagnosticDescriptor(
+            id: "FLOWGEN011",
+            title: "View type cannot be registered",
+            messageFormat: "[ViewFor] on view '{0}' cannot be registered: {1}",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor ViewModelNotReferenceType = new DiagnosticDescriptor(
+            id: "FLOWGEN012",
+            title: "ViewModel must be a reference type for the selected lifetime",
+            messageFormat: "[ViewFor] on view '{0}' registers ViewModel type '{1}' via {2}, which requires a reference-type ViewModel; a value-type ViewModel can only be used with Lifetime ViewOnly",
             category: "ElegantSeries.Flow.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
