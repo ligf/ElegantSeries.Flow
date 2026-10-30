@@ -109,6 +109,10 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     /// <param name="refreshIfActive">
     /// When <see langword="true"/> and the target type is already the active page, re-invokes
     /// its activation callbacks with the new parameter instead of being a silent no-op.
+    /// Applies only to a default (<see cref="NavigationOperation.Push"/> +
+    /// <see cref="NavigationRetention.Destroy"/>) request; an explicit
+    /// <paramref name="operation"/> or <paramref name="retention"/> takes precedence
+    /// and is always honored.
     /// </param>
     /// <param name="cancellationToken">Cooperative cancellation, passed through to the navigation service.</param>
     /// <returns>
@@ -147,6 +151,10 @@ public abstract class NavigationViewModelBase : INavigationViewModel, INotifyPro
     /// <param name="refreshIfActive">
     /// When <see langword="true"/> and the target type is already the active page, re-invokes
     /// its activation callbacks with the new parameter instead of being a silent no-op.
+    /// Applies only to a default (<see cref="NavigationOperation.Push"/> +
+    /// <see cref="NavigationRetention.Destroy"/>) request; an explicit
+    /// <paramref name="operation"/> or <paramref name="retention"/> takes precedence
+    /// and is always honored.
     /// </param>
     /// <param name="cancellationToken">Cooperative cancellation, passed through to the navigation service.</param>
     /// <returns>

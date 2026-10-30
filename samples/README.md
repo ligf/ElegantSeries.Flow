@@ -47,8 +47,9 @@ Both samples demonstrate the library's full feature set:
    - Q6 Refresh — `refreshIfActive: true` re-runs activation on the same
      instance (id stays, activation count grows).
 
-   Note: navigating to the already-active page type is a no-op by design
-   (per MAUI-style semantics), so push demos alternate between two page
+   Note: navigating to the already-active page type with a default push
+   is a no-op by design (per MAUI-style semantics), so push demos alternate
+   between two page
    types rather than pushing the same type. Quadrant pages that can hit a
    no-op (e.g. Back at the root) show a one-line status hint instead of
    failing silently.

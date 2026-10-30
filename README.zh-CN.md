@@ -384,10 +384,12 @@ ViewModel 上实现 `INavigationTargetAware`（最后一种连参数类型本身
 
 ### 刷新活动页面
 
-导航到已活动的类型是静默 no-op，返回 `true`。传 `refreshIfActive: true`
-可把它变成*刷新*：不推新页面、不建新作用域——只是用新参数重新跑一遍
-活动实例的激活回调，并触发 `RegionNavigated`。当前页面的 from-guard 照常
-执行，仍可否决刷新。
+以默认请求（`Push` + `Destroy`）导航到已活动的类型是静默 no-op，返回
+`true`。传 `refreshIfActive: true` 可把它变成*刷新*：不推新页面、不建新
+作用域——只是用新参数重新跑一遍活动实例的激活回调，并触发
+`RegionNavigated`。当前页面的 from-guard 照常执行，仍可否决刷新。显式指定
+operation 或 retention（`Replace`、`Reset`、`KeepAlive`）时优先于此捷径，
+始终按指定执行。
 
 ### 页面级服务作用域
 
@@ -404,8 +406,9 @@ ViewModel 自身的 DI 生命周期——即你的 `services.AddXxx<MyViewModel>
 | `Scoped` | 每个页面作用域一个实例 | 作用域释放它 |
 | `Singleton` | 从根容器共享 | 页面作用域永远不释放它 |
 
-一个 ViewModel *实例*永远不会在同一个 region 栈里出现两次：导航到已活动的
-类型是返回 `true` 的 no-op（或加 `refreshIfActive` 变成*刷新*，用新参数重新
+一个 ViewModel *实例*永远不会在同一个 region 栈里出现两次：以默认请求
+导航到已活动的类型是返回 `true` 的 no-op（或加 `refreshIfActive` 变成
+*刷新*，用新参数重新
 触发活动实例的回调）；导航到实例在栈深处的类型会*弹回它*——上面的页面被丢弃，
 已有的实例被重新激活。单例 ViewModel 和缓存的 KeepAlive 页面因此能在离开后
 存活、返回时复用，和主流框架一致（参考 Prism 的 `IsNavigationTarget`）。只有
