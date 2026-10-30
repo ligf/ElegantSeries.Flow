@@ -29,7 +29,8 @@ namespace ElegantSeries.Flow.Avalonia.Hosting;
 /// <para>
 /// Threading: the navigation service may raise <c>RegionNavigated</c> on any thread
 /// (library code uses <c>ConfigureAwait(false)</c>). All UI work is marshalled to the
-/// UI thread through <see cref="IDispatcher"/>; view creation therefore always happens
+/// UI thread through <see cref="ElegantSeries.Flow.Threading.IDispatcher"/>; view creation
+/// therefore always happens
 /// on the UI thread. The default constructor uses <see cref="AvaloniaDispatcher"/>.
 /// </para>
 /// <para>
@@ -103,7 +104,8 @@ public class NavigationHost : ContentControl, IDisposable
     /// </summary>
     /// <remarks>
     /// This is the constructor used by AXAML. It requires a running Avalonia application;
-    /// in unit tests, use <see cref="NavigationHost(IDispatcher)"/> with a test double.
+    /// in unit tests, use <see cref="NavigationHost(ElegantSeries.Flow.Threading.IDispatcher)"/>
+    /// with a test double.
     /// </remarks>
     public NavigationHost()
         : this(new AvaloniaDispatcher())
@@ -116,7 +118,7 @@ public class NavigationHost : ContentControl, IDisposable
     /// </summary>
     /// <param name="dispatcher">The dispatcher used to marshal UI work.</param>
     /// <exception cref="ArgumentNullException"><paramref name="dispatcher"/> is <see langword="null"/>.</exception>
-    protected NavigationHost(IDispatcher dispatcher)
+    protected NavigationHost(ElegantSeries.Flow.Threading.IDispatcher dispatcher)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
 

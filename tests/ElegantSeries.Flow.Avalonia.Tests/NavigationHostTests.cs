@@ -17,6 +17,21 @@ public sealed class NavigationHostTests
         }
     }
 
+    private sealed class CoreOnlyDispatcher : ElegantSeries.Flow.Threading.IDispatcher
+    {
+        public bool CheckAccess() => true;
+
+        public void Post(Action action) => action();
+    }
+
+    private sealed class CoreDispatcherHost : NavigationHost
+    {
+        public CoreDispatcherHost(ElegantSeries.Flow.Threading.IDispatcher dispatcher)
+            : base(dispatcher)
+        {
+        }
+    }
+
     private static NavigationHost CreateHost(
         FakeDispatcher dispatcher,
         FakeNavigationService service,
@@ -42,6 +57,18 @@ public sealed class NavigationHostTests
     public void RegionName_DefaultsToMainRegion()
     {
         using var host = new TestNavigationHost(new FakeDispatcher());
+
+        Assert.Equal("MainRegion", host.RegionName);
+    }
+
+    [Fact]
+    public void ProtectedConstructor_AcceptsCoreOnlyDispatcher()
+    {
+        // Pins the constructor's parameter type to the Core IDispatcher (as in
+        // the WPF host): a dispatcher implementing only the Core interface —
+        // not the Avalonia one — must be accepted. This test does not compile
+        // against the previous Avalonia-IDispatcher signature.
+        using var host = new CoreDispatcherHost(new CoreOnlyDispatcher());
 
         Assert.Equal("MainRegion", host.RegionName);
     }
