@@ -36,7 +36,7 @@ mkdir -p "$FEED" "$WORK"
 export NUGET_PACKAGES="$WORK/nuget-packages"
 
 echo "==> Packing packages"
-for project in ElegantSeries.Flow ElegantSeries.Flow.Mvvm ElegantSeries.Flow.Avalonia ElegantSeries.Flow.WPF ElegantSeries.Flow.Diagnostics; do
+for project in ElegantSeries.Flow ElegantSeries.Flow.Mvvm ElegantSeries.Flow.Avalonia ElegantSeries.Flow.WPF ElegantSeries.Flow.Diagnostics ElegantSeries.Flow.Routing; do
     "$DOTNET" pack "$REPO_ROOT/src/$project" -c Release -o "$FEED" --nologo -v q > /dev/null
 done
 

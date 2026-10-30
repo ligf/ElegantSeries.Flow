@@ -21,6 +21,7 @@
     <PackageReference Include="ElegantSeries.Flow.Avalonia" Version="$(FlowVersion)" />
     <PackageReference Include="ElegantSeries.Flow.Mvvm" Version="$(FlowVersion)" />
     <PackageReference Include="ElegantSeries.Flow.Diagnostics" Version="$(FlowVersion)" />
+    <PackageReference Include="ElegantSeries.Flow.Routing" Version="$(FlowVersion)" />
   </ItemGroup>
 
 </Project>

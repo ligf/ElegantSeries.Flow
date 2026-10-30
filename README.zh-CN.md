@@ -147,6 +147,7 @@ source generator 在编译期生成等价的注册代码，生成一个 `Registe
 | `ElegantSeries.Flow.Avalonia` | Avalonia host：`NavigationHost`、`BaseView<TViewModel>`、`ViewLocator` |
 | `ElegantSeries.Flow.Generator` | Roslyn source generator：从 `[ViewFor]` attribute 生成 `IViewLocator` 注册代码（纯 Analyzer，无运行时依赖） |
 | `ElegantSeries.Flow.Diagnostics` | 可选的指标观察器：把导航事件变成 `ElegantSeries.Flow.Diagnostics` meter 上的计数器（`navigation.completed`、`viewmodel.released`、`cache.cleared`、`subscriber.errors`），供 MeterListener / OpenTelemetry 读取 |
+| `ElegantSeries.Flow.Routing` | 可选的 URI 路由：显式 `RouteTableBuilder` 把 URI 模式（`orders/{id}`）映射到类型化导航——注册顺序即匹配优先级，零反射、AOT 安全 |
 
 ## UI 集成
 

@@ -11,9 +11,10 @@ mask. This harness is the independent consumer (roadmap Phase 2C
 
 `verify.sh`:
 
-1. Packs the five packages (`ElegantSeries.Flow`,
+1. Packs the six packages (`ElegantSeries.Flow`,
    `ElegantSeries.Flow.Mvvm`, `ElegantSeries.Flow.Avalonia`,
-   `ElegantSeries.Flow.WPF`, `ElegantSeries.Flow.Diagnostics`)
+   `ElegantSeries.Flow.WPF`, `ElegantSeries.Flow.Diagnostics`,
+   `ElegantSeries.Flow.Routing`)
    into `feed/`.
 2. Restores `ConsumerApp/` — a standalone console app that is **not**
    part of the solution — with `nuget.config` source mapping that

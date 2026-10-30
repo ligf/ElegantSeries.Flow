@@ -1,0 +1,25 @@
+#nullable enable
+ElegantSeries.Flow.Routing.IRouter
+ElegantSeries.Flow.Routing.IRouter.NavigateAsync(string! uri, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Routing.IRouter.TryNavigateAsync(string! uri, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Routing.RouteMatch
+ElegantSeries.Flow.Routing.RouteMatch.Query.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+ElegantSeries.Flow.Routing.RouteMatch.RawUri.get -> string!
+ElegantSeries.Flow.Routing.RouteMatch.Segments.get -> System.Collections.Generic.IReadOnlyList<string!>!
+ElegantSeries.Flow.Routing.RouteMatch.Values.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+ElegantSeries.Flow.Routing.RouteNotFoundException
+ElegantSeries.Flow.Routing.RouteNotFoundException.RouteNotFoundException(string! uri) -> void
+ElegantSeries.Flow.Routing.RouteNotFoundException.Uri.get -> string!
+ElegantSeries.Flow.Routing.Router
+ElegantSeries.Flow.Routing.Router.NavigateAsync(string! uri, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Routing.Router.Router(ElegantSeries.Flow.Navigation.INavigationService! navigation, ElegantSeries.Flow.Routing.RouteTable! routes) -> void
+ElegantSeries.Flow.Routing.Router.TryNavigateAsync(string! uri, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Routing.RouteTable
+ElegantSeries.Flow.Routing.RouteTable.Count.get -> int
+ElegantSeries.Flow.Routing.RouteTableBuilder
+ElegantSeries.Flow.Routing.RouteTableBuilder.Build() -> ElegantSeries.Flow.Routing.RouteTable!
+ElegantSeries.Flow.Routing.RouteTableBuilder.Map<TViewModel, TParam>(string! pattern, System.Func<ElegantSeries.Flow.Routing.RouteMatch!, TParam>! parameterFactory, string! region = "MainRegion", ElegantSeries.Flow.Navigation.NavigationOperation operation = ElegantSeries.Flow.Navigation.NavigationOperation.Push, ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy) -> ElegantSeries.Flow.Routing.RouteTableBuilder!
+ElegantSeries.Flow.Routing.RouteTableBuilder.Map<TViewModel>(string! pattern, string! region = "MainRegion", ElegantSeries.Flow.Navigation.NavigationOperation operation = ElegantSeries.Flow.Navigation.NavigationOperation.Push, ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy) -> ElegantSeries.Flow.Routing.RouteTableBuilder!
+ElegantSeries.Flow.Routing.RouteTableBuilder.RouteTableBuilder() -> void
+ElegantSeries.Flow.Routing.ServiceCollectionExtensions
+static ElegantSeries.Flow.Routing.ServiceCollectionExtensions.AddElegantSeriesFlowRouting(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<ElegantSeries.Flow.Routing.RouteTableBuilder!>! configure) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
