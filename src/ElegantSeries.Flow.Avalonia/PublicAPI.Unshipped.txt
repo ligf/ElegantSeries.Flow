@@ -3,7 +3,7 @@ ElegantSeries.Flow.Avalonia.Extensions.FlowViewServiceExtensions
 ElegantSeries.Flow.Avalonia.Hosting.NavigationHost
 ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.Dispose() -> void
 ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.NavigationHost() -> void
-ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.NavigationHost(ElegantSeries.Flow.Avalonia.Threading.IDispatcher! dispatcher) -> void
+ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.NavigationHost(ElegantSeries.Flow.Threading.IDispatcher! dispatcher) -> void
 ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.NavigationService.get -> ElegantSeries.Flow.Navigation.INavigationService?
 ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.NavigationService.set -> void
 ElegantSeries.Flow.Avalonia.Hosting.NavigationHost.RegionName.get -> string!
