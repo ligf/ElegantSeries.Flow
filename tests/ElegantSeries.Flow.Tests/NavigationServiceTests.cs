@@ -2266,6 +2266,41 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void AddElegantSeriesFlow_FailedCall_ShouldLeaveCollectionUntouched()
+    {
+        var transientServices = new ServiceCollection();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            transientServices.AddElegantSeriesFlow(
+                o => o.SyncLockTimeout = TimeSpan.FromSeconds(42), ServiceLifetime.Transient));
+        Assert.DoesNotContain(transientServices, d => d.ServiceType == typeof(NavigationOptions));
+        Assert.DoesNotContain(transientServices, d => d.ServiceType == typeof(INavigationService));
+
+        var undefinedServices = new ServiceCollection();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            undefinedServices.AddElegantSeriesFlow(
+                o => o.SyncLockTimeout = TimeSpan.FromSeconds(42), (ServiceLifetime)999));
+        Assert.DoesNotContain(undefinedServices, d => d.ServiceType == typeof(NavigationOptions));
+        Assert.DoesNotContain(undefinedServices, d => d.ServiceType == typeof(INavigationService));
+    }
+
+    [Fact]
+    public void AddElegantSeriesFlow_ValidRetryAfterFailedCall_ShouldApplyRetryConfiguration()
+    {
+        var services = new ServiceCollection();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            services.AddElegantSeriesFlow(
+                o => o.SyncLockTimeout = TimeSpan.FromSeconds(42), ServiceLifetime.Transient));
+
+        services.AddElegantSeriesFlow(
+            o => o.SyncLockTimeout = TimeSpan.FromSeconds(7), ServiceLifetime.Singleton);
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<NavigationOptions>();
+        Assert.Equal(TimeSpan.FromSeconds(7), options.SyncLockTimeout);
+        Assert.NotNull(provider.GetRequiredService<INavigationService>());
+    }
+
+    [Fact]
     public async Task Validation_AllMethods_ShouldThrowOnInvalidRegionName()
     {
         await Assert.ThrowsAsync<ArgumentException>(() => _navigationService.NavigateToAsync<TestHomeViewModel>(string.Empty));
