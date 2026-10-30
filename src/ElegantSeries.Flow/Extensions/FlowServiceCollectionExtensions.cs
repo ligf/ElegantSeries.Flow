@@ -46,7 +46,7 @@ public static class FlowServiceCollectionExtensions
     /// <paramref name="lifetime"/> is <see cref="ServiceLifetime.Transient"/> or not a
     /// defined value. The navigation service is stateful (it owns the region stacks),
     /// so transient lifetime would hand each consumer an isolated, empty stack and
-    /// silently break navigation.
+    /// silently break navigation. The collection is left unchanged when this is thrown.
     /// </exception>
     /// <remarks>
     /// <para><b>Registration conventions</b> (the page-level scope model disposes whatever
@@ -108,6 +108,15 @@ public static class FlowServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Configures <see cref="NavigationOptions"/>.</param>
     /// <param name="lifetime">Singleton (default, one service per app) or Scoped (one per window/scope).</param>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="services"/> or <paramref name="configure"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="lifetime"/> is <see cref="ServiceLifetime.Transient"/> or not a
+    /// defined value. The navigation service is stateful (it owns the region stacks),
+    /// so transient lifetime would hand each consumer an isolated, empty stack and
+    /// silently break navigation. The collection is left unchanged when this is thrown.
+    /// </exception>
     public static IServiceCollection AddElegantSeriesFlow(
         this IServiceCollection services,
         Action<NavigationOptions> configure,
@@ -115,6 +124,18 @@ public static class FlowServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configure);
+
+        // Validate before mutating the collection: a rejected call must leave
+        // the collection untouched. Otherwise the options instance registered
+        // below would survive the failure, and a later valid call's configure
+        // would be silently ignored (TryAdd keeps the first registration).
+        if (lifetime is not (ServiceLifetime.Singleton or ServiceLifetime.Scoped))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(lifetime),
+                lifetime,
+                "INavigationService must be Singleton or Scoped. Transient would give each consumer an isolated, empty navigation stack.");
+        }
 
         var options = new NavigationOptions();
         configure(options);
@@ -128,11 +149,6 @@ public static class FlowServiceCollectionExtensions
             case ServiceLifetime.Scoped:
                 services.TryAddScoped<INavigationService, NavigationService>();
                 break;
-            default:
-                throw new ArgumentOutOfRangeException(
-                    nameof(lifetime),
-                    lifetime,
-                    "INavigationService must be Singleton or Scoped. Transient would give each consumer an isolated, empty navigation stack.");
         }
 
         return services;
