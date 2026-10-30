@@ -1200,6 +1200,43 @@ public sealed partial class NavigationService
             return false;
         }
 
+        // The claimed candidate was withdrawn after the claim: the
+        // cancellation landed while the activation was finishing, too
+        // late to void the wake at judgment time. The departure it was
+        // claimed for never runs — provided the activation actually
+        // finished (an abandoned activation, its gate timed out with the
+        // To still running, has no rest to surface and keeps the
+        // departure flow below as its only exit) and no live intent is
+        // waiting in the slot (a live one means the page is about to
+        // depart again — the same rests test every other surfacing
+        // point in this file applies — so it must not be reported as
+        // resting). When the page does come to rest after all, it is
+        // surfaced BEFORE the entered intent completes (the order every
+        // other rest in this method keeps), the candidate is consumed
+        // as withdrawn, and no departure starts.
+        var claimedPageRests = false;
+        if (enteringClaimedIntent is not null && enteringClaimedIntent.IsWithdrawn && toRunnerSettled)
+        {
+            using (_stateLock.EnterScope())
+            {
+                claimedPageRests = window.PendingIntent is not { IsWithdrawn: false };
+            }
+        }
+
+        if (claimedPageRests)
+        {
+            CancelIntent(enteringClaimedIntent!);
+            RenewActivationIfCancelled(entry);
+            using (_stateLock.EnterScope())
+            {
+                window.Phase = WindowPhase.Open;
+            }
+
+            RaiseRegionNavigatedTracked(window, regionName, entry.ViewModel);
+            CompleteEnteredIntent();
+            return true;
+        }
+
         if (enteringClaimedIntent is not null)
         {
             CompleteEnteredIntent();

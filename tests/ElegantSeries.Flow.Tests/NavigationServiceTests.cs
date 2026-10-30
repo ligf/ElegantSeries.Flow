@@ -545,6 +545,46 @@ public class SlowToViewModel : NavigationViewModelBase, INavigationAwareAsync
 }
 
 /// <summary>
+/// Page whose async To captures the lifecycle token it was handed and
+/// blocks until released (ignoring the token), whose leave guard signals
+/// its start and blocks until released, and whose From does the same —
+/// so a test can force the entering step to claim a follow-up request
+/// (the claim cancels the To token), withdraw that request afterwards,
+/// and then prove no departure starts: a departure would invoke the
+/// guard first, and the guard parks on its gate once invoked.
+/// </summary>
+public class SlowClaimViewModel : NavigationViewModelBase, INavigationAwareAsync, INavigationGuard
+{
+    public TaskCompletionSource ToStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource ReleaseTo { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource GuardStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource ReleaseGuard { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource FromStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource ReleaseFrom { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public CancellationToken ToToken { get; private set; }
+
+    public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+    {
+        ToToken = cancellationToken;
+        ToStarted.TrySetResult();
+        await ReleaseTo.Task;
+    }
+
+    public async Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken)
+    {
+        GuardStarted.TrySetResult();
+        await ReleaseGuard.Task;
+        return true;
+    }
+
+    public async Task OnNavigatedFromAsync(CancellationToken cancellationToken = default)
+    {
+        FromStarted.TrySetResult();
+        await ReleaseFrom.Task;
+    }
+}
+
+/// <summary>
 /// Page whose async To captures the lifecycle token it was handed, signals
 /// its start, and then blocks until released (ignoring the token, so a test
 /// can observe the token's state while the activation is in flight).
@@ -1164,6 +1204,7 @@ public class NavigationServiceTests
         services.AddTransient<SelfRefreshFromViewModel>();
         services.AddTransient<InCallbackTaskStateViewModel>();
         services.AddTransient<SlowToViewModel>();
+        services.AddTransient<SlowClaimViewModel>();
         services.AddTransient<SlowToTokenViewModel>();
         services.AddTransient<SlowToVetoViewModel>();
         services.AddTransient<SlowToBlockingGuardViewModel>();
@@ -5488,6 +5529,133 @@ public class NavigationServiceTests
         Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
             .WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.False(page.FromRanBeforeToCompleted);
+    }
+
+    [Fact]
+    public async Task Window_ClaimedRegistrationWithdrawnAfterClaim_RestsAndSurfacesBeforeFateCompletes()
+    {
+        var navigated = new List<object>();
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            lock (navigated) navigated.Add(vm!);
+        };
+
+        var navTask = _navigationService.NavigateToAsync<SlowClaimViewModel>();
+        SlowClaimViewModel? page = null;
+        await WaitUntilAsync(() =>
+        {
+            page = _navigationService.GetCurrentViewModel() as SlowClaimViewModel;
+            return page is not null;
+        });
+        await page!.ToStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Register a follow-up request and do NOT withdraw it yet: the
+        // entering step judges the wake while the request is still live
+        // and claims it — the claim is observable as the entering page's
+        // activation token being cancelled.
+        using var cts = new CancellationTokenSource();
+        var claimedTask = _navigationService.NavigateToAsync<ChainLandingViewModel>(cancellationToken: cts.Token);
+        await WaitUntilAsync(() => page.ToToken.IsCancellationRequested);
+
+        // Withdraw AFTER the claim: too late to void the wake at judgment
+        // time, but the caller's fate still cancels.
+        cts.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await claimedTask);
+
+        // Let the activation finish. The claimed candidate is dead, so no
+        // departure may start — a departure would invoke the page's guard
+        // (which parks on its gate once invoked), and its From after that.
+        // The page comes to rest, and its RegionNavigated must already
+        // have been delivered at the moment the entered fate completes —
+        // the same order the unclaimed rest keeps. (Regression: the
+        // claimed path used to complete the entered fate first, then
+        // start the dead departure anyway — guard included — and surface
+        // the page only afterwards, from the settle step.)
+        page.ReleaseTo.TrySetResult();
+        try
+        {
+            Assert.True(await navTask.WaitAsync(TimeSpan.FromSeconds(10)));
+
+            var guardWait = await Task.WhenAny(page.GuardStarted.Task, Task.Delay(500));
+            Assert.NotSame(page.GuardStarted.Task, guardWait);
+            Assert.False(page.FromStarted.Task.IsCompleted);
+            lock (navigated) Assert.Single(navigated);
+            Assert.Same(page, _navigationService.GetCurrentViewModel());
+
+            // The claim cancelled the page's lifecycle source to close
+            // its window; resting renews it, like every other
+            // page-stays exit in the departure core.
+            var nav = (NavigationService)_navigationService;
+            var entry = GetNavigationEntry(nav, "MainRegion", typeof(SlowClaimViewModel));
+            Assert.NotNull(entry);
+            var lifecycleCts = (CancellationTokenSource)entry.GetType()
+                .GetProperty("LifecycleCts",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!
+                .GetValue(entry)!;
+            Assert.False(lifecycleCts.IsCancellationRequested);
+        }
+        finally
+        {
+            page.ReleaseGuard.TrySetResult();
+            page.ReleaseFrom.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task Window_ClaimedWithdrawnWithLiveIntentPending_DoesNotSurfaceEnteringPage()
+    {
+        var navigated = new List<object>();
+        _navigationService.RegionNavigated += (_, vm) =>
+        {
+            lock (navigated) navigated.Add(vm!);
+        };
+
+        var navTask = _navigationService.NavigateToAsync<SlowClaimViewModel>();
+        SlowClaimViewModel? page = null;
+        await WaitUntilAsync(() =>
+        {
+            page = _navigationService.GetCurrentViewModel() as SlowClaimViewModel;
+            return page is not null;
+        });
+        await page!.ToStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        using var cts = new CancellationTokenSource();
+        var claimedTask = _navigationService.NavigateToAsync<ChainLandingViewModel>(cancellationToken: cts.Token);
+        await WaitUntilAsync(() => page.ToToken.IsCancellationRequested);
+
+        // A further live request lands in the slot while the claimed
+        // candidate is still the window's departure candidate.
+        var nextTask = _navigationService.NavigateToAsync<TestHomeViewModel>();
+
+        // Withdraw the claimed candidate and let the activation finish:
+        // the entering page is already leaving for the live request, so
+        // it must not be surfaced as a resting page on its way out —
+        // only the live request's landing may be reported.
+        cts.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await claimedTask);
+        page.ReleaseTo.TrySetResult();
+        try
+        {
+            Assert.True(await navTask.WaitAsync(TimeSpan.FromSeconds(10)));
+            await page.GuardStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            page.ReleaseGuard.TrySetResult();
+            await page.FromStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            page.ReleaseFrom.TrySetResult();
+            Assert.True(await nextTask.WaitAsync(TimeSpan.FromSeconds(10)));
+
+            lock (navigated)
+            {
+                var only = Assert.Single(navigated);
+                Assert.IsType<TestHomeViewModel>(only);
+            }
+
+            Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+        }
+        finally
+        {
+            page.ReleaseGuard.TrySetResult();
+            page.ReleaseFrom.TrySetResult();
+        }
     }
 
     [Fact]
