@@ -321,7 +321,7 @@ public interface INavigationService
     /// no-op: nothing is pushed and no new page scope is created — the active instance's
     /// activation callbacks run again with the new parameter and
     /// <see cref="RegionNavigated"/> is raised. When the target type is not active this
-    /// flag has no effect. Defaults to <see langword="false"/>.
+    /// flag has no effect. This shortcut applies only to a default (<see cref="NavigationOperation.Push"/> + <see cref="NavigationRetention.Destroy"/>) request; an explicit <paramref name="operation"/> or <paramref name="retention"/> takes precedence over it and is always honored. Defaults to <see langword="false"/>.
     /// </param>
     /// <param name="cancellationToken">
     /// Cooperative cancellation: while this request is still pending, cancellation
@@ -409,7 +409,7 @@ public interface INavigationService
     /// <paramref name="parameter"/> instead of being a silent no-op: nothing is pushed and
     /// no new page scope is created — the active instance's activation callbacks run again
     /// and <see cref="RegionNavigated"/> is raised. When the target type is not active this
-    /// flag has no effect. Defaults to <see langword="false"/>.
+    /// flag has no effect. This shortcut applies only to a default (<see cref="NavigationOperation.Push"/> + <see cref="NavigationRetention.Destroy"/>) request; an explicit <paramref name="operation"/> or <paramref name="retention"/> takes precedence over it and is always honored. Defaults to <see langword="false"/>.
     /// </param>
     /// <param name="cancellationToken">
     /// Cooperative cancellation: while this request is still pending, cancellation

@@ -418,11 +418,13 @@ no longer withdraws the request.)
 
 ### Refreshing the active page
 
-Navigating to the already-active type is a silent no-op returning `true`. Pass
-`refreshIfActive: true` to turn it into a *refresh*: nothing is pushed and no new page
-scope is created — the active instance's activation callbacks simply run again with the
-new parameter, and `RegionNavigated` is raised. The current page's from-guard is still
-consulted and may veto the refresh.
+Navigating to the already-active type with a default request (`Push` + `Destroy`)
+is a silent no-op returning `true`. Pass `refreshIfActive: true` to turn it into a
+*refresh*: nothing is pushed and no new page scope is created — the active instance's
+activation callbacks simply run again with the new parameter, and `RegionNavigated`
+is raised. The current page's from-guard is still consulted and may veto the refresh.
+An explicit operation or retention (`Replace`, `Reset`, `KeepAlive`) takes precedence
+over this shortcut and is always honored.
 
 ### Page-level service scopes
 
@@ -441,7 +443,8 @@ not the navigation service registration — interacts with the page scope:
 | `Singleton` | Shared from the root container | The page scope never disposes it |
 
 A ViewModel *instance* never appears twice on one region's stack: navigating to the
-already-active type is a no-op returning `true` (or a *refresh* with `refreshIfActive`,
+already-active type with a default (`Push` + `Destroy`) request is a no-op returning
+`true` (or a *refresh* with `refreshIfActive`,
 re-invoking the active instance's callbacks with the new parameter); navigating to a
 type whose instance lives deeper on the stack *pops back to it* — the pages above are
 dropped and the existing instance is re-activated. Singleton ViewModels and cached

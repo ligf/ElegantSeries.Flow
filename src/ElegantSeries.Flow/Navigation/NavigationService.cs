@@ -29,9 +29,12 @@ namespace ElegantSeries.Flow.Navigation;
 /// <c>Dispose</c> on a ViewModel directly. A ViewModel <i>instance</i> never appears
 /// twice on one region's stack, though several instances of the same <i>type</i> may
 /// coexist there (a covered instance below a newer one). Navigating to the
-/// already-active type is a no-op that returns <see langword="true"/> (or a
-/// <i>refresh</i> when requested, which re-invokes the active instance's activation
-/// callbacks without creating a new page scope). A forward (Push) navigation that
+/// already-active type with a default (<see cref="NavigationOperation.Push"/> +
+/// <see cref="NavigationRetention.Destroy"/>) request is a no-op that returns
+/// <see langword="true"/> (or a <i>refresh</i> when requested, which re-invokes the
+/// active instance's activation callbacks without creating a new page scope); an
+/// explicit operation or retention takes precedence over this shortcut and is
+/// always honored. A forward (Push) navigation that
 /// recognizes an existing KeepAlive entry — deeper on the stack, or held in the
 /// region's cache — as its target, by stored-parameter equality or the entry's
 /// <see cref="INavigationTargetAware"/> vote, re-activates that entry with the new
