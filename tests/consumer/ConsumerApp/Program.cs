@@ -6,7 +6,7 @@ using ElegantSeries.Flow.Diagnostics;
 using ElegantSeries.Flow.Avalonia.Locating;
 using ElegantSeries.Flow.Avalonia.Views;
 using ElegantSeries.Flow.Extensions;
-using ElegantSeries.Flow.Generated;
+using ConsumerApp.g;
 using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.Routing;
 using ElegantSeries.Flow.ViewModels;

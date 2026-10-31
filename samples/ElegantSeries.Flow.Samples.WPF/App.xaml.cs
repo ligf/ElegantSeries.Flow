@@ -1,6 +1,6 @@
 using System.Windows;
 using ElegantSeries.Flow.Extensions;
-using ElegantSeries.Flow.Generated;
+using ElegantSeries.Flow.Samples.WPF.g;
 using ElegantSeries.Flow.WPF.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using ElegantSeries.Flow.Samples.Shared;

@@ -138,9 +138,13 @@ active ViewModel to a View. The typical pattern is a `ContentControl`-style host
 ViewModel→View mapping, register views explicitly via `views.Register` /
 `views.RegisterTransient` / `views.RegisterSingleton` inside `services.AddElegantSeriesFlowViews(...)`
 — no runtime reflection, no naming conventions. Alternatively, put a `[ViewFor]`
-attribute (`ElegantSeries.Flow.Routing`) on the View class declaring its ViewModel
+attribute (`ElegantSeries.Flow.Routing`) on the View class — the ViewModel is
+inferred from the View's `BaseView<TViewModel>` base class, or named explicitly
+as `[ViewFor<TViewModel>]` for Views without that base —
 and let the ElegantSeries.Flow source generator emit the same registrations into a
-generated `RegisterAttributedViews()` extension (call it inside `AddElegantSeriesFlowViews`); the
+generated `RegisterAttributedViews()` extension (call it inside `AddElegantSeriesFlowViews`;
+the generated code lives in your own assembly's `<assembly name>.g`
+namespace — add a `using` for it); the
 attribute's `Lifetime` selects `Transient` (default), `Singleton`, or `ViewOnly`
 (mapping only — register the ViewModel in DI yourself). The runtime never scans the
 attribute. Register a ViewModel either manually or via the attribute, not both:

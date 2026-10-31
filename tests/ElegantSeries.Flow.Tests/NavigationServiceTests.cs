@@ -2236,12 +2236,13 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void ViewForAttribute_ShouldStoreViewModelType_AndThrowOnNull()
+    public void GenericViewForAttribute_ShouldDefaultToTransientLifetime()
     {
-        var attr = new ViewForAttribute(typeof(TestHomeViewModel));
-        Assert.Equal(typeof(TestHomeViewModel), attr.ViewModelType);
+        var attr = new ViewForAttribute<TestHomeViewModel>();
+        Assert.Equal(ViewModelLifetime.Transient, attr.Lifetime);
 
-        Assert.Throws<ArgumentNullException>(() => new ViewForAttribute(null!));
+        attr.Lifetime = ViewModelLifetime.Singleton;
+        Assert.Equal(ViewModelLifetime.Singleton, attr.Lifetime);
     }
 
     [Fact]
