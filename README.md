@@ -138,13 +138,33 @@ active ViewModel to a View. The typical pattern is a `ContentControl`-style host
 ViewModel→View mapping, register views explicitly via `views.Register` /
 `views.RegisterTransient` / `views.RegisterSingleton` inside `services.AddElegantSeriesFlowViews(...)`
 — no runtime reflection, no naming conventions. Alternatively, put a `[ViewFor]`
-attribute (`ElegantSeries.Flow.Routing`) on the View class declaring its ViewModel
+attribute (`ElegantSeries.Flow.Routing`) on the View class — the ViewModel is
+inferred from the View's `BaseView<TViewModel>` base class, or named explicitly
+as `[ViewFor<TViewModel>]` for Views without that base —
 and let the ElegantSeries.Flow source generator emit the same registrations into a
-generated `RegisterAttributedViews()` extension (call it inside `AddElegantSeriesFlowViews`); the
+generated `RegisterAttributedViews()` extension (call it inside `AddElegantSeriesFlowViews`;
+the generated code lives in your own assembly's `<assembly name>.FlowGenerated`
+namespace — add a `using` for it); the
 attribute's `Lifetime` selects `Transient` (default), `Singleton`, or `ViewOnly`
 (mapping only — register the ViewModel in DI yourself). The runtime never scans the
 attribute. Register a ViewModel either manually or via the attribute, not both:
 duplicates throw `InvalidOperationException` at startup.)
+
+Views may also live in more than one assembly — for example feature modules, each
+with its own Views and ViewModels, referenced by the desktop app that hosts
+navigation; each assembly's generated registrations cover only that assembly's
+views. Compose them in the app's `AddElegantSeriesFlowViews` in either of two
+ways. Manually: one fully qualified static call per module,
+`Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);` (the
+extension-method form takes one `using <module>.FlowGenerated;` per file, and importing two
+modules' generated namespaces into one file makes a bare
+`RegisterAttributedViews()` call ambiguous). Or aggregated: when the app
+references assemblies that carry generated registrations, the generator also
+emits a `RegisterAllAttributedViews()` extension into the app's own generated
+namespace — it calls the app's own registrations first (when the app declares
+attributed views of its own), then each provider's own registrations, in
+assembly-name order, exactly once per provider. Pick one form per module:
+registering the same ViewModel twice throws at startup.
 
 ## Packages
 
