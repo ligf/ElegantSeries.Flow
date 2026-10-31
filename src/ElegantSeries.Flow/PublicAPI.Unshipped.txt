@@ -111,8 +111,10 @@ ElegantSeries.Flow.Routing.ViewForAttribute
 ElegantSeries.Flow.Routing.ViewForAttribute.Lifetime.get -> ElegantSeries.Flow.Routing.ViewModelLifetime
 ElegantSeries.Flow.Routing.ViewForAttribute.Lifetime.set -> void
 ElegantSeries.Flow.Routing.ViewForAttribute.ViewForAttribute() -> void
-ElegantSeries.Flow.Routing.ViewForAttribute.ViewForAttribute(System.Type! viewModelType) -> void
-ElegantSeries.Flow.Routing.ViewForAttribute.ViewModelType.get -> System.Type?
+ElegantSeries.Flow.Routing.ViewForAttribute<TViewModel>
+ElegantSeries.Flow.Routing.ViewForAttribute<TViewModel>.Lifetime.get -> ElegantSeries.Flow.Routing.ViewModelLifetime
+ElegantSeries.Flow.Routing.ViewForAttribute<TViewModel>.Lifetime.set -> void
+ElegantSeries.Flow.Routing.ViewForAttribute<TViewModel>.ViewForAttribute() -> void
 ElegantSeries.Flow.Routing.ViewModelLifetime
 ElegantSeries.Flow.Routing.ViewModelLifetime.Singleton = 1 -> ElegantSeries.Flow.Routing.ViewModelLifetime
 ElegantSeries.Flow.Routing.ViewModelLifetime.Transient = 0 -> ElegantSeries.Flow.Routing.ViewModelLifetime

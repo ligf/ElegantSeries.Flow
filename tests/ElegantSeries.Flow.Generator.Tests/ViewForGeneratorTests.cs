@@ -18,8 +18,12 @@ public class ViewForGeneratorTests
             public sealed class ViewForAttribute : System.Attribute
             {
                 public ViewForAttribute() { }
-                public ViewForAttribute(System.Type viewModelType) { ViewModelType = viewModelType; }
-                public System.Type? ViewModelType { get; }
+                public ViewModelLifetime Lifetime { get; set; } = ViewModelLifetime.Transient;
+            }
+
+            [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+            public sealed class ViewForAttribute<TViewModel> : System.Attribute
+            {
                 public ViewModelLifetime Lifetime { get; set; } = ViewModelLifetime.Transient;
             }
 
@@ -107,6 +111,25 @@ public class ViewForGeneratorTests
         }
         """;
 
+    private const string ViewsWithRootGeneratedType = """
+        namespace TestCompilation
+        {
+            public class Generated
+            {
+            }
+
+            public class ProbeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+            {
+                public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+            }
+
+            [ElegantSeries.Flow.Routing.ViewFor<TestCompilation.ProbeViewModel>]
+            public class ProbeView : Avalonia.Controls.Control
+            {
+            }
+        }
+        """;
+
     private const string BasicViews = """
         namespace TestApp.ViewModels
         {
@@ -128,16 +151,14 @@ public class ViewForGeneratorTests
 
         namespace TestApp.Views
         {
-            [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+            [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
             public class HomeView : Avalonia.Controls.Control { }
 
-            [ElegantSeries.Flow.Routing.ViewFor(
-                typeof(TestApp.ViewModels.MenuViewModel),
+            [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.MenuViewModel>(
                 Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.Singleton)]
             public class MenuView : Avalonia.Controls.Control { }
 
-            [ElegantSeries.Flow.Routing.ViewFor(
-                typeof(TestApp.ViewModels.DetailViewModel),
+            [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.DetailViewModel>(
                 Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.ViewOnly)]
             public class DetailView : Avalonia.Controls.Control { }
         }
@@ -186,10 +207,10 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class HomeView : Avalonia.Controls.Control { }
 
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class OtherHomeView : Avalonia.Controls.Control { }
             }
             """;
@@ -198,6 +219,72 @@ public class ViewForGeneratorTests
 
         var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN001");
         Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+    }
+
+    [Fact]
+    public void BothFormsOnOneView_SameViewModel_ReportsFlowGen013()
+    {
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+            {
+                public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+            }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN013");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        // The duplicate-view diagnostic replaces, not stacks with, FLOWGEN001.
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN001");
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
+    [Fact]
+    public void BothFormsOnOneView_ConflictingViewModels_ReportsFlowGen005Not013()
+    {
+        // The generic declaration disagrees with the BaseView-inferred type:
+        // that is FLOWGEN005's territory (explicit vs. inferred conflict on
+        // the generic application itself). The errored mapping is excluded
+        // from the duplicate-declaration check, so FLOWGEN013 does not stack.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+            {
+                public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+            }
+
+                public class OtherViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+            {
+                public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+            }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.OtherViewModel>]
+                public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN005");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN013");
+        Assert.Empty(runResult.GeneratedSources);
     }
 
     [Fact]
@@ -250,8 +337,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(
-                    typeof(TestApp.ViewModels.MenuViewModel),
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.MenuViewModel>(
                     Lifetime = (ElegantSeries.Flow.Routing.ViewModelLifetime)1)]
                 public class MenuView : Avalonia.Controls.Control { }
             }
@@ -282,8 +368,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(
-                    typeof(TestApp.ViewModels.HomeViewModel),
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>(
                     Lifetime = (ElegantSeries.Flow.Routing.ViewModelLifetime)99)]
                 public class HomeView : Avalonia.Controls.Control { }
             }
@@ -382,7 +467,7 @@ public class ViewForGeneratorTests
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class GenericView<T>
                 {
                 }
@@ -431,13 +516,17 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
-    public void NullViewModelType_ReportsFlowGen006()
+    public void TypeParameterViewModelType_ReportsFlowGen006()
     {
+        // A type argument that is not a named type (here the view's own type
+        // parameter) cannot be resolved to a registrable ViewModel: FLOWGEN006
+        // instead of silently skipping the view. (This is the only shape that
+        // reaches FLOWGEN006 now that the explicit form is generic-only.)
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(null)]
-                public class HomeView
+                [ElegantSeries.Flow.Routing.ViewFor<T>]
+                public class HomeView<T> : Avalonia.Controls.Control
                 {
                 }
             }
@@ -485,7 +574,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.OtherViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.OtherViewModel>]
                 public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel>
                 {
                 }
@@ -513,7 +602,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel>
                 {
                 }
@@ -548,7 +637,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class HomeView { }
             }
             """;
@@ -574,7 +663,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public abstract class HomeView : Avalonia.Controls.Control { }
             }
             """;
@@ -600,7 +689,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class HomeView : Avalonia.Controls.Control
                 {
                     public HomeView(int unused) { }
@@ -631,7 +720,7 @@ public class ViewForGeneratorTests
             {
                 public class Container
                 {
-                    [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                    [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                     private class NestedView : Avalonia.Controls.Control { }
                 }
             }
@@ -691,7 +780,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class HomeView { }
             }
             """;
@@ -717,7 +806,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class HomeView : System.Windows.FrameworkElement { }
             }
             """;
@@ -751,7 +840,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.StructViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.StructViewModel>]
                 public class StructView : Avalonia.Controls.Control { }
             }
             """;
@@ -777,8 +866,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(
-                    typeof(TestApp.ViewModels.StructViewModel),
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.StructViewModel>(
                     Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.Singleton)]
                 public class StructView : Avalonia.Controls.Control { }
             }
@@ -807,8 +895,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(
-                    typeof(TestApp.ViewModels.StructViewModel),
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.StructViewModel>(
                     Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.ViewOnly)]
                 public class StructView : Avalonia.Controls.Control { }
             }
@@ -842,7 +929,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 file class FileView : Avalonia.Controls.Control { }
             }
             """;
@@ -872,7 +959,7 @@ public class ViewForGeneratorTests
             {
                 file class Container
                 {
-                    [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                    [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                     public class InnerView : Avalonia.Controls.Control { }
                 }
             }
@@ -903,7 +990,7 @@ public class ViewForGeneratorTests
             {
                 public class Outer<T>
                 {
-                    [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                    [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                     public class InnerView : Avalonia.Controls.Control { }
                 }
             }
@@ -933,7 +1020,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public static class StaticView { }
             }
             """;
@@ -962,7 +1049,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class BrokenView : TypoBase { }
             }
             """;
@@ -972,8 +1059,90 @@ public class ViewForGeneratorTests
         Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN011");
     }
 
+    [Fact]
+    public void GeneratedNamespace_IncludesTheAssemblyName()
+    {
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + BasicViews;
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "namespace TestCompilation.g",
+            generated.SourceText.ToString());
+    }
+
+    [Fact]
+    public void GeneratedNamespace_SanitizesAssemblyNameIntoValidIdentifierSegments()
+    {
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + BasicViews;
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(sources, "2-cool.namespace");
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+
+        // '2-cool' -> '_2_cool' (dash replaced, leading digit prefixed) and the
+        // reserved keyword 'namespace' -> 'namespace_'.
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "namespace _2_cool.namespace_.g",
+            generated.SourceText.ToString());
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
+    public void GeneratedNamespace_RootTypeNamedGenerated_DoesNotCollide()
+    {
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + ViewsWithRootGeneratedType;
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+
+        // The consumer's own 'Generated' type sits in the root namespace; the
+        // generated namespace must not reuse that segment name (CS0101).
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "namespace TestCompilation.g",
+            generated.SourceText.ToString());
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
+    public void GeneratedNamespace_EmptySegmentAndMissingNameFallbacks()
+    {
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + BasicViews;
+
+        // An empty trailing segment becomes '_'.
+        var (dotRunResult, dotDiagnostics, _) = RunGenerator(sources, "Foo.");
+        Assert.Empty(dotDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var dotGenerated = Assert.Single(
+            dotRunResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "namespace Foo._.g",
+            dotGenerated.SourceText.ToString());
+
+        // A whitespace-only assembly name falls back to the bare namespace.
+        // (The compilation itself is invalid — CS8203 — so only the emitted
+        // namespace line is pinned here, not the updated compilation.)
+        var (blankRunResult, blankDiagnostics, _) = RunGenerator(sources, " ");
+        Assert.Empty(blankDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var blankGenerated = Assert.Single(
+            blankRunResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        var blankText = blankGenerated.SourceText.ToString();
+        Assert.Contains("namespace ElegantSeries.Flow.Generated", blankText);
+        Assert.DoesNotContain("namespace ElegantSeries.Flow.Generated.", blankText);
+    }
+
     private static (GeneratorRunResult RunResult, ImmutableArray<Diagnostic> Diagnostics, Compilation UpdatedCompilation)
-        RunGenerator(string sources)
+        RunGenerator(string sources, string assemblyName = "TestCompilation")
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(sources);
         var references = new[]
@@ -982,7 +1151,7 @@ public class ViewForGeneratorTests
             MetadataReference.CreateFromFile(typeof(System.Attribute).Assembly.Location),
         };
         var compilation = CSharpCompilation.Create(
-            "TestCompilation",
+            assemblyName,
             new[] { syntaxTree },
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -997,13 +1166,16 @@ public class ViewForGeneratorTests
     [Fact]
     public void OpenGenericViewModel_ReportsFlowGen009()
     {
-        // [ViewFor(typeof(DetailViewModel<>))] with an open generic ViewModel must
+        // [ViewFor<DetailViewModel<T>>] with an open generic ViewModel must
         // produce FLOWGEN009, not generate uncompilable registration code.
+        // (The unbound form DetailViewModel<> cannot be written as a type
+        // argument at all; a constructed type over the view's own type
+        // parameter is how an open ViewModel is expressed in the generic form.)
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.DetailViewModel<>))]
-                public class DetailView
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.DetailViewModel<T>>]
+                public class DetailView<T>
                 {
                 }
             }
@@ -1030,7 +1202,7 @@ public class ViewForGeneratorTests
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.DetailViewModel<string>))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.DetailViewModel<string>>]
                 public class DetailView
                 {
                 }
@@ -1052,12 +1224,12 @@ public class ViewForGeneratorTests
     [Fact]
     public void ViewModelNotImplementingInterface_ReportsFlowGen010()
     {
-        // [ViewFor(typeof(PlainClass))] where PlainClass does not implement
+        // [ViewFor<PlainClass>] where PlainClass does not implement
         // INavigationViewModel must produce FLOWGEN010.
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.PlainClass))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.PlainClass>]
                 public class DetailView : Avalonia.Controls.Control
                 {
                 }
@@ -1085,7 +1257,7 @@ public class ViewForGeneratorTests
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.GoodViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.GoodViewModel>]
                 public class DetailView : Avalonia.Controls.Control
                 {
                 }

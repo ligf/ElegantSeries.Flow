@@ -87,27 +87,19 @@ public class NavigationServiceCoverageTests
     // ── ViewForAttribute ────────────────────────────────────────
 
     [Fact]
-    public void ViewForAttribute_Parameterless_CreatesWithNullViewModelType()
+    public void ViewForAttribute_Parameterless_DefaultsToTransientLifetime()
     {
         var attr = new ViewForAttribute();
-        Assert.Null(attr.ViewModelType);
         Assert.Equal(ViewModelLifetime.Transient, attr.Lifetime);
     }
 
     [Fact]
-    public void ViewForAttribute_NullViewModelType_Throws()
+    public void GenericViewForAttribute_SetsProperties()
     {
-        Assert.Throws<ArgumentNullException>(() => new ViewForAttribute(null!));
-    }
-
-    [Fact]
-    public void ViewForAttribute_WithType_SetsProperties()
-    {
-        var attr = new ViewForAttribute(typeof(TestHomeViewModel))
+        var attr = new ViewForAttribute<TestHomeViewModel>
         {
             Lifetime = ViewModelLifetime.Singleton,
         };
-        Assert.Equal(typeof(TestHomeViewModel), attr.ViewModelType);
         Assert.Equal(ViewModelLifetime.Singleton, attr.Lifetime);
     }
 

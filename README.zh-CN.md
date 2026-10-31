@@ -130,9 +130,12 @@ ElegantSeries.Flow 与 UI 无关：它管理 ViewModel，平台层负责把活�
 ViewModel→View 映射方式：在 `services.AddElegantSeriesFlowViews(...)` 里用 `views.Register` /
 `views.RegisterTransient` / `views.RegisterSingleton` 显式注册——无运行时反射，
 无命名约定。也可以在 View 类上放 `[ViewFor]` attribute
-（`ElegantSeries.Flow.Routing`）声明它的 ViewModel，让 ElegantSeries.Flow
+（`ElegantSeries.Flow.Routing`）声明它的 ViewModel——ViewModel 可从 View 的
+`BaseView<TViewModel>` 基类推断，没有该基类的 View 用 `[ViewFor<TViewModel>]`
+显式写明——让 ElegantSeries.Flow
 source generator 在编译期生成等价的注册代码，生成一个 `RegisterAttributedViews()`
-扩展方法（在 `AddElegantSeriesFlowViews` 里调用）；attribute 的 `Lifetime` 可选 `Transient`
+扩展方法（在 `AddElegantSeriesFlowViews` 里调用；生成代码位于你自己程序集的
+`<程序集名>.g` 命名空间，需要加对应的 `using`）；attribute 的 `Lifetime` 可选 `Transient`
 （默认）、`Singleton` 或 `ViewOnly`（只生成映射，ViewModel 的 DI 注册自己管）。
 运行时从不扫描这个 attribute。每个 ViewModel 二选一：手动注册或 attribute 生成，
 不要两边都做——重复注册会在启动时抛 `InvalidOperationException`。

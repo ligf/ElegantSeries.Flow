@@ -18,7 +18,7 @@ namespace ElegantSeries.Flow.Generator;
 /// For every class carrying <c>[ViewFor]</c>, the generator emits the equivalent
 /// of an explicit <c>IViewLocator.Register*</c> call into a generated
 /// <c>RegisterAttributedViews</c> extension method. The ViewModel type is either
-/// given explicitly (<c>[ViewFor(typeof(TViewModel))]</c>) or inferred from the
+/// given explicitly (<c>[ViewFor&lt;TViewModel&gt;]</c>) or inferred from the
 /// view's <c>BaseView&lt;TViewModel&gt;</c> base class. The runtime never scans
 /// the attribute; everything is plain generated C#, so the output is Native AOT
 /// and trimming safe.
@@ -37,6 +37,7 @@ namespace ElegantSeries.Flow.Generator;
 public sealed class ViewForGenerator : IIncrementalGenerator
 {
     private const string ViewForAttributeMetadataName = "ElegantSeries.Flow.Routing.ViewForAttribute";
+    private const string GenericViewForAttributeMetadataName = "ElegantSeries.Flow.Routing.ViewForAttribute`1";
 
     // Platform namespace roots. The locator and BaseView<TViewModel> namespaces
     // are derived from these, so supporting a new platform only touches this table.
@@ -55,7 +56,10 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var mappings = context.SyntaxProvider
+        // Two attribute forms feed the same mapping pipeline: the plain
+        // [ViewFor] (ViewModel inferred from the view's BaseView<T>) and the
+        // generic [ViewFor<TViewModel>] (ViewModel as the type argument).
+        var plainMappings = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 ViewForAttributeMetadataName,
                 predicate: static (node, _) => node is ClassDeclarationSyntax,
@@ -63,6 +67,19 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             .Where(static m => m is not null)
             .Select(static (m, _) => m!)
             .Collect();
+
+        var genericMappings = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                GenericViewForAttributeMetadataName,
+                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                transform: static (ctx, ct) => GetMapping(ctx, ct))
+            .Where(static m => m is not null)
+            .Select(static (m, _) => m!)
+            .Collect();
+
+        var mappings = plainMappings
+            .Combine(genericMappings)
+            .Select(static (pair, _) => pair.Left.AddRange(pair.Right));
 
         var compilationAndMappings = context.CompilationProvider.Combine(mappings);
 
@@ -170,7 +187,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         var format = SymbolDisplayFormat.FullyQualifiedFormat;
         var viewName = viewType.ToDisplayString(format);
 
-        // The ViewModel type is either explicit ([ViewFor(typeof(VM))]) or inferred
+        // The ViewModel type is either explicit ([ViewFor<VM>]) or inferred
         // from the view's BaseView<TViewModel> base class ([ViewFor]).
         var baseViewModel = FindBaseViewModel(viewType);
         INamedTypeSymbol? explicitViewModelSymbol = null;
@@ -181,24 +198,40 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         var isOpenGenericViewModel = false;
         string? viewModelNotImplementingInterface = null;
 
-        if (attribute.ConstructorArguments.Length == 0)
+        // The explicit ViewModel type exists only on the generic attribute
+        // form, as its type argument: [ViewFor<VM>]. The plain [ViewFor]
+        // carries no type at all; its ViewModel is inferred from the view's
+        // BaseView<TViewModel> base class below.
+        INamedTypeSymbol? explicitViewModel = null;
+        var explicitUnresolvable = false;
+        if (attribute.AttributeClass is { IsGenericType: true } genericAttributeClass)
         {
-            if (baseViewModel is not null)
+            if (genericAttributeClass.TypeArguments[0] is INamedTypeSymbol genericViewModel)
             {
-                viewModelName = baseViewModel.ToDisplayString(format);
+                // Error named types land here too: an unresolved type argument
+                // is an INamedTypeSymbol with TypeKind Error (IErrorTypeSymbol
+                // derives from INamedTypeSymbol), and the explicit path below
+                // handles it (the compiler already reports the bad name).
+                explicitViewModel = genericViewModel;
             }
             else
             {
-                cannotInfer = true;
+                // Anything that is not a named type (a type parameter, an
+                // array type, ...) cannot be resolved to a registrable
+                // ViewModel here: FLOWGEN006.
+                explicitUnresolvable = true;
             }
         }
-        else if (attribute.ConstructorArguments[0].Value is INamedTypeSymbol explicitViewModel)
+
+        if (explicitViewModel is not null)
         {
             explicitViewModelSymbol = explicitViewModel;
             viewModelName = explicitViewModel.ToDisplayString(format);
-            // Open generic ViewModels (e.g. DetailViewModel<>) cannot be registered:
-            // the generated code would reference an undefined type parameter.
-            // typeof(X<>) yields an unbound generic type.
+            // Open generic ViewModels (e.g. DetailViewModel<T> over a type
+            // parameter) cannot be registered: the generated code would
+            // reference an undefined type parameter. (An unbound generic
+            // cannot be written as a type argument from source; that arm of
+            // the check only serves symbols constructed outside source.)
             isOpenGenericViewModel = explicitViewModel.IsGenericType &&
                 (explicitViewModel.IsUnboundGenericType ||
                  explicitViewModel.TypeArguments.Any(a => a is ITypeParameterSymbol));
@@ -224,17 +257,20 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                 conflictingBaseViewModel = baseViewModel.ToDisplayString(format);
             }
         }
-        else if (attribute.ConstructorArguments[0].Kind != TypedConstantKind.Error)
+        else if (explicitUnresolvable)
         {
-            // The type argument could not be resolved (e.g. an explicit null),
-            // and the compiler did not already report it: surface FLOWGEN006
+            // The type argument could not be resolved to a named type (e.g.
+            // it is a type parameter of a generic view): surface FLOWGEN006
             // instead of silently skipping the view.
             unresolvableViewModelType = true;
         }
+        else if (baseViewModel is not null)
+        {
+            viewModelName = baseViewModel.ToDisplayString(format);
+        }
         else
         {
-            // Unresolvable ViewModel type argument; the compiler already reports it.
-            return null;
+            cannotInfer = true;
         }
 
         var lifetimeName = GetLifetimeName(attribute);
@@ -552,6 +588,85 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         !mapping.ViewConstraintViolations.IsEmpty ||
         mapping.ViewModelNotReferenceType is not null;
 
+    /// <summary>
+    /// Computes the namespace the registrations are generated into for one
+    /// compilation: the sanitized assembly name plus a ".g" segment (the
+    /// same marker generated files carry in their ".g.cs" suffix), so the
+    /// namespace stays unique per assembly without inventing a word a
+    /// consumer type could plausibly be named. A missing assembly name
+    /// falls back to the bare <c>ElegantSeries.Flow.Generated</c> namespace.
+    /// </summary>
+    private static string GetGeneratedNamespace(string? assemblyName)
+    {
+        var root = SanitizeNamespaceRoot(assemblyName);
+        return root is null
+            ? "ElegantSeries.Flow.Generated"
+            : root + ".g";
+    }
+
+    /// <summary>
+    /// Turns an assembly name into a namespace root (the generated namespace
+    /// is the root plus ".g") so that two assemblies using
+    /// <c>[ViewFor]</c> never emit the same registrations type: dots are
+    /// kept as segment separators, every other invalid character becomes
+    /// '_', a segment that would start with a digit is prefixed with '_',
+    /// and a segment equal to a reserved keyword gets a trailing '_'.
+    /// Returns null for a missing assembly name (the caller then falls back
+    /// to the bare generated namespace).
+    /// </summary>
+    private static string? SanitizeNamespaceRoot(string? assemblyName)
+    {
+        if (string.IsNullOrWhiteSpace(assemblyName))
+        {
+            return null;
+        }
+
+        var segments = assemblyName!.Split('.');
+        var sb = new StringBuilder();
+        for (var i = 0; i < segments.Length; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append('.');
+            }
+
+            var start = sb.Length;
+            foreach (var c in segments[i])
+            {
+                sb.Append(char.IsLetterOrDigit(c) || c == '_' ? c : '_');
+            }
+
+            if (sb.Length == start)
+            {
+                sb.Append('_');
+            }
+            else if (char.IsDigit(sb[start]))
+            {
+                sb.Insert(start, '_');
+            }
+
+            if (ReservedKeywords.Contains(sb.ToString(start, sb.Length - start)))
+            {
+                sb.Append('_');
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static readonly HashSet<string> ReservedKeywords = new HashSet<string>
+    {
+        "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
+        "class", "const", "continue", "decimal", "default", "delegate", "do", "double", "else",
+        "enum", "event", "explicit", "extern", "false", "finally", "fixed", "float", "for",
+        "foreach", "goto", "if", "implicit", "in", "int", "interface", "internal", "is", "lock",
+        "long", "namespace", "new", "null", "object", "operator", "out", "override", "params",
+        "private", "protected", "public", "readonly", "ref", "return", "sbyte", "sealed",
+        "short", "sizeof", "stackalloc", "static", "string", "struct", "switch", "this",
+        "throw", "true", "try", "typeof", "uint", "ulong", "unchecked", "unsafe", "ushort",
+        "using", "virtual", "void", "volatile", "while",
+    };
+
     private static void Generate(
         SourceProductionContext spc,
         Compilation compilation,
@@ -655,13 +770,37 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             }
         }
 
+        // One view, one [ViewFor] declaration: the plain and generic attribute
+        // classes are separate types, so a single view can carry both. They are
+        // alternatives, never cumulative - not even when they agree - because
+        // the mapping must be declared exactly once. Report each extra
+        // declaration and keep it out of the duplicate-ViewModel check below,
+        // whose message would blame other views instead.
+        var seenViews = new HashSet<string>();
+        var duplicateViewMappings = new HashSet<ViewMapping>();
+        foreach (var mapping in mappings)
+        {
+            if (HasMappingError(mapping))
+            {
+                continue;
+            }
+
+            if (!seenViews.Add(mapping.ViewName))
+            {
+                duplicateViewMappings.Add(mapping);
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.DuplicateViewDeclaration, mapping.Location, mapping.ViewName));
+                hasMappingErrors = true;
+            }
+        }
+
         // Duplicate ViewModel mappings would throw at runtime; fail at compile time instead.
         // Skip mappings that already have errors: their ViewModelName may be empty or
         // otherwise invalid, which would produce noise diagnostics on top of the real ones.
         var seenViewModels = new HashSet<string>();
         foreach (var mapping in mappings)
         {
-            if (HasMappingError(mapping))
+            if (HasMappingError(mapping) || duplicateViewMappings.Contains(mapping))
             {
                 continue;
             }
@@ -690,7 +829,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         sb.AppendLine("// [ViewFor] attributes. Do not edit manually.");
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
-        sb.AppendLine("namespace ElegantSeries.Flow.Generated");
+        sb.AppendLine("namespace " + GetGeneratedNamespace(compilation.AssemblyName));
         sb.AppendLine("{");
         sb.AppendLine("    /// <summary>");
         sb.AppendLine("    /// View registrations generated from <c>[ViewFor]</c> attributes.");
@@ -812,6 +951,14 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             id: "FLOWGEN012",
             title: "ViewModel must be a reference type for the selected lifetime",
             messageFormat: "[ViewFor] on view '{0}' registers ViewModel type '{1}' via {2}, which requires a reference-type ViewModel; a value-type ViewModel can only be used with Lifetime ViewOnly",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor DuplicateViewDeclaration = new DiagnosticDescriptor(
+            id: "FLOWGEN013",
+            title: "View carries more than one [ViewFor] attribute",
+            messageFormat: "View '{0}' carries more than one [ViewFor] attribute. Declare the ViewModel mapping exactly once: [ViewFor] and [ViewFor<TViewModel>] are alternatives, not cumulative.",
             category: "ElegantSeries.Flow.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);

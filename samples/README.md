@@ -120,11 +120,15 @@ Both samples demonstrate the library's full feature set:
     `NavigationViewModelBase` (core package): manual `SetProperty`
     notification, no CommunityToolkit.Mvvm; its buttons call public methods
     from code-behind.
-21. **`ViewFor` attribute + source generator** — every view carries
-    `[ViewFor(typeof(XxxViewModel))]`; the ElegantSeries.Flow source generator
+21. **`ViewFor` attribute + source generator** — every view carries a
+    `[ViewFor]` attribute (all sample views inherit `BaseView<TViewModel>`, so
+    the ViewModel is inferred; a view without that base would instead name it
+    explicitly as `[ViewFor<XxxViewModel>]`); the ElegantSeries.Flow source generator
     (`ElegantSeries.Flow.Generator`, referenced as an Analyzer) turns them into
     `IViewLocator.Register*` calls inside the generated
-    `RegisterAttributedViews()` extension (called from `AddElegantSeriesFlowViews`). The
+    `RegisterAttributedViews()` extension (called from `AddElegantSeriesFlowViews`; the
+    generated code lives in the sample assembly's own
+    `<assembly name>.g` namespace). The
     attribute's `Lifetime` selects the registration: `Transient` (default) →
     `RegisterTransient`, `Singleton` → `RegisterSingleton`, `ViewOnly` →
     mapping-only `Register` (used by Home/Detail, whose DI stays manual).
