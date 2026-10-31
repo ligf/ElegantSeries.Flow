@@ -243,6 +243,22 @@ public sealed partial class NavigationService
 
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (operation is not (NavigationOperation.Push or NavigationOperation.Replace or NavigationOperation.Reset))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(operation),
+                operation,
+                "The operation must be a defined NavigationOperation value (Push, Replace or Reset).");
+        }
+
+        if (retention is not (NavigationRetention.Destroy or NavigationRetention.KeepAlive))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(retention),
+                retention,
+                "The retention must be a defined NavigationRetention value (Destroy or KeepAlive).");
+        }
+
         var intent = new NavigationIntent
         {
             RegionName = regionName,

@@ -338,6 +338,10 @@ public interface INavigationService
     /// page window, vetoed by the current page's leave guard, or discarded because
     /// the service was disposed.
     /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="operation"/> or <paramref name="retention"/> is not a
+    /// defined <see cref="NavigationOperation"/> / <see cref="NavigationRetention"/> value.
+    /// </exception>
     /// <exception cref="OperationCanceledException">
     /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
     /// call completes; cancellation while the request is still pending also
@@ -426,6 +430,10 @@ public interface INavigationService
     /// page window, vetoed by the current page's leave guard, or discarded because
     /// the service was disposed.
     /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="operation"/> or <paramref name="retention"/> is not a
+    /// defined <see cref="NavigationOperation"/> / <see cref="NavigationRetention"/> value.
+    /// </exception>
     /// <exception cref="OperationCanceledException">
     /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
     /// call completes; cancellation while the request is still pending also
@@ -608,6 +616,10 @@ public interface INavigationService
     /// same page window, vetoed by the current page's leave guard, or the
     /// service was disposed.
     /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="retention"/> is not a defined
+    /// <see cref="NavigationRetention"/> value.
+    /// </exception>
     /// <exception cref="OperationCanceledException">
     /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
     /// call completes; cancellation while the request is still pending also
@@ -649,6 +661,10 @@ public interface INavigationService
     /// same page window, vetoed by the current page's leave guard, or the
     /// service was disposed.
     /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="retention"/> is not a defined
+    /// <see cref="NavigationRetention"/> value.
+    /// </exception>
     /// <exception cref="OperationCanceledException">
     /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
     /// call completes; cancellation while the request is still pending also
