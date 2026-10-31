@@ -2315,6 +2315,34 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task Validation_NavigateMethods_ShouldThrowOnUndefinedEnumValues()
+    {
+        // Arrange: land on a page so "the rejected calls changed nothing" is observable.
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        var currentBefore = _navigationService.GetCurrentViewModel();
+
+        var operationError = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => _navigationService.NavigateToAsync<TestDetailViewModel>(operation: (NavigationOperation)99));
+        Assert.Equal("operation", operationError.ParamName);
+
+        var retentionError = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => _navigationService.NavigateToAsync<TestDetailViewModel>(retention: (NavigationRetention)99));
+        Assert.Equal("retention", retentionError.ParamName);
+
+        var parameterizedError = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => _navigationService.NavigateToAsync<TestDetailViewModel, string>("param", operation: (NavigationOperation)(-1)));
+        Assert.Equal("operation", parameterizedError.ParamName);
+
+        var setRootError = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => _navigationService.SetRootAsync<TestDetailViewModel>(retention: (NavigationRetention)(-1)));
+        Assert.Equal("retention", setRootError.ParamName);
+
+        // The rejected calls must not have disturbed the stack.
+        Assert.Same(currentBefore, _navigationService.GetCurrentViewModel());
+        Assert.False(_navigationService.CanGoBack());
+    }
+
+    [Fact]
     public async Task NavigateToAsync_ReentrancyInRegionNavigated_ShouldNotDeadlock()
     {
         bool secondNavigated = false;
