@@ -1,5 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
-
 namespace ElegantSeries.Flow.Routing;
 
 /// <summary>
@@ -50,11 +48,11 @@ public enum ViewModelLifetime
 /// declaration.
 /// </para>
 /// <para>
-/// The ViewModel type can be omitted when the View inherits
-/// <c>BaseView&lt;TViewModel&gt;</c>: the generator infers it from the base
-/// class. Pass it explicitly only for Views that do not inherit
-/// <c>BaseView&lt;TViewModel&gt;</c>. When both are present, they must agree —
-/// a mismatch is reported as a compile-time error.
+/// This form carries no ViewModel type: the generator infers it from the
+/// View's <c>BaseView&lt;TViewModel&gt;</c> base class, so it requires the
+/// View to inherit <c>BaseView&lt;TViewModel&gt;</c>. Views that do not
+/// inherit it name their ViewModel explicitly with the generic
+/// <see cref="ViewForAttribute{TViewModel}"/> instead.
 /// </para>
 /// <para>
 /// <b>Manual vs. generated registration:</b> both mechanisms are supported, but
@@ -69,33 +67,44 @@ public enum ViewModelLifetime
 public sealed class ViewForAttribute : Attribute
 {
     /// <summary>
-    /// Initializes the attribute without an explicit ViewModel type. The source
-    /// generator infers the ViewModel from the View's
-    /// <c>BaseView&lt;TViewModel&gt;</c> base class.
+    /// Initializes the attribute. The source generator infers the ViewModel
+    /// from the View's <c>BaseView&lt;TViewModel&gt;</c> base class.
     /// </summary>
     public ViewForAttribute()
     {
     }
 
     /// <summary>
-    /// Initializes the attribute with an explicit ViewModel type. Use this for
-    /// Views that do not inherit <c>BaseView&lt;TViewModel&gt;</c>.
+    /// Gets or sets how the source generator registers the ViewModel in
+    /// dependency injection. Defaults to <see cref="ViewModelLifetime.Transient"/>.
     /// </summary>
-    /// <param name="viewModelType">The ViewModel type displayed by the decorated View.</param>
-    public ViewForAttribute(
-        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] Type viewModelType)
-    {
-        ViewModelType = viewModelType ?? throw new ArgumentNullException(nameof(viewModelType));
-    }
+    public ViewModelLifetime Lifetime { get; set; } = ViewModelLifetime.Transient;
+}
 
-    /// <summary>
-    /// Gets the ViewModel type displayed by the decorated View, or
-    /// <see langword="null"/> when it is inferred from the View's
-    /// <c>BaseView&lt;TViewModel&gt;</c> base class.
-    /// </summary>
-    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
-    public Type? ViewModelType { get; }
-
+/// <summary>
+/// Declares which ViewModel a View displays, for AOT-compatible view registration,
+/// with the ViewModel type given as a generic type argument.
+/// </summary>
+/// <remarks>
+/// <para>
+/// This is the strongly typed form of <see cref="ViewForAttribute"/>: use it for
+/// Views that do not inherit <c>BaseView&lt;TViewModel&gt;</c> and therefore
+/// cannot have their ViewModel inferred. Views that do inherit
+/// <c>BaseView&lt;TViewModel&gt;</c> can use the plain
+/// <see cref="ViewForAttribute"/> and omit the type entirely.
+/// </para>
+/// <para>
+/// Like <see cref="ViewForAttribute"/>, this attribute is a compile-time
+/// contract for the ElegantSeries.Flow source generator only; the runtime
+/// never scans it. When both an explicit type argument and a
+/// <c>BaseView&lt;TViewModel&gt;</c> base class are present, they must agree —
+/// a mismatch is reported as a compile-time error.
+/// </para>
+/// </remarks>
+/// <typeparam name="TViewModel">The ViewModel type displayed by the decorated View.</typeparam>
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+public sealed class ViewForAttribute<TViewModel> : Attribute
+{
     /// <summary>
     /// Gets or sets how the source generator registers the ViewModel in
     /// dependency injection. Defaults to <see cref="ViewModelLifetime.Transient"/>.

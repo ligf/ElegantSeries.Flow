@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using ElegantSeries.Flow.Generator;
@@ -18,9 +19,18 @@ public class ViewForGeneratorTests
             public sealed class ViewForAttribute : System.Attribute
             {
                 public ViewForAttribute() { }
-                public ViewForAttribute(System.Type viewModelType) { ViewModelType = viewModelType; }
-                public System.Type? ViewModelType { get; }
                 public ViewModelLifetime Lifetime { get; set; } = ViewModelLifetime.Transient;
+            }
+
+            [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+            public sealed class ViewForAttribute<TViewModel> : System.Attribute
+            {
+                public ViewModelLifetime Lifetime { get; set; } = ViewModelLifetime.Transient;
+            }
+
+            [System.AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
+            public sealed class GeneratedViewRegistrationsAttribute : System.Attribute
+            {
             }
 
             public enum ViewModelLifetime { Transient, Singleton, ViewOnly }
@@ -107,6 +117,25 @@ public class ViewForGeneratorTests
         }
         """;
 
+    private const string ViewsWithRootGeneratedType = """
+        namespace TestCompilation
+        {
+            public class Generated
+            {
+            }
+
+            public class ProbeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+            {
+                public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+            }
+
+            [ElegantSeries.Flow.Routing.ViewFor<TestCompilation.ProbeViewModel>]
+            public class ProbeView : Avalonia.Controls.Control
+            {
+            }
+        }
+        """;
+
     private const string BasicViews = """
         namespace TestApp.ViewModels
         {
@@ -128,16 +157,14 @@ public class ViewForGeneratorTests
 
         namespace TestApp.Views
         {
-            [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+            [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
             public class HomeView : Avalonia.Controls.Control { }
 
-            [ElegantSeries.Flow.Routing.ViewFor(
-                typeof(TestApp.ViewModels.MenuViewModel),
+            [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.MenuViewModel>(
                 Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.Singleton)]
             public class MenuView : Avalonia.Controls.Control { }
 
-            [ElegantSeries.Flow.Routing.ViewFor(
-                typeof(TestApp.ViewModels.DetailViewModel),
+            [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.DetailViewModel>(
                 Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.ViewOnly)]
             public class DetailView : Avalonia.Controls.Control { }
         }
@@ -186,10 +213,10 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class HomeView : Avalonia.Controls.Control { }
 
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class OtherHomeView : Avalonia.Controls.Control { }
             }
             """;
@@ -198,6 +225,72 @@ public class ViewForGeneratorTests
 
         var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN001");
         Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+    }
+
+    [Fact]
+    public void BothFormsOnOneView_SameViewModel_ReportsFlowGen013()
+    {
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+            {
+                public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+            }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN013");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        // The duplicate-view diagnostic replaces, not stacks with, FLOWGEN001.
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN001");
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
+    [Fact]
+    public void BothFormsOnOneView_ConflictingViewModels_ReportsFlowGen005Not013()
+    {
+        // The generic declaration disagrees with the BaseView-inferred type:
+        // that is FLOWGEN005's territory (explicit vs. inferred conflict on
+        // the generic application itself). The errored mapping is excluded
+        // from the duplicate-declaration check, so FLOWGEN013 does not stack.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+            {
+                public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+            }
+
+                public class OtherViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+            {
+                public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+            }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.OtherViewModel>]
+                public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN005");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN013");
+        Assert.Empty(runResult.GeneratedSources);
     }
 
     [Fact]
@@ -250,8 +343,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(
-                    typeof(TestApp.ViewModels.MenuViewModel),
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.MenuViewModel>(
                     Lifetime = (ElegantSeries.Flow.Routing.ViewModelLifetime)1)]
                 public class MenuView : Avalonia.Controls.Control { }
             }
@@ -282,8 +374,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(
-                    typeof(TestApp.ViewModels.HomeViewModel),
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>(
                     Lifetime = (ElegantSeries.Flow.Routing.ViewModelLifetime)99)]
                 public class HomeView : Avalonia.Controls.Control { }
             }
@@ -382,7 +473,7 @@ public class ViewForGeneratorTests
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class GenericView<T>
                 {
                 }
@@ -431,13 +522,54 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
-    public void NullViewModelType_ReportsFlowGen006()
+    public void ConsumerShapedProject_NestedNamespaceInlineQualifiedBaseView_CompilesClean()
     {
+        // A consumer-shaped project (assembly name unrelated to the brand):
+        // the view sits in a nested consumer namespace and names its library
+        // base class by its full ElegantSeries.Flow.* name inline, without a
+        // using directive. The generated namespace must not hijack that
+        // resolution: whatever segments it plants under the consumer root,
+        // an ElegantSeries.* lookup from inside the consumer's own namespaces
+        // must still reach the library.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace ShopApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace ShopApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<ShopApp.ViewModels.HomeViewModel>
+                {
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(sources, assemblyName: "ShopApp");
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+    }
+
+    [Fact]
+    public void TypeParameterViewModelType_ReportsFlowGen006()
+    {
+        // A type argument that is not a named type (here the view's own type
+        // parameter) cannot be resolved to a registrable ViewModel: FLOWGEN006
+        // instead of silently skipping the view. (This is the only shape that
+        // reaches FLOWGEN006 now that the explicit form is generic-only.)
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(null)]
-                public class HomeView
+                [ElegantSeries.Flow.Routing.ViewFor<T>]
+                public class HomeView<T> : Avalonia.Controls.Control
                 {
                 }
             }
@@ -485,7 +617,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.OtherViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.OtherViewModel>]
                 public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel>
                 {
                 }
@@ -513,7 +645,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel>
                 {
                 }
@@ -548,7 +680,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class HomeView { }
             }
             """;
@@ -574,7 +706,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public abstract class HomeView : Avalonia.Controls.Control { }
             }
             """;
@@ -600,7 +732,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class HomeView : Avalonia.Controls.Control
                 {
                     public HomeView(int unused) { }
@@ -631,7 +763,7 @@ public class ViewForGeneratorTests
             {
                 public class Container
                 {
-                    [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                    [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                     private class NestedView : Avalonia.Controls.Control { }
                 }
             }
@@ -691,7 +823,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class HomeView { }
             }
             """;
@@ -717,7 +849,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class HomeView : System.Windows.FrameworkElement { }
             }
             """;
@@ -751,7 +883,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.StructViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.StructViewModel>]
                 public class StructView : Avalonia.Controls.Control { }
             }
             """;
@@ -777,8 +909,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(
-                    typeof(TestApp.ViewModels.StructViewModel),
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.StructViewModel>(
                     Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.Singleton)]
                 public class StructView : Avalonia.Controls.Control { }
             }
@@ -807,8 +938,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(
-                    typeof(TestApp.ViewModels.StructViewModel),
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.StructViewModel>(
                     Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.ViewOnly)]
                 public class StructView : Avalonia.Controls.Control { }
             }
@@ -842,7 +972,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 file class FileView : Avalonia.Controls.Control { }
             }
             """;
@@ -872,7 +1002,7 @@ public class ViewForGeneratorTests
             {
                 file class Container
                 {
-                    [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                    [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                     public class InnerView : Avalonia.Controls.Control { }
                 }
             }
@@ -903,7 +1033,7 @@ public class ViewForGeneratorTests
             {
                 public class Outer<T>
                 {
-                    [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                    [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                     public class InnerView : Avalonia.Controls.Control { }
                 }
             }
@@ -933,7 +1063,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public static class StaticView { }
             }
             """;
@@ -962,7 +1092,7 @@ public class ViewForGeneratorTests
 
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.HomeViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
                 public class BrokenView : TypoBase { }
             }
             """;
@@ -972,17 +1102,633 @@ public class ViewForGeneratorTests
         Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN011");
     }
 
+    [Fact]
+    public void GeneratedNamespace_IncludesTheAssemblyName()
+    {
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + BasicViews;
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "namespace TestCompilation.FlowGenerated",
+            generated.SourceText.ToString());
+    }
+
+    [Fact]
+    public void GeneratedNamespace_SanitizesAssemblyNameIntoValidIdentifierSegments()
+    {
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + BasicViews;
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(sources, "2-cool.namespace");
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+
+        // '2-cool' -> '_2_cool' (dash replaced, leading digit prefixed) and the
+        // reserved keyword 'namespace' -> 'namespace_'.
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "namespace _2_cool.namespace_.FlowGenerated",
+            generated.SourceText.ToString());
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
+    public void GeneratedNamespace_RootTypeNamedGenerated_DoesNotCollide()
+    {
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + ViewsWithRootGeneratedType;
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+
+        // The consumer's own 'Generated' type sits in the root namespace; the
+        // generated namespace must not reuse that segment name (CS0101).
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "namespace TestCompilation.FlowGenerated",
+            generated.SourceText.ToString());
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
+    public void GeneratedNamespace_EmptySegmentAndMissingNameFallbacks()
+    {
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + BasicViews;
+
+        // An empty trailing segment becomes '_'.
+        var (dotRunResult, dotDiagnostics, _) = RunGenerator(sources, "Foo.");
+        Assert.Empty(dotDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var dotGenerated = Assert.Single(
+            dotRunResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "namespace Foo._.FlowGenerated",
+            dotGenerated.SourceText.ToString());
+
+        // A whitespace-only assembly name falls back to the bare namespace.
+        // (The compilation itself is invalid — CS8203 — so only the emitted
+        // namespace line is pinned here, not the updated compilation.)
+        var (blankRunResult, blankDiagnostics, _) = RunGenerator(sources, " ");
+        Assert.Empty(blankDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var blankGenerated = Assert.Single(
+            blankRunResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        var blankText = blankGenerated.SourceText.ToString();
+        Assert.Contains("namespace ElegantSeries.Flow.Generated", blankText);
+        Assert.DoesNotContain("namespace ElegantSeries.Flow.Generated.", blankText);
+    }
+
+    [Fact]
+    public void OwnGeneratedFile_CarriesRegistrationsMarker()
+    {
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "[assembly: global::ElegantSeries.Flow.Routing.GeneratedViewRegistrations]",
+            generated.SourceText.ToString());
+    }
+
+    [Fact]
+    public void ReferencedProvider_GeneratesAggregatorWithOwnCallFirst()
+    {
+        var plugin = BuildProviderLibrary("Plugin", "Plugin", "ReportView", "ReportViewModel");
+        var sources = """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, plugin });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+        var aggregator = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+        var text = aggregator.SourceText.ToString();
+        var ownCall = "global::TestCompilation.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
+        var providerCall = "global::Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
+        Assert.Contains(ownCall, text);
+        Assert.Contains(providerCall, text);
+        Assert.True(
+            text.IndexOf(ownCall, System.StringComparison.Ordinal) < text.IndexOf(providerCall, System.StringComparison.Ordinal),
+            "The aggregation must call this assembly's own registrations before the providers'.");
+    }
+
+    [Fact]
+    public void NoProviderReferences_NoAggregatorGenerated()
+    {
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.DoesNotContain(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+    }
+
+    [Fact]
+    public void ProviderOnlyApp_GeneratesAggregatorWithoutOwnCall()
+    {
+        // The desktop-shell shape: the app itself declares no views; every
+        // view arrives from a referenced module. The aggregation must still
+        // be generated, without a call to an own registrations class that
+        // does not exist.
+        var plugin = BuildProviderLibrary("Plugin", "Plugin", "ReportView", "ReportViewModel");
+        var sources = """
+            namespace TestApp
+            {
+                public class ShellMarker { }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, plugin });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.DoesNotContain(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        var aggregator = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+        var text = aggregator.SourceText.ToString();
+        Assert.Contains("global::Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);", text);
+        Assert.DoesNotContain("TestCompilation.FlowGenerated.ViewForRegistrations.RegisterAttributedViews", text);
+    }
+
+    [Fact]
+    public void ProviderWithWrongRegistrationSignature_IsSkipped()
+    {
+        // A marker alone is not enough: a "provider" whose registration
+        // method does not take this compilation's platform locator is not a
+        // real provider (forged marker or incompatible generator output) and
+        // must be silently skipped rather than called.
+        var impostor = BuildProviderLibrary(
+            "Impostor",
+            "Impostor",
+            "FakeView",
+            "FakeViewModel",
+            registrationsOverride: """
+                [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
+
+                namespace Impostor.FlowGenerated
+                {
+                    public static class ViewForRegistrations
+                    {
+                        public static void RegisterAttributedViews(string notAViewLocator)
+                        {
+                        }
+                    }
+                }
+                """);
+        var sources = """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, impostor });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.DoesNotContain(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+    }
+
+    [Fact]
+    public void ProviderWithInternalRegistrationType_IsSkipped()
+    {
+        // The aggregator calls the provider through a fully qualified static
+        // call from another assembly, so a registration type that is not
+        // public can never be a real provider: validation must reject it
+        // instead of emitting a call that cannot bind (CS0122).
+        var cloaked = BuildProviderLibrary(
+            "Cloaked",
+            "Cloaked",
+            "HiddenView",
+            "HiddenViewModel",
+            registrationsOverride: """
+                [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
+
+                namespace Cloaked.FlowGenerated
+                {
+                    internal static class ViewForRegistrations
+                    {
+                        public static void RegisterAttributedViews(this global::ElegantSeries.Flow.Avalonia.Locating.IViewLocator views)
+                        {
+                        }
+                    }
+                }
+                """);
+        var sources = """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, cloaked });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.DoesNotContain(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+    }
+
+    [Fact]
+    public void ProviderWithGenericRegistrationMethod_IsSkipped()
+    {
+        // A generic registration method cannot be called without type
+        // arguments the aggregator does not have (CS0411), so it fails
+        // validation like any other non-conforming shape.
+        var generic = BuildProviderLibrary(
+            "Generic",
+            "Generic",
+            "OpenView",
+            "OpenViewModel",
+            registrationsOverride: """
+                [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
+
+                namespace Generic.FlowGenerated
+                {
+                    public static class ViewForRegistrations
+                    {
+                        public static void RegisterAttributedViews<T>(this global::ElegantSeries.Flow.Avalonia.Locating.IViewLocator views)
+                        {
+                        }
+                    }
+                }
+                """);
+        var sources = """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, generic });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.DoesNotContain(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+    }
+
+    [Fact]
+    public void MultipleProviders_SortKeyIsRawAssemblyName()
+    {
+        // "Z-Mod" sorts before "Z.Mod" by raw assembly name ('-' 0x2D <
+        // '.' 0x2E), but after it by sanitized type name ("Z.Mod.FlowGenerated" vs
+        // "Z_Mod.FlowGenerated": '.' 0x2E < '_' 0x5F). The aggregation order is the raw
+        // assembly-name order.
+        var hyphen = BuildProviderLibrary("Z-Mod", "ZMod", "AlphaView", "AlphaViewModel");
+        var dotted = BuildProviderLibrary("Z.Mod", "ZDotMod", "BetaView", "BetaViewModel");
+        var sources = """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, dotted, hyphen });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var aggregator = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+        var text = aggregator.SourceText.ToString();
+        var hyphenCall = "global::Z_Mod.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
+        var dottedCall = "global::Z.Mod.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
+        Assert.Contains(hyphenCall, text);
+        Assert.Contains(dottedCall, text);
+        Assert.True(
+            text.IndexOf(hyphenCall, System.StringComparison.Ordinal) < text.IndexOf(dottedCall, System.StringComparison.Ordinal),
+            "Provider calls must be sorted by raw assembly name, not by sanitized type name.");
+    }
+
+    [Fact]
+    public void ProviderOnlyApp_WithAmbiguousPlatforms_ReportsFlowGen002()
+    {
+        // Both platform locators visible (the harness inlines both locator
+        // stubs; FlowStubs also carries the Avalonia one — a harness
+        // artifact) and a genuine provider referenced: the provider-only
+        // path must report FLOWGEN002 rather than guess a platform.
+        var plugin = BuildProviderLibrary("Plugin", "Plugin", "ReportView", "ReportViewModel");
+        var sources = AttributeStub + AvaloniaLocatorStub + WpfLocatorStub + """
+            namespace TestApp
+            {
+                public class ShellMarker { }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, plugin });
+        Assert.Contains(diagnostics, d => d.Id == "FLOWGEN002");
+    }
+
+    [Fact]
+    public void ProviderOnlyApp_AmbiguousPlatformsWithOnlyImpostorProvider_StaysSilent()
+    {
+        // The ambiguity report is gated on validated providers: an impostor
+        // that fails validation against both candidate locators must not be
+        // able to switch on a build error.
+        var impostor = BuildProviderLibrary(
+            "Impostor",
+            "Impostor",
+            "FakeView",
+            "FakeViewModel",
+            registrationsOverride: """
+                [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
+
+                namespace Impostor.FlowGenerated
+                {
+                    public static class ViewForRegistrations
+                    {
+                        public static void RegisterAttributedViews(string notAViewLocator)
+                        {
+                        }
+                    }
+                }
+                """);
+        var sources = AttributeStub + AvaloniaLocatorStub + WpfLocatorStub + """
+            namespace TestApp
+            {
+                public class ShellMarker { }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, impostor });
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN002");
+    }
+
+    [Fact]
+    public void ErrorMapping_SuppressesAggregatorAlongWithRegistrations()
+    {
+        // A FLOWGEN error in the app's own mappings cancels all generation
+        // for the compilation, the aggregation included — even when a valid
+        // provider is referenced.
+        var plugin = BuildProviderLibrary("Plugin", "Plugin", "ReportView", "ReportViewModel");
+        var sources = """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.BadViewModel>]
+                public class BadView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class BadViewModel { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, plugin });
+        Assert.Contains(diagnostics, d => d.Id == "FLOWGEN010");
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
+    [Fact]
+    public void MultipleProviders_AggregatorCallsSortedByAssemblyName()
+    {
+        var reports = BuildProviderLibrary("Reports", "Reports", "ChartView", "ChartViewModel");
+        var plugin = BuildProviderLibrary("Plugin", "Plugin", "ReportView", "ReportViewModel");
+        var sources = """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+            """;
+
+        // References are deliberately supplied in reverse name order; the
+        // aggregation order must not depend on reference order.
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, reports, plugin });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var aggregator = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+        var text = aggregator.SourceText.ToString();
+        var pluginCall = "global::Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
+        var reportsCall = "global::Reports.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
+        Assert.Contains(pluginCall, text);
+        Assert.Contains(reportsCall, text);
+        Assert.True(
+            text.IndexOf(pluginCall, System.StringComparison.Ordinal) < text.IndexOf(reportsCall, System.StringComparison.Ordinal),
+            "Provider calls must be sorted by assembly name for deterministic output.");
+    }
+
+    [Fact]
+    public void ProviderRegistration_CallerCanComposeViaQualifiedStaticCall()
+    {
+        // The manual composition contract pinned end to end across two
+        // assemblies: without using the aggregation, the composition root
+        // calls the provider's registrations through the fully qualified
+        // static form and the whole compilation stays clean.
+        var plugin = BuildProviderLibrary("Plugin", "Plugin", "ReportView", "ReportViewModel");
+        var sources = """
+            namespace TestApp
+            {
+                public static class Composition
+                {
+                    public static void RegisterModuleViews(ElegantSeries.Flow.Avalonia.Locating.IViewLocator views)
+                    {
+                        global::Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);
+                    }
+                }
+            }
+            """;
+
+        var (_, diagnostics, updatedCompilation) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, plugin });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
+    public void UserTypeInsideGeneratedNamespace_CoexistsWithRegistrations()
+    {
+        // A namespace is not a type: user code may live in the same
+        // <assembly>.FlowGenerated namespace as the generated registrations without
+        // colliding with them.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestCompilation.FlowGenerated
+            {
+                public static class UsersOwnHelpers { }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(sources);
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.Single(runResult.GeneratedSources, s => s.HintName == "ViewForRegistrations.g.cs");
+    }
+
+    [Fact]
+    public void RootTypeNamedFlowGenerated_CollidesWithGeneratedNamespaceSegment()
+    {
+        // The accepted residual boundary of the FlowGenerated segment word:
+        // a consumer type named exactly FlowGenerated inside the assembly
+        // root namespace cannot coexist with the generated namespace
+        // segment of the same name (CS0101, reported on the consumer's own
+        // declaration). Renaming or relocating that one type is the remedy;
+        // this pins the boundary so it is a recorded cost, not a surprise.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestCompilation
+            {
+                public class FlowGenerated { }
+            }
+            """;
+
+        var (_, _, updatedCompilation) = RunGenerator(sources);
+        Assert.Contains(
+            updatedCompilation.GetDiagnostics(),
+            d => d.Id == "CS0101" && d.Severity == DiagnosticSeverity.Error);
+    }
+
     private static (GeneratorRunResult RunResult, ImmutableArray<Diagnostic> Diagnostics, Compilation UpdatedCompilation)
-        RunGenerator(string sources)
+        RunGenerator(
+            string sources,
+            string assemblyName = "TestCompilation",
+            IReadOnlyList<MetadataReference>? additionalReferences = null)
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(sources);
-        var references = new[]
+        var references = new List<MetadataReference>
         {
             MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
             MetadataReference.CreateFromFile(typeof(System.Attribute).Assembly.Location),
         };
+        if (additionalReferences is not null)
+        {
+            references.AddRange(additionalReferences);
+        }
+
         var compilation = CSharpCompilation.Create(
-            "TestCompilation",
+            assemblyName,
             new[] { syntaxTree },
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -994,16 +1740,113 @@ public class ViewForGeneratorTests
         return (runResult.Results.Single(), runResult.Diagnostics, updatedCompilation);
     }
 
+    /// <summary>
+    /// The shared stub assembly (attributes, controls, navigation contracts,
+    /// Avalonia locator) as a metadata reference. Provider libraries and the
+    /// app compilations that consume them must all resolve the stub types —
+    /// above all the platform locator — from this one assembly, exactly as
+    /// real assemblies all reference the one platform package; compiling the
+    /// stubs into each test compilation instead would give every compilation
+    /// its own private copy of the locator interface and the cross-assembly
+    /// calls would not type-check.
+    /// </summary>
+    private static readonly MetadataReference FlowStubsReference = BuildFlowStubs();
+
+    private static MetadataReference BuildFlowStubs()
+    {
+        var references = new[]
+        {
+            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(System.Attribute).Assembly.Location),
+        };
+        var compilation = CSharpCompilation.Create(
+            "ElegantSeries.Flow.Stubs",
+            new[]
+            {
+                CSharpSyntaxTree.ParseText(
+                    AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub),
+            },
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var errors = compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
+        Assert.Empty(errors);
+        return compilation.ToMetadataReference();
+    }
+
+    /// <summary>
+    /// Builds a stand-in provider library: an assembly with one attributed
+    /// view plus a hand-written replica of the file the generator would have
+    /// emitted into it (marker attribute + registrations class), returned as
+    /// a metadata reference the app compilation can consume.
+    /// </summary>
+    private static MetadataReference BuildProviderLibrary(
+        string assemblyName,
+        string viewNamespace,
+        string viewName,
+        string viewModelName,
+        string? registrationsOverride = null)
+    {
+        var viewSources = $$"""
+            namespace {{viewNamespace}}.Views
+            {
+                public class {{viewName}} : Avalonia.Controls.UserControl { }
+            }
+
+            namespace {{viewNamespace}}.ViewModels
+            {
+                public class {{viewModelName}} : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+            """;
+        var generatedNamespace = string.Join(
+            ".",
+            assemblyName.Split('.').Select(segment => new string(
+                segment.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_').ToArray()))) + ".FlowGenerated";
+        var registrations = registrationsOverride ?? $$"""
+            [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
+
+            namespace {{generatedNamespace}}
+            {
+                public static class ViewForRegistrations
+                {
+                    public static void RegisterAttributedViews(this global::ElegantSeries.Flow.Avalonia.Locating.IViewLocator views)
+                    {
+                        views.RegisterTransient<global::{{viewNamespace}}.Views.{{viewName}}, global::{{viewNamespace}}.ViewModels.{{viewModelName}}>();
+                    }
+                }
+            }
+            """;
+        var references = new[]
+        {
+            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(System.Attribute).Assembly.Location),
+            FlowStubsReference,
+        };
+        var compilation = CSharpCompilation.Create(
+            assemblyName,
+            new[] { CSharpSyntaxTree.ParseText(viewSources), CSharpSyntaxTree.ParseText(registrations) },
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var errors = compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
+        Assert.Empty(errors);
+        return compilation.ToMetadataReference();
+    }
+
     [Fact]
     public void OpenGenericViewModel_ReportsFlowGen009()
     {
-        // [ViewFor(typeof(DetailViewModel<>))] with an open generic ViewModel must
+        // [ViewFor<DetailViewModel<T>>] with an open generic ViewModel must
         // produce FLOWGEN009, not generate uncompilable registration code.
+        // (The unbound form DetailViewModel<> cannot be written as a type
+        // argument at all; a constructed type over the view's own type
+        // parameter is how an open ViewModel is expressed in the generic form.)
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.DetailViewModel<>))]
-                public class DetailView
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.DetailViewModel<T>>]
+                public class DetailView<T>
                 {
                 }
             }
@@ -1030,7 +1873,7 @@ public class ViewForGeneratorTests
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.DetailViewModel<string>))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.DetailViewModel<string>>]
                 public class DetailView
                 {
                 }
@@ -1052,12 +1895,12 @@ public class ViewForGeneratorTests
     [Fact]
     public void ViewModelNotImplementingInterface_ReportsFlowGen010()
     {
-        // [ViewFor(typeof(PlainClass))] where PlainClass does not implement
+        // [ViewFor<PlainClass>] where PlainClass does not implement
         // INavigationViewModel must produce FLOWGEN010.
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.PlainClass))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.PlainClass>]
                 public class DetailView : Avalonia.Controls.Control
                 {
                 }
@@ -1085,7 +1928,7 @@ public class ViewForGeneratorTests
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
-                [ElegantSeries.Flow.Routing.ViewFor(typeof(TestApp.ViewModels.GoodViewModel))]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.GoodViewModel>]
                 public class DetailView : Avalonia.Controls.Control
                 {
                 }
