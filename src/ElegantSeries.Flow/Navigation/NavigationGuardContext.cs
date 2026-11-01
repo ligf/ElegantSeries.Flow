@@ -11,8 +11,10 @@ public sealed class NavigationGuardContext
     /// </summary>
     /// <param name="regionName">The region the navigation targets.</param>
     /// <param name="targetViewModelType">
-    /// The ViewModel type being navigated to — or, for back navigation, the type of the
-    /// page being returned to.
+    /// For a forward navigation, the ViewModel type declared by the navigation call —
+    /// the runtime type of the instance that will be created is decided by dependency
+    /// injection and may differ. For a back navigation, the runtime type of the
+    /// existing page instance being returned to.
     /// </param>
     /// <param name="operation">
     /// The stack operation of the pending navigation, or <see langword="null"/> for
@@ -48,8 +50,10 @@ public sealed class NavigationGuardContext
     public string RegionName { get; }
 
     /// <summary>
-    /// Gets the ViewModel type being navigated to — or, for back navigation, the type of
-    /// the page being returned to.
+    /// Gets the ViewModel type of the pending navigation: for a forward navigation,
+    /// the type declared by the navigation call (the created instance's runtime type
+    /// is decided by dependency injection and may differ); for a back navigation, the
+    /// runtime type of the existing page instance being returned to.
     /// </summary>
     public Type TargetViewModelType { get; }
 

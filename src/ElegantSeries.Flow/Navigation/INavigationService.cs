@@ -158,6 +158,24 @@ public interface INavigationService
     /// that its activation callbacks ran again with a new parameter.
     /// </para>
     /// <para>
+    /// Ordering against navigation completion: this event is raised when a page comes
+    /// to rest, and a navigation call whose page comes to rest completes only after
+    /// this event has been raised for that page — a caller that awaits such a call can
+    /// rely on subscribers having been notified. A page does not come to rest while a
+    /// further request for the region is already pending: its announcement is deferred
+    /// and the landing call completes without it. If the pending request then moves
+    /// on, the page was an intermediate and is never announced. If it instead settles
+    /// without displacing the page — the leave guard refuses it (veto, cancellation,
+    /// or a guard fault), the request is withdrawn, the departure itself faults, or
+    /// the request resolves without a departure at all (a no-op request, a back
+    /// request at the bottom of the stack, a back-to request whose target is not on
+    /// the stack) — the page is announced when the region comes to rest, which may be
+    /// after the landing call and any requests that settled without displacing it
+    /// have completed (and not at all if the service is disposed first). Do not infer
+    /// from any navigation call's completion that the announcement of a page whose
+    /// landing was deferred has already been delivered.
+    /// </para>
+    /// <para>
     /// The navigation service is typically a long-lived singleton: views/hosts that
     /// subscribe must unsubscribe when detached (or dispose their subscription), otherwise
     /// the service keeps the subscriber alive.
