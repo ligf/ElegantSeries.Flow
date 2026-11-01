@@ -581,7 +581,7 @@ public sealed partial class NavigationService
         // committed; the entering page's To callback runs afterwards, in the
         // pump's entering step.
         await RunDisposalActionsAsync(work).ConfigureAwait(false);
-        errors.AddRange(work.Errors);
+        ReportDisposalErrors(work);
 
         if (_disposed)
         {

@@ -958,7 +958,7 @@ public sealed partial class NavigationService
                 // no departing page.
                 FaultOrReport(intent, ex);
                 await RunDisposalActionsAsync(work).ConfigureAwait(false);
-                errors.AddRange(work.Errors);
+                ReportDisposalErrors(work);
 
                 NavigationEntry? top;
                 using (_stateLock.EnterScope())
@@ -981,10 +981,6 @@ public sealed partial class NavigationService
                 else
                 {
                     RaiseEvents(work.Events, ReportSubscriberError);
-                    foreach (var disposalError in work.Errors)
-                    {
-                        ReportSubscriberError(disposalError);
-                    }
                 }
 
                 return !_disposed;
@@ -2054,7 +2050,7 @@ public sealed partial class NavigationService
             // region back to a defined rest state.
             FaultOrReport(final, ex);
             await RunDisposalActionsAsync(work).ConfigureAwait(false);
-            departureErrors.AddRange(work.Errors);
+            ReportDisposalErrors(work);
 
             NavigationEntry? top;
             using (_stateLock.EnterScope())
@@ -2598,7 +2594,7 @@ public sealed partial class NavigationService
         }
 
         await RunDisposalActionsAsync(work).ConfigureAwait(false);
-        errors.AddRange(work.Errors);
+        ReportDisposalErrors(work);
 
         if (_disposed)
         {
@@ -2721,7 +2717,7 @@ public sealed partial class NavigationService
         }
 
         await RunDisposalActionsAsync(work).ConfigureAwait(false);
-        errors.AddRange(work.Errors);
+        ReportDisposalErrors(work);
 
         if (_disposed)
         {
@@ -2746,7 +2742,25 @@ public sealed partial class NavigationService
         foreach (var dispose in work.DisposeActions)
         {
             try { await dispose().ConfigureAwait(false); }
-            catch (Exception ex) { work.Errors.Add(ex); }
+            catch (Exception ex) { work.DisposalErrors.Add(ex); }
         }
+    }
+
+    /// <summary>
+    /// Reports a hop's collected outgoing-disposal errors through
+    /// SubscriberError, exactly once each, and clears the bucket so no later
+    /// consumer can report or merge them again. Disposal errors are framework
+    /// cleanup failures that occur after the hop's state change is committed;
+    /// they never fault a navigation fate (whose caller could only misread
+    /// them as "the navigation did not happen").
+    /// </summary>
+    private void ReportDisposalErrors(TransitionWork work)
+    {
+        foreach (var error in work.DisposalErrors)
+        {
+            ReportSubscriberError(error);
+        }
+
+        work.DisposalErrors.Clear();
     }
 }

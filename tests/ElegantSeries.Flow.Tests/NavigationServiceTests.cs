@@ -1120,6 +1120,32 @@ public class ThrowingAsyncDisposeViewModel : NavigationViewModelBase, IAsyncDisp
     }
 }
 
+/// <summary>
+/// Base for the cache-eviction disposal test: two derived runtime types are
+/// registered for this one static type so two same-key instances can sit on
+/// the stack; an instance flagged <see cref="ThrowOnDispose"/> throws when the
+/// cache evicts and disposes it.
+/// </summary>
+public class EvictionBaseViewModel : NavigationViewModelBase, IDisposable
+{
+    public bool DisposeAttempted { get; private set; }
+
+    public bool ThrowOnDispose { get; set; }
+
+    public void Dispose()
+    {
+        DisposeAttempted = true;
+        if (ThrowOnDispose)
+        {
+            throw new InvalidOperationException("Evicted dispose failed.");
+        }
+    }
+}
+
+public class EvictionDerivedViewModel : EvictionBaseViewModel { }
+
+public class EvictionSecondViewModel : EvictionBaseViewModel { }
+
 public class TestView { }
 
 /// <summary>Collects weak references to every <see cref="ScopedProbeService"/> the container creates.</summary>
@@ -2495,25 +2521,114 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public async Task NavigateAway_WhenPageScopeDisposalThrows_ViewModelReleasedStillFires_PinOwnershipReleased()
+    public async Task NavigateAway_WhenPageScopeDisposalThrows_ViewModelReleasedStillFires_AndErrorGoesToSubscriberError()
     {
         INavigationViewModel? releasedVm = null;
         string? releasedRegion = null;
         _navigationService.ViewModelReleased += (region, vm) => { releasedRegion = region; releasedVm = vm; };
+        var reported = new List<Exception>();
+        _navigationService.SubscriberError += ex => reported.Add(ex);
 
         await _navigationService.NavigateToAsync<ThrowingKeepAliveViewModel>("EventRegion");
         var throwing = (ThrowingKeepAliveViewModel)_navigationService.GetCurrentViewModel("EventRegion")!;
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _navigationService.NavigateToAsync<TestHomeViewModel>("EventRegion", operation: NavigationOperation.Replace));
-        Assert.Equal("Sync dispose failed.", ex.Message);
+        // The departing page's scope disposal runs after the navigation has
+        // committed, so its failure does not fault the call: the call reports
+        // the navigation's own outcome and the disposal failure is reported
+        // through SubscriberError instead, exactly once.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>(
+            "EventRegion", operation: NavigationOperation.Replace));
+        var error = Assert.Single(reported);
+        Assert.IsType<InvalidOperationException>(error);
+        Assert.Equal("Sync dispose failed.", error.Message);
 
-        // Ownership was released even though the scope disposal threw; the error still
-        // propagates to the caller, and navigation itself completed.
+        // Ownership was released even though the scope disposal threw, and
+        // navigation itself completed.
         Assert.Same(throwing, releasedVm);
         Assert.Equal("EventRegion", releasedRegion);
         Assert.True(throwing.DisposeAttempted);
         Assert.True(_navigationService.IsActive<TestHomeViewModel>("EventRegion"));
+    }
+
+    [Fact]
+    public async Task GoBack_WhenPoppedPageDisposalThrows_ShouldReturnTrue_AndReportToSubscriberError()
+    {
+        var reported = new List<Exception>();
+        _navigationService.SubscriberError += ex => reported.Add(ex);
+
+        await _navigationService.NavigateToAsync<TestHomeViewModel>("BackRegion");
+        await _navigationService.NavigateToAsync<ThrowingAsyncDisposeViewModel>("BackRegion");
+        var throwing = (ThrowingAsyncDisposeViewModel)_navigationService.GetCurrentViewModel("BackRegion")!;
+
+        Assert.True(await _navigationService.GoBackAsync("BackRegion"));
+
+        var error = Assert.Single(reported);
+        Assert.IsType<InvalidOperationException>(error);
+        Assert.Equal("Async dispose failed.", error.Message);
+        Assert.True(throwing.DisposeAttempted);
+        Assert.True(_navigationService.IsActive<TestHomeViewModel>("BackRegion"));
+    }
+
+    [Fact]
+    public async Task Reset_WhenSeveralDepartingPagesThrowOnDisposal_ShouldReturnTrue_AndReportEachErrorOnce()
+    {
+        var reported = new List<Exception>();
+        _navigationService.SubscriberError += ex => reported.Add(ex);
+
+        await _navigationService.NavigateToAsync<TestHomeViewModel>("ResetRegion");
+        await _navigationService.NavigateToAsync<ThrowingKeepAliveViewModel>("ResetRegion");
+        await _navigationService.NavigateToAsync<ThrowingDependencyViewModel>("ResetRegion");
+
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>(
+            "ResetRegion", operation: NavigationOperation.Reset));
+
+        // Both departing pages' disposal failures are reported, one per page;
+        // neither faults the reset, which landed normally.
+        Assert.Equal(2, reported.Count);
+        Assert.Contains(reported, ex => ex.Message == "Sync dispose failed.");
+        Assert.Contains(reported, ex => ex.Message == "VM dispose failed.");
+        Assert.True(_navigationService.IsActive<TestHomeViewModel>("ResetRegion"));
+    }
+
+    [Fact]
+    public async Task GoBack_WhenCacheEvictionDisposalThrows_ShouldReturnTrue_AndReportToSubscriberError()
+    {
+        // Same same-key two-instance shape as the cache-eviction regression
+        // test: the second instance is popped into the cache first, then the
+        // first instance's cache write evicts it — and the evicted entry's
+        // disposal, queued into the second GoBack's hop, throws.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<TestHomeViewModel>();
+        int counter = 0;
+        services.AddTransient<EvictionBaseViewModel>(_ =>
+            (counter++ % 2 == 0)
+                ? new EvictionDerivedViewModel()
+                : new EvictionSecondViewModel { ThrowOnDispose = true });
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+        var reported = new List<Exception>();
+        nav.SubscriberError += ex => reported.Add(ex);
+
+        await nav.NavigateToAsync<TestHomeViewModel>();
+        await nav.NavigateToAsync<EvictionBaseViewModel>(retention: NavigationRetention.KeepAlive);
+        await nav.NavigateToAsync<EvictionBaseViewModel>(retention: NavigationRetention.KeepAlive);
+        var evicted = Assert.IsType<EvictionSecondViewModel>(nav.GetCurrentViewModel());
+
+        // Pop the second instance: it moves to the cache, nothing disposed.
+        Assert.True(await nav.GoBackAsync());
+        Assert.Empty(reported);
+
+        // Pop the first instance: its cache write evicts the second entry,
+        // whose disposal throws — reported, not faulted into this call.
+        Assert.True(await nav.GoBackAsync());
+        var error = Assert.Single(reported);
+        Assert.IsType<InvalidOperationException>(error);
+        Assert.Equal("Evicted dispose failed.", error.Message);
+        Assert.True(evicted.DisposeAttempted);
+        Assert.True(nav.IsActive<TestHomeViewModel>());
+
+        await provider.DisposeAsync();
     }
 
     [Fact]
@@ -2762,15 +2877,22 @@ public class NavigationServiceTests
         var serviceProvider = services.BuildServiceProvider();
         var navigationService = (NavigationService)serviceProvider.GetRequiredService<INavigationService>();
 
+        var reported = new List<Exception>();
+        navigationService.SubscriberError += ex => reported.Add(ex);
+
         await navigationService.NavigateToAsync<ThrowingDependencyViewModel>();
         var throwing = (ThrowingDependencyViewModel)navigationService.GetCurrentViewModel()!;
         await navigationService.NavigateToAsync<KeepAliveViewModel>();
         var healthy = (KeepAliveViewModel)navigationService.GetCurrentViewModel()!;
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            navigationService.NavigateToAsync<TestHomeViewModel>(operation: NavigationOperation.Reset));
+        // The reset's outgoing disposals run after the reset has committed:
+        // the throwing page's failure is reported through SubscriberError and
+        // does not fault the call.
+        Assert.True(await navigationService.NavigateToAsync<TestHomeViewModel>(operation: NavigationOperation.Reset));
 
-        Assert.Equal("VM dispose failed.", ex.Message);
+        var error = Assert.Single(reported);
+        Assert.IsType<InvalidOperationException>(error);
+        Assert.Equal("VM dispose failed.", error.Message);
         Assert.True(throwing.DisposeAttempted);
         // Pinned platform behavior: IServiceScope.Dispose stops at the first throwing
         // disposable, so the dependency created before the ViewModel is never released.

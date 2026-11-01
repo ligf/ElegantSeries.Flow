@@ -94,8 +94,11 @@ namespace ElegantSeries.Flow.Navigation;
 /// <para>
 /// Within one page scope the DI container stops disposing remaining services after the
 /// first throwing disposable (platform behavior, sync and async alike). Across pages the
-/// service still attempts every scope: a single failure is rethrown as-is, several are
-/// wrapped in <see cref="AggregateException"/>.
+/// service still attempts every scope. Where the service's own disposal drives the
+/// release, the failures reach that caller — a single failure rethrown as-is, several
+/// wrapped in <see cref="AggregateException"/>; where a navigation drives it, each
+/// failure is instead reported through <see cref="SubscriberError"/> (see its
+/// documentation) and the navigation's own result is unaffected.
 /// </para>
 /// <para>
 /// <b>Region names:</b> every <c>regionName</c> parameter on this interface is
@@ -192,7 +195,8 @@ public interface INavigationService
     /// <para>
     /// Ownership-released means the ViewModel was removed from navigation state and its
     /// page scope is being disposed. The event fires even if the scope disposal threw
-    /// (the error is still reported to the caller); it does <i>not</i> mean every
+    /// (the error is still reported — through <see cref="SubscriberError"/> when the
+    /// release was driven by a navigation); it does <i>not</i> mean every
     /// disposable inside the scope was released — the DI container stops a scope at the
     /// first throwing disposable. The event also fires for Singleton ViewModels when
     /// their page is torn down: the page scope is disposed, but the shared instance
@@ -222,9 +226,15 @@ public interface INavigationService
     /// and for navigation failures that have no awaiting caller to throw to:
     /// a leave guard that faults after its caller has withdrawn, a disposal-gate
     /// timeout, or a callback chain stopped by
-    /// <see cref="NavigationOptions.MaxNavigationChainLength"/>. The exception
-    /// is swallowed to protect navigation state; subscribe to this event for
-    /// diagnostics.
+    /// <see cref="NavigationOptions.MaxNavigationChainLength"/>. It also
+    /// reports failures of the page-scope disposals a navigation performs on
+    /// its way out (a departing <see cref="NavigationRetention.Destroy"/> page,
+    /// or a cached page evicted by the departing page taking its cache slot):
+    /// those disposals run after the navigation has committed, so their
+    /// failures are reported here — exactly once each — and never fault the
+    /// navigation task, whose result reports the navigation's own outcome.
+    /// The exception is swallowed to protect navigation state; subscribe to
+    /// this event for diagnostics.
     /// </summary>
     /// <remarks>Parameter: the reported exception.</remarks>
     event Action<Exception>? SubscriberError;
