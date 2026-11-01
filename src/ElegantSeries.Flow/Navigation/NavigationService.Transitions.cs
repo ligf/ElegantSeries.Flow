@@ -720,7 +720,7 @@ public sealed partial class NavigationService
                 {
                     // No callback in flight (shouldn't happen for self-dispose,
                     // but be safe): dispose inline.
-                    if (await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false))
+                    if (await DisposeScopeAsync(entry.Scope, work.DisposalErrors).ConfigureAwait(false))
                     {
                         foreach (var region in regionsToNotify)
                         {
@@ -739,7 +739,7 @@ public sealed partial class NavigationService
             }
             else
             {
-                if (await DisposeScopeAsync(entry.Scope, work.Errors).ConfigureAwait(false))
+                if (await DisposeScopeAsync(entry.Scope, work.DisposalErrors).ConfigureAwait(false))
                 {
                     foreach (var region in regionsToNotify)
                     {
@@ -902,7 +902,14 @@ public sealed partial class NavigationService
 
         public List<Action> Events { get; } = [];
 
-        public List<Exception> Errors { get; } = [];
+        /// <summary>
+        /// Errors thrown by this hop's outgoing page-scope disposals. These
+        /// are framework cleanup failures, not navigation failures: the pump
+        /// reports each of them through SubscriberError (see
+        /// ReportDisposalErrors) and they never enter a fate-bound error
+        /// list. Do not merge this list into an intent's errors.
+        /// </summary>
+        public List<Exception> DisposalErrors { get; } = [];
 
         /// <summary>
         /// ViewModels whose Navigation property changed under the lock.
