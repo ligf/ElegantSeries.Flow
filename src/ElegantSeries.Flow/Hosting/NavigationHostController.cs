@@ -64,7 +64,17 @@ internal sealed class NavigationHostController<TView> where TView : class
     /// Initializes a new instance of the <see cref="NavigationHostController{TView}"/> class.
     /// </summary>
     /// <param name="dispatcher">Marshals view updates to the UI thread.</param>
-    /// <param name="regionNameProvider">Returns the region this host displays. Evaluated per event so renames take effect immediately.</param>
+    /// <param name="regionNameProvider">
+    /// Returns the region this host displays. Evaluated per event so renames take
+    /// effect immediately. It is evaluated on the thread raising the navigation
+    /// event (the receipt-time filter, before any marshaling) as well as on the
+    /// UI thread (the queued path's re-check and <see cref="Refresh"/>), so it
+    /// must be thread-safe, cheap, and must not touch thread-affine UI state —
+    /// mirror the name into a plain (volatile) field, as the platform hosts do.
+    /// The returned name is compared ordinally against the service's normalized
+    /// event names, so it must be returned in the service's normalized form
+    /// (trimmed).
+    /// </param>
     /// <param name="viewFactory">
     /// Creates the view for a page, given its <see cref="ViewCreationContext"/>.
     /// May throw (for example
