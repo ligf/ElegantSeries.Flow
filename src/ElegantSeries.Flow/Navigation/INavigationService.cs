@@ -92,6 +92,24 @@ namespace ElegantSeries.Flow.Navigation;
 /// <see cref="INavigationAware"/>.
 /// </para>
 /// <para>
+/// <b>Event threading:</b> the events of this interface
+/// (<see cref="RegionNavigated"/>, <see cref="ViewModelReleased"/>,
+/// <see cref="RegionCacheCleared"/>, <see cref="SubscriberError"/>) are raised
+/// synchronously, on whatever thread is executing the work that produces
+/// them — the thread of a caller awaiting a navigation, a lifecycle
+/// callback's continuation, or a thread-pool thread. A few reports complete
+/// in the background after the operation that started them has returned —
+/// deferred scope disposals and late-finishing lifecycle callbacks (see
+/// "After disposal" below) — and their events arrive on a thread-pool
+/// thread at that later time. No thread affinity is guaranteed and no
+/// synchronization context is captured on any path: handlers must be
+/// thread-safe, must not block the raising thread, and must marshal UI work
+/// to the UI thread themselves. The platform <c>NavigationHost</c> controls
+/// already marshal their view updates internally, so an application that
+/// navigates from background threads needs no additional work when it uses
+/// them.
+/// </para>
+/// <para>
 /// Within one page scope the DI container stops disposing remaining services after the
 /// first throwing disposable (platform behavior, sync and async alike). Across pages the
 /// service still attempts every scope. Where the service's own disposal drives the
