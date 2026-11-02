@@ -22,6 +22,7 @@
     <PackageReference Include="ElegantSeries.Flow.Mvvm" Version="$(FlowVersion)" />
     <PackageReference Include="ElegantSeries.Flow.Diagnostics" Version="$(FlowVersion)" />
     <PackageReference Include="ElegantSeries.Flow.Routing" Version="$(FlowVersion)" />
+    <PackageReference Include="ElegantSeries.Flow.Journal" Version="$(FlowVersion)" />
   </ItemGroup>
 
 </Project>
