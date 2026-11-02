@@ -5,7 +5,7 @@ namespace ElegantSeries.Flow.Routing;
 /// route matches the URI. (<see cref="IRouter.TryNavigateAsync"/>
 /// returns <see langword="false"/> in the same situation instead.)
 /// </summary>
-public class RouteNotFoundException : Exception
+public sealed class RouteNotFoundException : Exception
 {
     /// <summary>Creates the exception for the unmatched URI.</summary>
     /// <param name="uri">The URI no route matched, exactly as passed
