@@ -30,6 +30,12 @@ public sealed class AddElegantSeriesFlowAnalyzer : DiagnosticAnalyzer
     private const string LifetimeParameterName = "lifetime";
     private const string ServiceLifetimeMetadataName = "Microsoft.Extensions.DependencyInjection.ServiceLifetime";
 
+    // The assembly that defines FlowServiceCollectionExtensions. Name and
+    // namespace matching alone would also match a user-defined or third-party
+    // type with the same names, so the containing assembly's identity is
+    // verified as well.
+    private const string FlowAssemblyName = "ElegantSeries.Flow";
+
     // Microsoft.Extensions.DependencyInjection.ServiceLifetime:
     // Singleton = 0, Scoped = 1, Transient = 2.
     private const int SingletonValue = 0;
@@ -61,7 +67,8 @@ public sealed class AddElegantSeriesFlowAnalyzer : DiagnosticAnalyzer
         if (context.SemanticModel.GetSymbolInfo(invocation, context.CancellationToken).Symbol is not IMethodSymbol method ||
             method.Name != MethodName ||
             method.ContainingType?.Name != "FlowServiceCollectionExtensions" ||
-            method.ContainingType.ContainingNamespace?.ToDisplayString() != "ElegantSeries.Flow.Extensions")
+            method.ContainingType.ContainingNamespace?.ToDisplayString() != "ElegantSeries.Flow.Extensions" ||
+            method.ContainingType.ContainingAssembly?.Name != FlowAssemblyName)
         {
             return;
         }
