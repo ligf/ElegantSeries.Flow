@@ -177,6 +177,7 @@ registering the same ViewModel twice throws at startup.
 | `ElegantSeries.Flow.Generator` | Roslyn source generator: emits `IViewLocator` registrations from `[ViewFor]` attributes (Analyzer-only, no runtime dependency) |
 | `ElegantSeries.Flow.Diagnostics` | Optional metrics observer: turns navigation events into counters on the `ElegantSeries.Flow.Diagnostics` meter (`navigation.completed`, `viewmodel.released`, `cache.cleared`, `subscriber.errors`) for MeterListener / OpenTelemetry |
 | `ElegantSeries.Flow.Routing` | Optional URI routing: an explicit `RouteTableBuilder` maps URI patterns (`orders/{id}`) to typed navigations — registration order is match priority, no reflection, AOT-safe |
+| `ElegantSeries.Flow.Journal` | Optional navigation journal: a decorator over `INavigationService` that records navigation history with parameter snapshots (per-type delegate serializers, no reflection), persists entries and stack snapshots through a pluggable store (in-memory or JSON file), and restores region stacks from a snapshot — recording failures never affect navigation |
 
 ## UI integration
 

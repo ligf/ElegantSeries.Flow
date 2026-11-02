@@ -7,6 +7,7 @@ using ElegantSeries.Flow.Avalonia.Locating;
 using ElegantSeries.Flow.Avalonia.Views;
 using ElegantSeries.Flow.Extensions;
 using ConsumerApp.FlowGenerated;
+using ElegantSeries.Flow.Journal;
 using ElegantSeries.Flow.Navigation;
 using ElegantSeries.Flow.Routing;
 using ElegantSeries.Flow.ViewModels;
@@ -32,6 +33,8 @@ string? capturedRouteName = null;
 var services = new ServiceCollection();
 services.AddElegantSeriesFlow();
 services.AddElegantSeriesFlowDiagnostics();
+services.AddElegantSeriesFlowJournal(journal => journal
+    .RegisterParameter<string>(value => value, value => value));
 services.AddElegantSeriesFlowRouting(routes => routes
     .Map<BetaViewModel>("beta")
     .Map<AlphaViewModel, string>("alpha/{name}", match =>
@@ -99,6 +102,24 @@ Check(navigation.GetCurrentViewModel() is BetaViewModel, "Routing landed on Beta
 Check(await router.NavigateAsync("alpha/consumer"), "Routing placeholder route navigates");
 Check(capturedRouteName == "consumer", "Routing parameter factory received the placeholder value");
 Check(!await router.TryNavigateAsync("no/such/route"), "Routing TryNavigate returns false for an unknown URI");
+
+// The Journal package's decorator wrapped the packaged core's
+// navigation service, so every navigation above was recorded; the
+// routed string parameter was frozen with the registered serializer.
+var journal = provider.GetRequiredService<INavigationJournal>();
+var journalEntries = await journal.GetEntriesAsync();
+Check(journalEntries.Count > 0, "Journal recorded the navigations above");
+Check(journalEntries.Any(e => e.ParameterSnapshot == "consumer"), "Journal froze the route parameter snapshot");
+var journalSnapshot = await journal.CaptureSnapshotAsync();
+Check(journalSnapshot.Regions.Count > 0, "Journal captured a stack snapshot");
+var restoredPages = 0;
+var restoreResult = await journal.RestoreAsync(journalSnapshot, _ =>
+{
+    restoredPages++;
+    return Task.FromResult(true);
+});
+Check(restoreResult.AllSucceeded && restoredPages == journalSnapshot.Regions.Sum(r => r.Pages.Count),
+    "Journal restore walked every snapshot page");
 
 Console.WriteLine(failures == 0 ? "CONSUMER PASS" : $"CONSUMER FAIL ({failures} checks failed)");
 return failures == 0 ? 0 : 1;

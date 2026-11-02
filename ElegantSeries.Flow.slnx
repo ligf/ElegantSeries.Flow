@@ -7,6 +7,7 @@
     <Project Path="src/ElegantSeries.Flow.Generator/ElegantSeries.Flow.Generator.csproj" />
     <Project Path="src/ElegantSeries.Flow.Diagnostics/ElegantSeries.Flow.Diagnostics.csproj" />
     <Project Path="src/ElegantSeries.Flow.Routing/ElegantSeries.Flow.Routing.csproj" />
+    <Project Path="src/ElegantSeries.Flow.Journal/ElegantSeries.Flow.Journal.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ElegantSeries.Flow.Tests/ElegantSeries.Flow.Tests.csproj" />
@@ -15,6 +16,7 @@
     <Project Path="tests/ElegantSeries.Flow.Generator.Tests/ElegantSeries.Flow.Generator.Tests.csproj" />
     <Project Path="tests/ElegantSeries.Flow.Diagnostics.Tests/ElegantSeries.Flow.Diagnostics.Tests.csproj" />
     <Project Path="tests/ElegantSeries.Flow.Routing.Tests/ElegantSeries.Flow.Routing.Tests.csproj" />
+    <Project Path="tests/ElegantSeries.Flow.Journal.Tests/ElegantSeries.Flow.Journal.Tests.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/ElegantSeries.Flow.Samples.WPF/ElegantSeries.Flow.Samples.WPF.csproj" />

@@ -1,0 +1,159 @@
+#nullable enable
+ElegantSeries.Flow.Journal.INavigationJournal
+ElegantSeries.Flow.Journal.INavigationJournal.CaptureSnapshotAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ElegantSeries.Flow.Journal.JournalSnapshot!>!
+ElegantSeries.Flow.Journal.INavigationJournal.ClearAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ElegantSeries.Flow.Journal.INavigationJournal.GetEntriesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Journal.JournalEntry!>!>!
+ElegantSeries.Flow.Journal.INavigationJournal.LoadSnapshotAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ElegantSeries.Flow.Journal.JournalSnapshot?>!
+ElegantSeries.Flow.Journal.INavigationJournal.RestoreAsync(ElegantSeries.Flow.Journal.JournalSnapshot! snapshot, System.Func<ElegantSeries.Flow.Journal.JournalPageRestore!, System.Threading.Tasks.Task<bool>!>! navigatePage, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ElegantSeries.Flow.Journal.JournalRestoreResult!>!
+ElegantSeries.Flow.Journal.INavigationJournalStore
+ElegantSeries.Flow.Journal.INavigationJournalStore.AppendAsync(ElegantSeries.Flow.Journal.JournalEntry! entry, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.INavigationJournalStore.ClearAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.INavigationJournalStore.LoadSnapshotAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ElegantSeries.Flow.Journal.JournalSnapshot?>
+ElegantSeries.Flow.Journal.INavigationJournalStore.ReadEntriesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Journal.JournalEntry!>!>
+ElegantSeries.Flow.Journal.INavigationJournalStore.SaveSnapshotAsync(ElegantSeries.Flow.Journal.JournalSnapshot! snapshot, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.InMemoryJournalStore
+ElegantSeries.Flow.Journal.InMemoryJournalStore.AppendAsync(ElegantSeries.Flow.Journal.JournalEntry! entry, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.InMemoryJournalStore.ClearAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.InMemoryJournalStore.InMemoryJournalStore() -> void
+ElegantSeries.Flow.Journal.InMemoryJournalStore.InMemoryJournalStore(ElegantSeries.Flow.Journal.JournalOptions! options) -> void
+ElegantSeries.Flow.Journal.InMemoryJournalStore.LoadSnapshotAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ElegantSeries.Flow.Journal.JournalSnapshot?>
+ElegantSeries.Flow.Journal.InMemoryJournalStore.ReadEntriesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Journal.JournalEntry!>!>
+ElegantSeries.Flow.Journal.InMemoryJournalStore.SaveSnapshotAsync(ElegantSeries.Flow.Journal.JournalSnapshot! snapshot, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.JournalBuilder
+ElegantSeries.Flow.Journal.JournalBuilder.JournalBuilder() -> void
+ElegantSeries.Flow.Journal.JournalBuilder.Options.get -> ElegantSeries.Flow.Journal.JournalOptions!
+ElegantSeries.Flow.Journal.JournalBuilder.RegisterParameter<TParameter>(System.Func<TParameter, string!>! serialize, System.Func<string!, TParameter>! deserialize) -> ElegantSeries.Flow.Journal.JournalBuilder!
+ElegantSeries.Flow.Journal.JournalBuilder.UseJsonFileStore(string! path) -> ElegantSeries.Flow.Journal.JournalBuilder!
+ElegantSeries.Flow.Journal.JournalBuilder.UseStore(ElegantSeries.Flow.Journal.INavigationJournalStore! store) -> ElegantSeries.Flow.Journal.JournalBuilder!
+ElegantSeries.Flow.Journal.JournalEntry
+ElegantSeries.Flow.Journal.JournalEntry.JournalEntry() -> void
+ElegantSeries.Flow.Journal.JournalEntry.Kind.get -> ElegantSeries.Flow.Journal.JournalEntryKind
+ElegantSeries.Flow.Journal.JournalEntry.Kind.init -> void
+ElegantSeries.Flow.Journal.JournalEntry.ParameterSnapshot.get -> string?
+ElegantSeries.Flow.Journal.JournalEntry.ParameterSnapshot.init -> void
+ElegantSeries.Flow.Journal.JournalEntry.ParameterType.get -> string?
+ElegantSeries.Flow.Journal.JournalEntry.ParameterType.init -> void
+ElegantSeries.Flow.Journal.JournalEntry.Region.get -> string!
+ElegantSeries.Flow.Journal.JournalEntry.Region.init -> void
+ElegantSeries.Flow.Journal.JournalEntry.Sequence.get -> long
+ElegantSeries.Flow.Journal.JournalEntry.Sequence.init -> void
+ElegantSeries.Flow.Journal.JournalEntry.TimestampUtc.get -> System.DateTimeOffset
+ElegantSeries.Flow.Journal.JournalEntry.TimestampUtc.init -> void
+ElegantSeries.Flow.Journal.JournalEntry.ViewModelType.get -> string?
+ElegantSeries.Flow.Journal.JournalEntry.ViewModelType.init -> void
+ElegantSeries.Flow.Journal.JournalEntryKind
+ElegantSeries.Flow.Journal.JournalEntryKind.Back = 1 -> ElegantSeries.Flow.Journal.JournalEntryKind
+ElegantSeries.Flow.Journal.JournalEntryKind.CacheCleared = 2 -> ElegantSeries.Flow.Journal.JournalEntryKind
+ElegantSeries.Flow.Journal.JournalEntryKind.Navigated = 0 -> ElegantSeries.Flow.Journal.JournalEntryKind
+ElegantSeries.Flow.Journal.JournalEntryKind.Released = 3 -> ElegantSeries.Flow.Journal.JournalEntryKind
+ElegantSeries.Flow.Journal.JournalEntryKind.Removed = 4 -> ElegantSeries.Flow.Journal.JournalEntryKind
+ElegantSeries.Flow.Journal.JournalNavigationService
+ElegantSeries.Flow.Journal.JournalNavigationService.CanGoBack(string! regionName = "MainRegion") -> bool
+ElegantSeries.Flow.Journal.JournalNavigationService.ClearAllCache() -> void
+ElegantSeries.Flow.Journal.JournalNavigationService.ClearAllCacheAsync() -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.JournalNavigationService.ClearCache(string! regionName) -> void
+ElegantSeries.Flow.Journal.JournalNavigationService.ClearCacheAsync(string! regionName) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.JournalNavigationService.Dispose() -> void
+ElegantSeries.Flow.Journal.JournalNavigationService.DisposeAsync() -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.JournalNavigationService.GetCurrentParameter(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel, string! regionName = "MainRegion") -> object?
+ElegantSeries.Flow.Journal.JournalNavigationService.GetCurrentRetention(string! regionName = "MainRegion") -> ElegantSeries.Flow.Navigation.NavigationRetention?
+ElegantSeries.Flow.Journal.JournalNavigationService.GetCurrentViewModel(string! regionName = "MainRegion") -> ElegantSeries.Flow.Navigation.INavigationViewModel?
+ElegantSeries.Flow.Journal.JournalNavigationService.GetNavigationStack(string! regionName = "MainRegion") -> System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Navigation.INavigationViewModel!>!
+ElegantSeries.Flow.Journal.JournalNavigationService.GoBackAsync(string! regionName = "MainRegion", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Journal.JournalNavigationService.GoBackToAsync<TViewModel, TParam>(TParam parameter, string! regionName = "MainRegion", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Journal.JournalNavigationService.GoBackToAsync<TViewModel>(string! regionName = "MainRegion", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Journal.JournalNavigationService.IsActive<TViewModel>(string! regionName = "MainRegion") -> bool
+ElegantSeries.Flow.Journal.JournalNavigationService.JournalNavigationService(ElegantSeries.Flow.Navigation.INavigationService! inner, ElegantSeries.Flow.Journal.INavigationJournalStore! store, ElegantSeries.Flow.Journal.JournalBuilder! builder) -> void
+ElegantSeries.Flow.Journal.JournalNavigationService.NavigateToAsync<TViewModel, TParam>(TParam parameter, string! regionName = "MainRegion", ElegantSeries.Flow.Navigation.NavigationOperation operation = ElegantSeries.Flow.Navigation.NavigationOperation.Push, ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy, bool refreshIfActive = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Journal.JournalNavigationService.NavigateToAsync<TViewModel>(string! regionName = "MainRegion", ElegantSeries.Flow.Navigation.NavigationOperation operation = ElegantSeries.Flow.Navigation.NavigationOperation.Push, ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy, bool refreshIfActive = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Journal.JournalNavigationService.RegionCacheCleared -> System.Action<string!>?
+ElegantSeries.Flow.Journal.JournalNavigationService.RegionNavigated -> System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>?
+ElegantSeries.Flow.Journal.JournalNavigationService.Remove<TViewModel, TParam>(TParam parameter, string! regionName = "MainRegion") -> int
+ElegantSeries.Flow.Journal.JournalNavigationService.Remove<TViewModel>(string! regionName = "MainRegion") -> int
+ElegantSeries.Flow.Journal.JournalNavigationService.SetRootAsync<TViewModel, TParam>(TParam parameter, string! regionName = "MainRegion", ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Journal.JournalNavigationService.SetRootAsync<TViewModel>(string! regionName = "MainRegion", ElegantSeries.Flow.Navigation.NavigationRetention retention = ElegantSeries.Flow.Navigation.NavigationRetention.Destroy, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+ElegantSeries.Flow.Journal.JournalNavigationService.SubscribeRegionCacheCleared(System.Action<string!>! handler) -> System.IDisposable!
+ElegantSeries.Flow.Journal.JournalNavigationService.SubscribeRegionNavigated(System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>! handler) -> System.IDisposable!
+ElegantSeries.Flow.Journal.JournalNavigationService.SubscriberError -> System.Action<System.Exception!>?
+ElegantSeries.Flow.Journal.JournalNavigationService.SubscribeSubscriberError(System.Action<System.Exception!>! handler) -> System.IDisposable!
+ElegantSeries.Flow.Journal.JournalNavigationService.SubscribeViewModelReleased(System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>! handler) -> System.IDisposable!
+ElegantSeries.Flow.Journal.JournalNavigationService.ViewModelReleased -> System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>?
+ElegantSeries.Flow.Journal.JournalOptions
+ElegantSeries.Flow.Journal.JournalOptions.JournalOptions() -> void
+ElegantSeries.Flow.Journal.JournalOptions.MaxHistoryEntries.get -> int
+ElegantSeries.Flow.Journal.JournalOptions.MaxHistoryEntries.set -> void
+ElegantSeries.Flow.Journal.JournalPageRestore
+ElegantSeries.Flow.Journal.JournalPageRestore.JournalPageRestore() -> void
+ElegantSeries.Flow.Journal.JournalPageRestore.Operation.get -> ElegantSeries.Flow.Journal.JournalRestoreOperation
+ElegantSeries.Flow.Journal.JournalPageRestore.Operation.init -> void
+ElegantSeries.Flow.Journal.JournalPageRestore.Parameter.get -> object?
+ElegantSeries.Flow.Journal.JournalPageRestore.Parameter.init -> void
+ElegantSeries.Flow.Journal.JournalPageRestore.Region.get -> string!
+ElegantSeries.Flow.Journal.JournalPageRestore.Region.init -> void
+ElegantSeries.Flow.Journal.JournalPageRestore.Retention.get -> ElegantSeries.Flow.Navigation.NavigationRetention
+ElegantSeries.Flow.Journal.JournalPageRestore.Retention.init -> void
+ElegantSeries.Flow.Journal.JournalPageRestore.ViewModelType.get -> string!
+ElegantSeries.Flow.Journal.JournalPageRestore.ViewModelType.init -> void
+ElegantSeries.Flow.Journal.JournalPageSnapshot
+ElegantSeries.Flow.Journal.JournalPageSnapshot.JournalPageSnapshot() -> void
+ElegantSeries.Flow.Journal.JournalPageSnapshot.Parameter.get -> string?
+ElegantSeries.Flow.Journal.JournalPageSnapshot.Parameter.init -> void
+ElegantSeries.Flow.Journal.JournalPageSnapshot.ParameterType.get -> string?
+ElegantSeries.Flow.Journal.JournalPageSnapshot.ParameterType.init -> void
+ElegantSeries.Flow.Journal.JournalPageSnapshot.Retention.get -> ElegantSeries.Flow.Navigation.NavigationRetention
+ElegantSeries.Flow.Journal.JournalPageSnapshot.Retention.init -> void
+ElegantSeries.Flow.Journal.JournalPageSnapshot.ViewModelType.get -> string!
+ElegantSeries.Flow.Journal.JournalPageSnapshot.ViewModelType.init -> void
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult.Error.get -> System.Exception?
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult.Error.init -> void
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult.FailedPage.get -> ElegantSeries.Flow.Journal.JournalPageSnapshot?
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult.FailedPage.init -> void
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult.JournalRegionRestoreResult() -> void
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult.Region.get -> string!
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult.Region.init -> void
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult.RestoredPages.get -> int
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult.RestoredPages.init -> void
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult.Succeeded.get -> bool
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult.TotalPages.get -> int
+ElegantSeries.Flow.Journal.JournalRegionRestoreResult.TotalPages.init -> void
+ElegantSeries.Flow.Journal.JournalRegionSnapshot
+ElegantSeries.Flow.Journal.JournalRegionSnapshot.JournalRegionSnapshot() -> void
+ElegantSeries.Flow.Journal.JournalRegionSnapshot.Pages.get -> System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Journal.JournalPageSnapshot!>!
+ElegantSeries.Flow.Journal.JournalRegionSnapshot.Pages.init -> void
+ElegantSeries.Flow.Journal.JournalRegionSnapshot.Region.get -> string!
+ElegantSeries.Flow.Journal.JournalRegionSnapshot.Region.init -> void
+ElegantSeries.Flow.Journal.JournalRestoreOperation
+ElegantSeries.Flow.Journal.JournalRestoreOperation.Push = 1 -> ElegantSeries.Flow.Journal.JournalRestoreOperation
+ElegantSeries.Flow.Journal.JournalRestoreOperation.Root = 0 -> ElegantSeries.Flow.Journal.JournalRestoreOperation
+ElegantSeries.Flow.Journal.JournalRestoreResult
+ElegantSeries.Flow.Journal.JournalRestoreResult.AllSucceeded.get -> bool
+ElegantSeries.Flow.Journal.JournalRestoreResult.JournalRestoreResult() -> void
+ElegantSeries.Flow.Journal.JournalRestoreResult.Regions.get -> System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Journal.JournalRegionRestoreResult!>!
+ElegantSeries.Flow.Journal.JournalRestoreResult.Regions.init -> void
+ElegantSeries.Flow.Journal.JournalSnapshot
+ElegantSeries.Flow.Journal.JournalSnapshot.CapturedUtc.get -> System.DateTimeOffset
+ElegantSeries.Flow.Journal.JournalSnapshot.CapturedUtc.init -> void
+ElegantSeries.Flow.Journal.JournalSnapshot.FormatVersion.get -> int
+ElegantSeries.Flow.Journal.JournalSnapshot.FormatVersion.init -> void
+ElegantSeries.Flow.Journal.JournalSnapshot.JournalSnapshot() -> void
+ElegantSeries.Flow.Journal.JournalSnapshot.Regions.get -> System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Journal.JournalRegionSnapshot!>!
+ElegantSeries.Flow.Journal.JournalSnapshot.Regions.init -> void
+ElegantSeries.Flow.Journal.JsonFileNavigationJournalStore
+ElegantSeries.Flow.Journal.JsonFileNavigationJournalStore.AppendAsync(ElegantSeries.Flow.Journal.JournalEntry! entry, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.JsonFileNavigationJournalStore.ClearAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.JsonFileNavigationJournalStore.Dispose() -> void
+ElegantSeries.Flow.Journal.JsonFileNavigationJournalStore.JsonFileNavigationJournalStore(string! path) -> void
+ElegantSeries.Flow.Journal.JsonFileNavigationJournalStore.JsonFileNavigationJournalStore(string! path, ElegantSeries.Flow.Journal.JournalOptions! options) -> void
+ElegantSeries.Flow.Journal.JsonFileNavigationJournalStore.LoadSnapshotAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<ElegantSeries.Flow.Journal.JournalSnapshot?>
+ElegantSeries.Flow.Journal.JsonFileNavigationJournalStore.ReadEntriesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Journal.JournalEntry!>!>
+ElegantSeries.Flow.Journal.JsonFileNavigationJournalStore.SaveSnapshotAsync(ElegantSeries.Flow.Journal.JournalSnapshot! snapshot, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.NavigationJournal
+ElegantSeries.Flow.Journal.NavigationJournal.CaptureSnapshotAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ElegantSeries.Flow.Journal.JournalSnapshot!>!
+ElegantSeries.Flow.Journal.NavigationJournal.ClearAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+ElegantSeries.Flow.Journal.NavigationJournal.GetEntriesAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Journal.JournalEntry!>!>!
+ElegantSeries.Flow.Journal.NavigationJournal.LoadSnapshotAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ElegantSeries.Flow.Journal.JournalSnapshot?>!
+ElegantSeries.Flow.Journal.NavigationJournal.NavigationJournal(ElegantSeries.Flow.Journal.JournalNavigationService! navigation, ElegantSeries.Flow.Journal.INavigationJournalStore! store) -> void
+ElegantSeries.Flow.Journal.NavigationJournal.RestoreAsync(ElegantSeries.Flow.Journal.JournalSnapshot! snapshot, System.Func<ElegantSeries.Flow.Journal.JournalPageRestore!, System.Threading.Tasks.Task<bool>!>! navigatePage, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<ElegantSeries.Flow.Journal.JournalRestoreResult!>!
+ElegantSeries.Flow.Journal.ServiceCollectionExtensions
+static ElegantSeries.Flow.Journal.ServiceCollectionExtensions.AddElegantSeriesFlowJournal(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<ElegantSeries.Flow.Journal.JournalBuilder!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
