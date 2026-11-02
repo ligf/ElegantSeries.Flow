@@ -155,6 +155,16 @@ public class RouterTests
     }
 
     [Fact]
+    public void RouteNotFoundException_IsSealed()
+    {
+        // Settled before the Routing package's first release: the exception
+        // is a leaf type (unions of route failures are sibling exceptions,
+        // not derived ones), matching the sealed public types across the
+        // Routing package and Core.
+        Assert.True(typeof(RouteNotFoundException).IsSealed);
+    }
+
+    [Fact]
     public async Task NoMatch_NavigateThrows_TryReturnsFalse()
     {
         var provider = BuildProvider();
