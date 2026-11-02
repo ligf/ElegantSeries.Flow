@@ -331,9 +331,10 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
             // The platform is identified by which Flow locator the compilation
             // references (mirrors Generate); the base type follows from it.
-            // When neither locator is referenced, Generate reports nothing at
-            // all, so skipping the derivation check loses no diagnostic; when
-            // both are referenced, FLOWGEN002 suppresses per-mapping reports.
+            // When neither locator is referenced, Generate reports FLOWGEN014
+            // and suppresses per-mapping reports, so skipping the derivation
+            // check loses no diagnostic; when both are referenced, FLOWGEN002
+            // does the same.
             INamedTypeSymbol? platformBaseType = null;
             string? platformBaseTypeName = null;
             if (compilation.GetTypeByMetadataName(AvaloniaLocatorMetadataName) is not null)
@@ -688,6 +689,14 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         var platformCount = (avaloniaLocator is not null ? 1 : 0) + (wpfLocator is not null ? 1 : 0);
         if (platformCount == 0)
         {
+            // Mappings exist (the empty case took the provider-only path),
+            // but with no platform locator referenced no registration can
+            // ever be generated for this compilation — a dead declaration
+            // that would otherwise surface only as a runtime "view not
+            // registered". One error naming the root cause, mirroring the
+            // ambiguous-platform path; the per-mapping reports below stay
+            // suppressed next to it.
+            spc.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.NoPlatformReferenced, Location.None));
             return;
         }
 
@@ -1175,6 +1184,14 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             id: "FLOWGEN013",
             title: "View carries more than one [ViewFor] attribute",
             messageFormat: "View '{0}' carries more than one [ViewFor] attribute. Declare the ViewModel mapping exactly once: [ViewFor] and [ViewFor<TViewModel>] are alternatives, not cumulative.",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor NoPlatformReferenced = new DiagnosticDescriptor(
+            id: "FLOWGEN014",
+            title: "No view locator platform referenced",
+            messageFormat: "This compilation declares [ViewFor] view mappings, but neither the WPF nor the Avalonia view locator is referenced, so no view registrations can be generated for it. Reference ElegantSeries.Flow.WPF or ElegantSeries.Flow.Avalonia in this project.",
             category: "ElegantSeries.Flow.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);

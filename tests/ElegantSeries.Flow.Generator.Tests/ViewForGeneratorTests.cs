@@ -327,6 +327,78 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void NoPlatformReferenced_WithValidMappings_ReportsFlowGen014()
+    {
+        // The mappings are valid; the root cause is the missing platform
+        // reference itself, so the error fires anyway: without a locator no
+        // registration can ever be generated for this compilation.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + BasicViews;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN014");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
+    [Fact]
+    public void NoPlatformReferenced_WithInvalidMapping_ReportsOnlyFlowGen014()
+    {
+        // The plain [ViewFor] below would be FLOWGEN004 with a platform
+        // referenced; without one, the single platform error replaces the
+        // per-mapping reports (the same cascade discipline as FLOWGEN002).
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class HomeView { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics);
+        Assert.Equal("FLOWGEN014", error.Id);
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
+    [Fact]
+    public void NoPlatformReferenced_WithoutMappings_StaysSilent()
+    {
+        // No attributed views of its own: the provider-only path, which has
+        // no declared registration intent to report on.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN014");
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
+    [Fact]
+    public void NoPlatformReferenced_WithReferencedProvider_StaysSilent()
+    {
+        // The scope exclusion with a provider actually referenced: this
+        // compilation declares no views of its own and references a validated
+        // provider library, but no platform locator either (no
+        // FlowStubsReference) — the provider-only path stays silent and emits
+        // no aggregator.
+        var plugin = BuildProviderLibrary("Plugin", "Plugin", "ReportView", "ReportViewModel");
+        var sources = """
+            namespace TestApp
+            {
+                public class Placeholder { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { plugin });
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN014");
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
+    [Fact]
     public void ValidLifetimeCast_EmitsCorrectRegistration()
     {
         // Guards the fix for a second silent bug in the old syntax-based parsing:
@@ -388,13 +460,14 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
-    public void NoPlatformLocator_EmitsNothing()
+    public void NoPlatformLocator_ReportsFlowGen014_AndEmitsNothing()
     {
         var sources = AttributeStub + BasicViews;
 
         var (runResult, diagnostics, _) = RunGenerator(sources);
 
-        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN014");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
         Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
     }
 
