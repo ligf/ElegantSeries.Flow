@@ -19,6 +19,10 @@ using System.Runtime.CompilerServices;
 // shared host internals directly.
 [assembly: InternalsVisibleTo("ElegantSeries.Flow.WPF.Tests")]
 
+// The Avalonia host tests exercise the same shared host internals and the
+// internal definitive-current-page query the built-in service implements.
+[assembly: InternalsVisibleTo("ElegantSeries.Flow.Avalonia.Tests")]
+
 // Core navigation tests verify internal lifecycle behavior (e.g. that cache
 // clearing does not cancel an active page's token).
 [assembly: InternalsVisibleTo("ElegantSeries.Flow.Tests")]
