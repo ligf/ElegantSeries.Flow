@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NuGet consumer verification: packs the five packages, restores the
+# NuGet consumer verification: packs the seven packages, restores the
 # standalone ConsumerApp against ONLY the freshly packed feed (plus
 # nuget.org for third-party dependencies), then builds and runs it —
 # once as a normal build and once published with NativeAOT.
@@ -54,5 +54,18 @@ echo "==> Consumer build + run (JIT)"
 echo "==> Consumer publish + run (NativeAOT, $RID)"
 "$DOTNET" publish ConsumerApp -c Release -r "$RID" -p:PublishAot=true -p:FlowVersion="$VERSION" -o "$WORK/aot" --nologo -v q > /dev/null
 "$WORK/aot/ConsumerApp"
+
+# The WPF package is packed above but the console consumer cannot
+# reference it (platform mismatch), so it gets its own consumer: a
+# WPF exe restored from the same feed. Building it proves the WPF
+# package's registrations and generated views compile from the
+# package on any platform; running it additionally exercises them,
+# and is only possible on Windows.
+echo "==> WPF consumer build (compile-only on non-Windows)"
+"$DOTNET" build ConsumerApp.Wpf -c Release -p:FlowVersion="$VERSION" --nologo -v q > /dev/null
+if [[ "$RID" == win-* ]]; then
+    echo "==> WPF consumer run (Windows)"
+    "ConsumerApp.Wpf/bin/Release/net10.0-windows/ConsumerApp.Wpf.exe"
+fi
 
 echo "==> VERIFY PASS"

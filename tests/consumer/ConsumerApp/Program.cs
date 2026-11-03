@@ -77,6 +77,30 @@ Check(await navigation.GoBackAsync(), "go back from kept Beta");
 Check(await navigation.NavigateToAsync<BetaViewModel>(retention: NavigationRetention.KeepAlive), "navigate to Beta again");
 Check(ReferenceEquals(keptBeta, navigation.GetCurrentViewModel()), "KeepAlive reuses the cached Beta instance");
 
+// The generator's remaining lifetime forms, consumed through the
+// package: with Lifetime = Singleton / Transient the generated
+// RegisterAttributedViews also registers the ViewModel in DI with
+// that lifetime (the ViewOnly views above keep their manual DI
+// registrations instead), so Gamma and Delta have no manual
+// registration in the setup on purpose.
+Check(await navigation.NavigateToAsync<GammaViewModel>(), "navigate to Gamma");
+var gamma = navigation.GetCurrentViewModel();
+Check(gamma is GammaViewModel, "current is GammaViewModel");
+Check(locator.CreateView(gamma!) is GammaView, "generated registration resolves GammaView for GammaViewModel");
+Check(await navigation.GoBackAsync(), "go back from Gamma");
+Check(await navigation.NavigateToAsync<GammaViewModel>(), "navigate to Gamma again");
+Check(ReferenceEquals(gamma, navigation.GetCurrentViewModel()), "generated Singleton registration reuses the same GammaViewModel");
+Check(await navigation.GoBackAsync(), "go back from Gamma again");
+
+Check(await navigation.NavigateToAsync<DeltaViewModel>(), "navigate to Delta");
+var delta = navigation.GetCurrentViewModel();
+Check(delta is DeltaViewModel, "current is DeltaViewModel");
+Check(locator.CreateView(delta!) is DeltaView, "generated registration resolves DeltaView for DeltaViewModel");
+Check(await navigation.GoBackAsync(), "go back from Delta");
+Check(await navigation.NavigateToAsync<DeltaViewModel>(), "navigate to Delta again");
+Check(!ReferenceEquals(delta, navigation.GetCurrentViewModel()), "generated Transient registration creates a new DeltaViewModel each time");
+Check(await navigation.GoBackAsync(), "go back from Delta again");
+
 // The Diagnostics package observes the packaged core's events:
 // resolving NavigationDiagnostics starts its subscriptions, and a
 // MeterListener on its meter sees the next navigation counted.
@@ -146,5 +170,31 @@ public sealed class AlphaView : BaseView<AlphaViewModel>
 /// <summary>View for <see cref="BetaViewModel"/>.</summary>
 [ViewFor(Lifetime = ViewModelLifetime.ViewOnly)]
 public sealed class BetaView : BaseView<BetaViewModel>
+{
+}
+
+/// <summary>Page whose ViewModel registration is generated with the
+/// Singleton lifetime (no manual DI registration in the setup).</summary>
+public sealed class GammaViewModel : NavigationViewModelBase
+{
+}
+
+/// <summary>Page whose ViewModel registration is generated with the
+/// Transient lifetime (no manual DI registration in the setup).</summary>
+public sealed class DeltaViewModel : NavigationViewModelBase
+{
+}
+
+/// <summary>View for <see cref="GammaViewModel"/>; the generator
+/// emits the view mapping plus a Singleton ViewModel registration.</summary>
+[ViewFor(Lifetime = ViewModelLifetime.Singleton)]
+public sealed class GammaView : BaseView<GammaViewModel>
+{
+}
+
+/// <summary>View for <see cref="DeltaViewModel"/>; the generator
+/// emits the view mapping plus a Transient ViewModel registration.</summary>
+[ViewFor(Lifetime = ViewModelLifetime.Transient)]
+public sealed class DeltaView : BaseView<DeltaViewModel>
 {
 }

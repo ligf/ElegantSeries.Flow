@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -63,7 +64,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         var plainMappings = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 ViewForAttributeMetadataName,
-                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                predicate: static (node, _) => node is ClassDeclarationSyntax or RecordDeclarationSyntax,
                 transform: static (ctx, ct) => GetMapping(ctx, ct))
             .Where(static m => m is not null)
             .Select(static (m, _) => m!)
@@ -72,7 +73,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         var genericMappings = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 GenericViewForAttributeMetadataName,
-                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                predicate: static (node, _) => node is ClassDeclarationSyntax or RecordDeclarationSyntax,
                 transform: static (ctx, ct) => GetMapping(ctx, ct))
             .Where(static m => m is not null)
             .Select(static (m, _) => m!)
@@ -80,15 +81,23 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
         var mappings = plainMappings
             .Combine(genericMappings)
-            .Select(static (pair, _) => pair.Left.AddRange(pair.Right));
+            .Select(static (pair, _) => new ViewMappings(pair.Left.AddRange(pair.Right)));
 
-        var compilationAndMappings = context.CompilationProvider.Combine(mappings);
+        // The output step consumes an equatable snapshot of the
+        // compilation, never the Compilation itself: a Compilation
+        // compares by reference, so feeding it to the output step
+        // directly would re-run generation on every compilation
+        // change no matter how value-equal everything else is.
+        var snapshots = context.CompilationProvider
+            .Select(static (compilation, _) => CompilationSnapshot.Create(compilation));
 
-        context.RegisterSourceOutput(compilationAndMappings, static (spc, tuple) =>
+        var inputs = snapshots.Combine(mappings);
+
+        context.RegisterSourceOutput(inputs, static (spc, tuple) =>
             Generate(spc, tuple.Left, tuple.Right));
     }
 
-    private sealed class ViewMapping
+    private sealed class ViewMapping : IEquatable<ViewMapping>
     {
         public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType, bool isOpenGenericView, bool isOpenGenericViewModel, string? viewModelNotImplementingInterface, ImmutableArray<string> viewConstraintViolations, string? viewModelNotReferenceType)
         {
@@ -173,6 +182,231 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         /// ViewOnly (Register has no reference-type requirement).
         /// </summary>
         public string? ViewModelNotReferenceType { get; }
+
+        // Value equality over every field except Location, so the
+        // incremental pipeline can actually cache: without it the model
+        // compared by reference, every compilation change produced
+        // "new" mappings, and the collect/combine/output nodes re-ran
+        // in full on every keystroke. Location is the deliberate
+        // exception — it only positions this mapping's diagnostics, it
+        // never changes the generated output, and Roslyn Location
+        // instances have no value equality to compare with. The
+        // trade-off: if a mapping's payload is unchanged but its
+        // attribute moved within the file, a cached run keeps the
+        // diagnostic position from the run that first produced it,
+        // until the payload itself changes.
+        public bool Equals(ViewMapping? other) =>
+            other is not null &&
+            string.Equals(ViewName, other.ViewName, StringComparison.Ordinal) &&
+            string.Equals(ViewModelName, other.ViewModelName, StringComparison.Ordinal) &&
+            string.Equals(RegisterMethod, other.RegisterMethod, StringComparison.Ordinal) &&
+            string.Equals(InvalidLifetime, other.InvalidLifetime, StringComparison.Ordinal) &&
+            CannotInferViewModel == other.CannotInferViewModel &&
+            string.Equals(ConflictingBaseViewModel, other.ConflictingBaseViewModel, StringComparison.Ordinal) &&
+            UnresolvableViewModelType == other.UnresolvableViewModelType &&
+            IsOpenGenericView == other.IsOpenGenericView &&
+            IsOpenGenericViewModel == other.IsOpenGenericViewModel &&
+            string.Equals(ViewModelNotImplementingInterface, other.ViewModelNotImplementingInterface, StringComparison.Ordinal) &&
+            ViewConstraintViolations.SequenceEqual(other.ViewConstraintViolations) &&
+            string.Equals(ViewModelNotReferenceType, other.ViewModelNotReferenceType, StringComparison.Ordinal);
+
+        public override bool Equals(object? obj) => Equals(obj as ViewMapping);
+
+        public override int GetHashCode()
+        {
+            // Manual combine: the generator targets netstandard2.0,
+            // which has no System.HashCode.
+            unchecked
+            {
+                var hash = 17;
+                hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(ViewName);
+                hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(ViewModelName);
+                hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(RegisterMethod);
+                hash = (hash * 31) + (InvalidLifetime is null ? 0 : StringComparer.Ordinal.GetHashCode(InvalidLifetime));
+                hash = (hash * 31) + CannotInferViewModel.GetHashCode();
+                hash = (hash * 31) + (ConflictingBaseViewModel is null ? 0 : StringComparer.Ordinal.GetHashCode(ConflictingBaseViewModel));
+                hash = (hash * 31) + UnresolvableViewModelType.GetHashCode();
+                hash = (hash * 31) + IsOpenGenericView.GetHashCode();
+                hash = (hash * 31) + IsOpenGenericViewModel.GetHashCode();
+                hash = (hash * 31) + (ViewModelNotImplementingInterface is null ? 0 : StringComparer.Ordinal.GetHashCode(ViewModelNotImplementingInterface));
+                foreach (var violation in ViewConstraintViolations)
+                {
+                    hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(violation);
+                }
+
+                hash = (hash * 31) + (ViewModelNotReferenceType is null ? 0 : StringComparer.Ordinal.GetHashCode(ViewModelNotReferenceType));
+                return hash;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The combined mappings of both attribute forms as one
+    /// value-compared pipeline value: <see cref="ImmutableArray{T}"/>
+    /// itself compares by reference, so the collected array is wrapped
+    /// and compared element-wise (each <see cref="ViewMapping"/> is
+    /// value-equatable). Without the wrapper the output step's input
+    /// would count as changed on every run.
+    /// </summary>
+    private sealed class ViewMappings : IEquatable<ViewMappings>
+    {
+        public ViewMappings(ImmutableArray<ViewMapping> items)
+        {
+            Items = items;
+        }
+
+        public ImmutableArray<ViewMapping> Items { get; }
+
+        public bool Equals(ViewMappings? other) =>
+            other is not null && Items.SequenceEqual(other.Items);
+
+        public override bool Equals(object? obj) => Equals(obj as ViewMappings);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                var hash = 17;
+                foreach (var item in Items)
+                {
+                    hash = (hash * 31) + item.GetHashCode();
+                }
+
+                return hash;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Everything the output step needs from the compilation, projected
+    /// into value-compared data: the assembly name (for the generated
+    /// namespace), which platform locators are referenced, each present
+    /// locator's validated provider registrations, and — when exactly
+    /// one platform is referenced — that locator's display name for the
+    /// aggregator's extension method. The projection is recomputed
+    /// whenever the compilation changes, but as long as the projected
+    /// values are unchanged the output step reuses its previous
+    /// sources and diagnostics instead of re-running.
+    /// </summary>
+    private sealed class CompilationSnapshot : IEquatable<CompilationSnapshot>
+    {
+        private CompilationSnapshot(
+            string? assemblyName,
+            bool hasAvaloniaLocator,
+            bool hasWpfLocator,
+            string? singleLocatorDisplayName,
+            ImmutableArray<string> avaloniaProviders,
+            ImmutableArray<string> wpfProviders)
+        {
+            AssemblyName = assemblyName;
+            HasAvaloniaLocator = hasAvaloniaLocator;
+            HasWpfLocator = hasWpfLocator;
+            SingleLocatorDisplayName = singleLocatorDisplayName;
+            AvaloniaProviders = avaloniaProviders;
+            WpfProviders = wpfProviders;
+        }
+
+        public string? AssemblyName { get; }
+
+        public bool HasAvaloniaLocator { get; }
+
+        public bool HasWpfLocator { get; }
+
+        public int PlatformCount =>
+            (HasAvaloniaLocator ? 1 : 0) + (HasWpfLocator ? 1 : 0);
+
+        /// <summary>
+        /// The referenced locator's fully qualified name without the
+        /// <c>global::</c> prefix, when exactly one platform is
+        /// referenced; otherwise <see langword="null"/> (the aggregator
+        /// is never emitted for zero or two platforms).
+        /// </summary>
+        public string? SingleLocatorDisplayName { get; }
+
+        /// <summary>
+        /// Registration types of provider assemblies validated against
+        /// the Avalonia locator; empty when that locator is not
+        /// referenced or no provider validates.
+        /// </summary>
+        public ImmutableArray<string> AvaloniaProviders { get; }
+
+        /// <summary>
+        /// Registration types of provider assemblies validated against
+        /// the WPF locator; empty when that locator is not referenced
+        /// or no provider validates.
+        /// </summary>
+        public ImmutableArray<string> WpfProviders { get; }
+
+        /// <summary>
+        /// The providers validated against the single referenced
+        /// platform's locator. Only meaningful when
+        /// <see cref="PlatformCount"/> is exactly one.
+        /// </summary>
+        public ImmutableArray<string> SinglePlatformProviders =>
+            HasAvaloniaLocator ? AvaloniaProviders : WpfProviders;
+
+        public static CompilationSnapshot Create(Compilation compilation)
+        {
+            var avaloniaLocator = compilation.GetTypeByMetadataName(AvaloniaLocatorMetadataName);
+            var wpfLocator = compilation.GetTypeByMetadataName(WpfLocatorMetadataName);
+
+            var avaloniaProviders = avaloniaLocator is null
+                ? ImmutableArray<string>.Empty
+                : FindReferencedProviders(compilation, avaloniaLocator).ToImmutableArray();
+            var wpfProviders = wpfLocator is null
+                ? ImmutableArray<string>.Empty
+                : FindReferencedProviders(compilation, wpfLocator).ToImmutableArray();
+
+            string? singleLocatorDisplayName = null;
+            if ((avaloniaLocator is null) != (wpfLocator is null))
+            {
+                singleLocatorDisplayName = (avaloniaLocator ?? wpfLocator)!
+                    .ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                    .Substring("global::".Length);
+            }
+
+            return new CompilationSnapshot(
+                compilation.AssemblyName,
+                avaloniaLocator is not null,
+                wpfLocator is not null,
+                singleLocatorDisplayName,
+                avaloniaProviders,
+                wpfProviders);
+        }
+
+        public bool Equals(CompilationSnapshot? other) =>
+            other is not null &&
+            string.Equals(AssemblyName, other.AssemblyName, StringComparison.Ordinal) &&
+            HasAvaloniaLocator == other.HasAvaloniaLocator &&
+            HasWpfLocator == other.HasWpfLocator &&
+            string.Equals(SingleLocatorDisplayName, other.SingleLocatorDisplayName, StringComparison.Ordinal) &&
+            AvaloniaProviders.SequenceEqual(other.AvaloniaProviders) &&
+            WpfProviders.SequenceEqual(other.WpfProviders);
+
+        public override bool Equals(object? obj) => Equals(obj as CompilationSnapshot);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                var hash = 17;
+                hash = (hash * 31) + (AssemblyName is null ? 0 : StringComparer.Ordinal.GetHashCode(AssemblyName));
+                hash = (hash * 31) + HasAvaloniaLocator.GetHashCode();
+                hash = (hash * 31) + HasWpfLocator.GetHashCode();
+                hash = (hash * 31) + (SingleLocatorDisplayName is null ? 0 : StringComparer.Ordinal.GetHashCode(SingleLocatorDisplayName));
+                foreach (var provider in AvaloniaProviders)
+                {
+                    hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(provider);
+                }
+
+                foreach (var provider in WpfProviders)
+                {
+                    hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(provider);
+                }
+
+                return hash;
+            }
+        }
     }
 
     private static ViewMapping? GetMapping(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
@@ -310,7 +544,10 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         // it — but that diagnostic's message claims the view does not
         // inherit BaseView<TViewModel>, which is false here, and a second
         // error adds nothing: the view cannot be registered either way.
-        if (isOpenGenericView)
+        // A record view is in the same position: it is rejected below
+        // with a FLOWGEN011 violation that names the real problem, so
+        // the inference failure is suppressed for it too.
+        if (isOpenGenericView || viewType.IsRecord)
         {
             cannotInfer = false;
         }
@@ -325,7 +562,24 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         // FLOWGEN008 already rejects them, and constraint questions about an
         // unbound type have no meaningful answer.
         var viewConstraintViolations = ImmutableArray.CreateBuilder<string>();
-        if (!isOpenGenericView)
+
+        // A record class can never be a view: a record's base type can only
+        // be object or another record, so it cannot derive from the platform
+        // view base type the locator requires. Report that single fact and
+        // skip the checks below — derivation and constructor questions are
+        // derivative for a record, and their answers would only stack
+        // secondary violations on top of it. (A record struct cannot carry
+        // [ViewFor] at all: the attribute targets classes, so the compiler
+        // rejects that form itself.) Skipped for open generic records:
+        // FLOWGEN008 already rejects them, and the record violation would
+        // only stack on top of it — the same suppression the checks below
+        // observe for open generic views.
+        if (viewType.IsRecord && !isOpenGenericView)
+        {
+            viewConstraintViolations.Add("it is a record class; a record cannot derive from the platform view base type, so it cannot be registered as a view");
+        }
+
+        if (!isOpenGenericView && !viewType.IsRecord)
         {
             var compilation = ctx.SemanticModel.Compilation;
 
@@ -672,21 +926,18 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
     private static void Generate(
         SourceProductionContext spc,
-        Compilation compilation,
-        ImmutableArray<ViewMapping> mappings)
+        CompilationSnapshot snapshot,
+        ViewMappings mappings)
     {
-        if (mappings.IsEmpty)
+        if (mappings.Items.IsEmpty)
         {
             // No attributed views of our own: the only possible output is the
             // aggregation over referenced provider assemblies.
-            EmitAggregatorForProviderOnlyCompilation(spc, compilation);
+            EmitAggregatorForProviderOnlyCompilation(spc, snapshot);
             return;
         }
 
-        var avaloniaLocator = compilation.GetTypeByMetadataName(AvaloniaLocatorMetadataName);
-        var wpfLocator = compilation.GetTypeByMetadataName(WpfLocatorMetadataName);
-
-        var platformCount = (avaloniaLocator is not null ? 1 : 0) + (wpfLocator is not null ? 1 : 0);
+        var platformCount = snapshot.PlatformCount;
         if (platformCount == 0)
         {
             // Mappings exist (the empty case took the provider-only path),
@@ -706,7 +957,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             return;
         }
 
-        var locatorName = avaloniaLocator is not null ? AvaloniaLocatorMetadataName : WpfLocatorMetadataName;
+        var locatorName = snapshot.HasAvaloniaLocator ? AvaloniaLocatorMetadataName : WpfLocatorMetadataName;
 
         // Per-mapping errors are compile-time failures: unresolved view models
         // (FLOWGEN004/006), conflicting explicit/inferred types (FLOWGEN005),
@@ -714,7 +965,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         // silently at runtime. All diagnostics are collected and reported together
         // so the user sees every problem in one compilation, not one at a time.
         bool hasMappingErrors = false;
-        foreach (var mapping in mappings)
+        foreach (var mapping in mappings.Items)
         {
             if (mapping.CannotInferViewModel)
             {
@@ -791,9 +1042,10 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         // declaration and keep it out of the duplicate-ViewModel check below,
         // whose message would blame other views instead.
         var seenViews = new HashSet<string>();
-        var duplicateViewMappings = new HashSet<ViewMapping>();
-        foreach (var mapping in mappings)
+        var duplicateViewIndexes = new HashSet<int>();
+        for (var i = 0; i < mappings.Items.Length; i++)
         {
+            var mapping = mappings.Items[i];
             if (HasMappingError(mapping))
             {
                 continue;
@@ -801,7 +1053,13 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
             if (!seenViews.Add(mapping.ViewName))
             {
-                duplicateViewMappings.Add(mapping);
+                // Tracked by index, not by mapping: ViewMapping compares
+                // by value, so a set of mappings could not tell this
+                // extra declaration apart from the view's first one when
+                // the two agree — both would be excluded below, and a
+                // third view claiming the same ViewModel would then
+                // escape the duplicate-ViewModel check.
+                duplicateViewIndexes.Add(i);
                 spc.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticDescriptors.DuplicateViewDeclaration, mapping.Location, mapping.ViewName));
                 hasMappingErrors = true;
@@ -812,9 +1070,10 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         // Skip mappings that already have errors: their ViewModelName may be empty or
         // otherwise invalid, which would produce noise diagnostics on top of the real ones.
         var seenViewModels = new HashSet<string>();
-        foreach (var mapping in mappings)
+        for (var i = 0; i < mappings.Items.Length; i++)
         {
-            if (HasMappingError(mapping) || duplicateViewMappings.Contains(mapping))
+            var mapping = mappings.Items[i];
+            if (HasMappingError(mapping) || duplicateViewIndexes.Contains(i))
             {
                 continue;
             }
@@ -832,7 +1091,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             return;
         }
 
-        var ordered = mappings
+        var ordered = mappings.Items
             .OrderBy(m => m.ViewModelName, System.StringComparer.Ordinal)
             .ThenBy(m => m.ViewName, System.StringComparer.Ordinal)
             .ToArray();
@@ -845,7 +1104,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine("[assembly: global::ElegantSeries.Flow.Routing.GeneratedViewRegistrations]");
         sb.AppendLine();
-        sb.AppendLine("namespace " + GetGeneratedNamespace(compilation.AssemblyName));
+        sb.AppendLine("namespace " + GetGeneratedNamespace(snapshot.AssemblyName));
         sb.AppendLine("{");
         sb.AppendLine("    /// <summary>");
         sb.AppendLine("    /// View registrations generated from <c>[ViewFor]</c> attributes.");
@@ -880,7 +1139,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
         spc.AddSource("ViewForRegistrations.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
 
-        EmitAggregator(spc, compilation, (avaloniaLocator ?? wpfLocator)!, ownEmitted: true);
+        EmitAggregator(spc, snapshot, ownEmitted: true);
     }
 
     /// <summary>
@@ -894,20 +1153,16 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     /// </summary>
     private static void EmitAggregatorForProviderOnlyCompilation(
         SourceProductionContext spc,
-        Compilation compilation)
+        CompilationSnapshot snapshot)
     {
-        var avaloniaLocator = compilation.GetTypeByMetadataName(AvaloniaLocatorMetadataName);
-        var wpfLocator = compilation.GetTypeByMetadataName(WpfLocatorMetadataName);
-        var platformCount = (avaloniaLocator is not null ? 1 : 0) + (wpfLocator is not null ? 1 : 0);
-        if (platformCount == 0)
+        if (snapshot.PlatformCount == 0)
         {
             return;
         }
 
-        if (platformCount > 1)
+        if (snapshot.PlatformCount > 1)
         {
-            if (FindReferencedProviders(compilation, avaloniaLocator!).Count > 0
-                || FindReferencedProviders(compilation, wpfLocator!).Count > 0)
+            if (!snapshot.AvaloniaProviders.IsEmpty || !snapshot.WpfProviders.IsEmpty)
             {
                 spc.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.AmbiguousPlatform, Location.None));
             }
@@ -915,7 +1170,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             return;
         }
 
-        EmitAggregator(spc, compilation, (avaloniaLocator ?? wpfLocator)!, ownEmitted: false);
+        EmitAggregator(spc, snapshot, ownEmitted: false);
     }
 
     /// <summary>
@@ -929,18 +1184,17 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     /// </summary>
     private static void EmitAggregator(
         SourceProductionContext spc,
-        Compilation compilation,
-        INamedTypeSymbol locator,
+        CompilationSnapshot snapshot,
         bool ownEmitted)
     {
-        var providers = FindReferencedProviders(compilation, locator);
-        if (providers.Count == 0)
+        var providers = snapshot.SinglePlatformProviders;
+        if (providers.IsEmpty)
         {
             return;
         }
 
-        var generatedNamespace = GetGeneratedNamespace(compilation.AssemblyName);
-        var locatorName = locator.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Substring("global::".Length);
+        var generatedNamespace = GetGeneratedNamespace(snapshot.AssemblyName);
+        var locatorName = snapshot.SingleLocatorDisplayName!;
 
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated>");
