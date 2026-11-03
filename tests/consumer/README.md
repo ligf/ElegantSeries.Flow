@@ -11,10 +11,10 @@ mask. This harness is the independent consumer (roadmap Phase 2C
 
 `verify.sh`:
 
-1. Packs the six packages (`ElegantSeries.Flow`,
+1. Packs the seven packages (`ElegantSeries.Flow`,
    `ElegantSeries.Flow.Mvvm`, `ElegantSeries.Flow.Avalonia`,
    `ElegantSeries.Flow.WPF`, `ElegantSeries.Flow.Diagnostics`,
-   `ElegantSeries.Flow.Routing`)
+   `ElegantSeries.Flow.Routing`, `ElegantSeries.Flow.Journal`)
    into `feed/`.
 2. Restores `ConsumerApp/` — a standalone console app that is **not**
    part of the solution — with `nuget.config` source mapping that
@@ -32,13 +32,22 @@ mask. This harness is the independent consumer (roadmap Phase 2C
    with `[ViewFor]`-declared Avalonia views — then navigates
    (including an Mvvm `BaseViewModel` page and a KeepAlive round
    trip), asserts the generator-produced view registrations
-   resolve the right view types, and verifies the Diagnostics
-   package counts a completed navigation on its meter. It prints
-   one `PASS`/`FAIL` line per check and exits non-zero on any
-   failure.
+   resolve the right view types — including the generated
+   `Singleton`/`Transient` ViewModel registrations, whose
+   ViewModels are deliberately not registered by hand — and
+   verifies the Diagnostics package counts a completed navigation
+   on its meter. It prints one `PASS`/`FAIL` line per check and
+   exits non-zero on any failure.
 4. Publishes the same consumer with NativeAOT
    (`-p:PublishAot=true`, RID from `FLOW_VERIFY_RID`, default
    `linux-x64`) and runs the native binary through the same checks.
+5. Builds `ConsumerApp.Wpf/` — a WPF exe that references the WPF
+   package from the same feed (the console consumer cannot: the
+   platform TFMs differ), proving the WPF package's registration
+   surface and generated views compile from the package. On
+   Windows (`FLOW_VERIFY_RID=win-*`) the app also runs and
+   executes its navigation and view-creation checks; on other
+   platforms the step is compile-only.
 
 ## Running
 

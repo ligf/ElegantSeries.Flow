@@ -766,6 +766,171 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void UnchangedMapping_ReparsedTree_ReusesGeneratedOutput()
+    {
+        // Incrementality: the pipeline model compares by value, so
+        // when a compilation change re-runs the mapping transform on
+        // an identical (reparsed) view file — producing brand-new
+        // mapping objects with identical payloads — the output step
+        // still sees unchanged inputs and the driver reuses the
+        // previously generated source verbatim. With reference
+        // equality on the model, the same reparse marked every
+        // mapping "changed" and re-ran generation in full.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + BasicViews;
+        var references = new List<MetadataReference>
+        {
+            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(System.Attribute).Assembly.Location),
+        };
+        var compilation = CSharpCompilation.Create(
+            "TestCompilation",
+            new[] { CSharpSyntaxTree.ParseText(sources) },
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(new ViewForGenerator());
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var firstSource = Assert.Single(
+            driver.GetRunResult().Results.Single().GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+
+        // Replace the tree with a reparse of the same text and add an
+        // unrelated tree: every syntax node is a new object, the
+        // mapping payloads are unchanged.
+        var oldTree = compilation.SyntaxTrees.Single();
+        var reparsed = CSharpSyntaxTree.ParseText(sources);
+        var changed = compilation
+            .ReplaceSyntaxTree(oldTree, reparsed)
+            .AddSyntaxTrees(CSharpSyntaxTree.ParseText("namespace Unrelated { public class Marker { } }"));
+        driver = driver.RunGeneratorsAndUpdateCompilation(changed, out _, out _);
+        var secondSource = Assert.Single(
+            driver.GetRunResult().Results.Single().GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+
+        Assert.Same(firstSource.SourceText, secondSource.SourceText);
+    }
+
+    [Fact]
+    public void RecordView_ReportsFlowGen011()
+    {
+        // A record class cannot derive from the platform view base type
+        // (a record's base can only be object or another record), so it
+        // can never be registered as a view. The syntax predicate used
+        // to match class declarations only, so the attribute on a
+        // record was silently ignored — no registration, no diagnostic.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public record HomeView { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN011");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("record", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void RecordView_PlainViewFor_ReportsFlowGen011Only()
+    {
+        // The plain form on a record: the record violation names the
+        // real problem, so the FLOWGEN004 inference failure — whose
+        // message would blame the missing BaseView<T> inheritance the
+        // record can never have — must not stack on top of it.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public record HomeView { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics);
+        Assert.Equal("FLOWGEN011", error.Id);
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void OpenGenericRecordView_ReportsFlowGen008Only()
+    {
+        // An open generic record is rejected by FLOWGEN008 like any
+        // open generic view; the record violation must not stack on
+        // top of it (constraint questions about an unbound type are
+        // derivative — the same suppression open generic classes get).
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public record GenericView<T> { }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics);
+        Assert.Equal("FLOWGEN008", error.Id);
+    }
+
+    [Fact]
+    public void DoublyDeclaredView_PlusSecondViewForSameViewModel_ReportsFlowGen013And001()
+    {
+        // The doubly-declared view's extra declaration is excluded
+        // from the duplicate-ViewModel check (FLOWGEN013 covers it),
+        // but its first declaration still counts: a second view
+        // claiming the same ViewModel must trip FLOWGEN001. When
+        // ViewMapping gained value equality, a HashSet<ViewMapping>
+        // could no longer tell the first declaration from the
+        // value-equal extra one, excluded both, and the FLOWGEN001
+        // was silently dropped.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel> { }
+
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class OtherView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel> { }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(sources);
+
+        Assert.Contains(diagnostics, d => d.Id == "FLOWGEN013");
+        Assert.Contains(diagnostics, d => d.Id == "FLOWGEN001");
+    }
+
+    [Fact]
     public void AbstractView_ReportsFlowGen011()
     {
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
