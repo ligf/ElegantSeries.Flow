@@ -819,6 +819,38 @@ public class DetachThrowingViewModel : INavigationViewModel, IDisposable
 }
 
 /// <summary>
+/// Page whose detach throws AND whose own disposal throws, for the
+/// compound hop-failure test: the detach throw faults the hop, and
+/// the salvaged scope disposal's failure must be reported through
+/// SubscriberError instead of entering the fate.
+/// </summary>
+public class DetachAndDisposalThrowingViewModel : INavigationViewModel, IDisposable
+{
+    public static int DisposeAttempts;
+    public static bool ThrowOnDetach;
+
+    public static void Reset() { DisposeAttempts = 0; ThrowOnDetach = false; }
+
+    public void Dispose()
+    {
+        Interlocked.Increment(ref DisposeAttempts);
+        throw new InvalidOperationException("Scope disposal boom.");
+    }
+
+    INavigationService? INavigationViewModel.Navigation { get; set; }
+
+    void INavigationViewModel.SetNavigationSilent(INavigationService? service)
+    {
+        if (service is null && ThrowOnDetach)
+        {
+            throw new InvalidOperationException("Detach boom.");
+        }
+    }
+
+    void INavigationViewModel.RaiseNavigationChanged() { }
+}
+
+/// <summary>
 /// Page whose async To calls into a SECOND navigation service instance and
 /// records the awaited outcome: the call must be classified as an outside
 /// call for that instance (real fate), not as an in-callback registration.
@@ -1250,6 +1282,7 @@ public class NavigationServiceTests
         services.AddTransient<StackMidViewModel>();
         services.AddTransient<StackTopViewModel>();
         services.AddTransient<DetachThrowingViewModel>();
+        services.AddTransient<DetachAndDisposalThrowingViewModel>();
         services.AddTransient<CrossCallerViewModel>();
 
         _serviceProvider = services.BuildServiceProvider();
@@ -6370,6 +6403,101 @@ public class NavigationServiceTests
             [typeof(StackMidViewModel), typeof(StackTopViewModel)],
             _navigationService.GetNavigationStack().Select(vm => vm.GetType()).ToArray());
         Assert.IsType<StackTopViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Window_DetachThrowWithThrowingSalvageDisposal_ReportsDisposalErrorThroughSubscriberError()
+    {
+        DetachAndDisposalThrowingViewModel.Reset();
+
+        var reported = new List<Exception>();
+        using var subscription = _navigationService.SubscribeSubscriberError(ex =>
+        {
+            lock (reported)
+            {
+                reported.Add(ex);
+            }
+        });
+
+        await _navigationService.NavigateToAsync<DetachAndDisposalThrowingViewModel>();
+        DetachAndDisposalThrowingViewModel.ThrowOnDetach = true;
+
+        // Replace pops the page: its detach throws at commit, which
+        // faults the hop. The failure recovery salvages the popped
+        // page's disposal — and that disposal throws too.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _navigationService.NavigateToAsync<StackTopViewModel>(operation: NavigationOperation.Replace)
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // The fate carries the detach failure alone: the salvage
+        // disposal's failure must not enter it (D-5: a hop's departure
+        // disposal errors never fault the navigation).
+        Assert.Equal("Detach boom.", ex.Message);
+
+        // It is reported through SubscriberError instead, exactly once.
+        await WaitUntilAsync(() =>
+        {
+            lock (reported)
+            {
+                return reported.Count == 1;
+            }
+        });
+        lock (reported)
+        {
+            Assert.Equal("Scope disposal boom.", Assert.Single(reported).Message);
+        }
+
+        Assert.Equal(1, DetachAndDisposalThrowingViewModel.DisposeAttempts);
+        Assert.IsType<StackTopViewModel>(_navigationService.GetCurrentViewModel());
+
+        // The region is fully usable afterwards, and the same disposal
+        // is not reported a second time.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        lock (reported)
+        {
+            Assert.Single(reported);
+        }
+    }
+
+    [Fact]
+    public async Task Remove_WhileDepartureFromIsInFlight_RemovesCoveredPageAndSparesDepartingPage()
+    {
+        StackMidViewModel.Reset();
+
+        await _navigationService.NavigateToAsync<StackMidViewModel>();
+        await _navigationService.NavigateToAsync<SlowFromViewModel>();
+        var slow = Assert.IsType<SlowFromViewModel>(_navigationService.GetCurrentViewModel());
+
+        // Start a departure whose From callback blocks: the transition
+        // is in flight but nothing has committed — StackMid is still a
+        // covered page and SlowFrom is still the active page.
+        var navigation = _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await slow.FromStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // From another thread (Remove from within a lifecycle callback
+        // would be rejected as reentrancy; an outside caller is not):
+        // the covered page is removed and its scope disposed at once.
+        var removedCovered = await Task.Run(() => _navigationService.Remove<StackMidViewModel>())
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, removedCovered);
+        Assert.Equal(1, StackMidViewModel.DisposedCount);
+
+        // The departing page, though leaving, is still the active page
+        // and is never a removal target.
+        var removedDeparting = await Task.Run(() => _navigationService.Remove<SlowFromViewModel>())
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(0, removedDeparting);
+
+        // The in-flight departure is undisturbed and completes: the
+        // Push covers SlowFrom (it stays on the stack), and the
+        // removed page is simply absent.
+        slow.ReleaseFrom.TrySetResult();
+        Assert.True(await navigation.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.Equal(
+            [typeof(SlowFromViewModel), typeof(TestHomeViewModel)],
+            _navigationService.GetNavigationStack().Select(vm => vm.GetType()).ToArray());
     }
 
     [Fact]

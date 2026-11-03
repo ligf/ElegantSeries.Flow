@@ -139,6 +139,45 @@ public class DisposalInterleavingTests
         }
     }
 
+    /// <summary>Gate through which a page scope's synchronous disposal
+    /// can be parked: signals when the disposal has been entered and
+    /// blocks it until the test releases it.</summary>
+    public sealed class BlockingDisposeGate
+    {
+        public ManualResetEventSlim Entered { get; } = new(false);
+        public ManualResetEventSlim Release { get; } = new(false);
+    }
+
+    /// <summary>Scoped service whose synchronous disposal blocks on
+    /// the shared gate, so a disposal cleanup can be held in flight
+    /// deterministically.</summary>
+    public sealed class BlockingDisposeService : IDisposable
+    {
+        private readonly BlockingDisposeGate _gate;
+
+        public BlockingDisposeService(BlockingDisposeGate gate) => _gate = gate;
+
+        public void Dispose()
+        {
+            _gate.Entered.Set();
+            // Bounded even on a failing run (whose assertions may skip
+            // the release): a parked thread-pool thread must not linger
+            // for the life of the test process. Passing runs release
+            // the gate immediately, long before this bound.
+            _gate.Release.Wait(TimeSpan.FromMinutes(5));
+        }
+    }
+
+    /// <summary>Page whose scope contains the blocking disposable.</summary>
+    public sealed class BlockingDisposePage : NavigationViewModelBase
+    {
+        public BlockingDisposePage(PageScopeMarker marker, BlockingDisposeService blocking)
+        {
+            _ = marker;
+            _ = blocking;
+        }
+    }
+
     private static ServiceProvider BuildProvider(Action<NavigationOptions>? configure = null)
     {
         var services = new ServiceCollection();
@@ -155,7 +194,9 @@ public class DisposalInterleavingTests
         services.AddScoped<PageScopeMarker>();
         services.AddSingleton<CallbackGate>();
         services.AddSingleton<SelfDisposeHook>();
+        services.AddSingleton<BlockingDisposeGate>();
         services.AddScoped<ThrowOnDisposeService>();
+        services.AddScoped<BlockingDisposeService>();
         services.AddTransient<StressPageA>();
         services.AddTransient<StressPageB>();
         services.AddTransient<StressPageC>();
@@ -163,6 +204,7 @@ public class DisposalInterleavingTests
         services.AddTransient<DepartureGatedPage>();
         services.AddTransient<SelfDisposePage>();
         services.AddTransient<ThrowingScopePage>();
+        services.AddTransient<BlockingDisposePage>();
         return services.BuildServiceProvider();
     }
 
@@ -533,6 +575,97 @@ public class DisposalInterleavingTests
 
         await WaitForScopeBalanceAsync(ledger, "after sync disposal won the departure race");
         await Assert.ThrowsAsync<ObjectDisposedException>(async () => await nav.NavigateToAsync<StressPageA>());
+    }
+
+    // ── Transfer rows: sync Dispose × in-flight DisposeAsync ──
+
+    /// <summary>
+    /// The takeover row of the disposal transfer table (Dispose /
+    /// DisposeAsync concurrency remarks): a synchronous Dispose that
+    /// arrives while an async disposal is already in flight does NOT
+    /// take the cleanup over and does not wait for it — the service
+    /// is already marked disposed, so the call returns immediately,
+    /// and the async operation keeps its stronger guarantee and
+    /// releases every scope itself once its gate opens.
+    /// </summary>
+    [Fact]
+    public async Task SyncDispose_DuringInFlightDisposeAsync_ReturnsWithoutWaiting_AsyncDisposalCompletesCleanup()
+    {
+        var provider = BuildProvider(options =>
+        {
+            options.DisposalGateTimeout = TimeSpan.FromSeconds(30);
+        });
+        var ledger = provider.GetRequiredService<PageScopeLedger>();
+        var nav = provider.GetRequiredService<INavigationService>();
+        var gate = provider.GetRequiredService<CallbackGate>();
+
+        Assert.True(await nav.NavigateToAsync<StressPageA>());
+
+        // Park the async disposal on the second region's gated page:
+        // its callback is in flight, so the disposal cannot release
+        // any scope until the gate opens.
+        var gatedNavigation = nav.NavigateToAsync<GatedPage>(regionName: "Second");
+        await gate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+        var disposal = ((IAsyncDisposable)nav).DisposeAsync().AsTask();
+
+        // Wait until the disposal has actually begun: it sets the
+        // disposed flag and clears the stacks under the lock before it
+        // parks on the gate, so an emptied region proves both.
+        var beginDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (nav.GetCurrentViewModel("Second") is not null && DateTime.UtcNow < beginDeadline)
+        {
+            await Task.Delay(25);
+        }
+
+        Assert.Null(nav.GetCurrentViewModel("Second"));
+
+        // The synchronous call returns without waiting for the gate.
+        var syncDispose = Task.Run(() => ((IDisposable)nav).Dispose());
+        var syncWinner = await Task.WhenAny(syncDispose, Task.Delay(TimeSpan.FromSeconds(10)));
+        Assert.Same(syncDispose, syncWinner);
+        await syncDispose;
+
+        // Nothing was released early and the async operation is still
+        // parked: it kept ownership of the cleanup throughout.
+        Assert.Equal(0, ledger.Snapshot().Disposed);
+        Assert.False(disposal.IsCompleted);
+
+        gate.Release();
+        Assert.True(await gatedNavigation.WaitAsync(TimeSpan.FromSeconds(10)));
+        await disposal.WaitAsync(TimeSpan.FromSeconds(10));
+        await WaitForScopeBalanceAsync(ledger, "after sync Dispose raced an in-flight DisposeAsync");
+    }
+
+    /// <summary>
+    /// The reverse transfer row: a DisposeAsync that arrives while a
+    /// synchronous Dispose is still cleaning up returns immediately —
+    /// a completed ValueTask — instead of waiting for a cleanup it
+    /// can never join. The synchronous cleanup is held in flight by a
+    /// page scope whose disposal blocks on a gate.
+    /// </summary>
+    [Fact]
+    public async Task DisposeAsync_DuringSyncDisposeCleanup_ReturnsImmediately()
+    {
+        var provider = BuildProvider();
+        var ledger = provider.GetRequiredService<PageScopeLedger>();
+        var nav = provider.GetRequiredService<INavigationService>();
+        var gate = provider.GetRequiredService<BlockingDisposeGate>();
+
+        Assert.True(await nav.NavigateToAsync<BlockingDisposePage>());
+
+        // Start the synchronous disposal in the background and wait
+        // until it is provably inside the cleanup: the service is
+        // marked disposed and the scope disposal is blocked.
+        var syncDispose = Task.Run(() => ((IDisposable)nav).Dispose());
+        Assert.True(gate.Entered.Wait(TimeSpan.FromSeconds(10)));
+
+        var asyncCall = ((IAsyncDisposable)nav).DisposeAsync();
+        Assert.True(asyncCall.IsCompletedSuccessfully);
+        await asyncCall;
+
+        gate.Release.Set();
+        await syncDispose.WaitAsync(TimeSpan.FromSeconds(10));
+        await WaitForScopeBalanceAsync(ledger, "after DisposeAsync arrived during sync cleanup");
     }
 
     // ── Reentrancy: DisposeAsync from inside a callback ───────

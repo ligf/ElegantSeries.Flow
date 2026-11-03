@@ -371,7 +371,7 @@ public class ViewForGeneratorTests
 
         var (runResult, diagnostics, _) = RunGenerator(sources);
 
-        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN014");
+        Assert.Empty(diagnostics);
         Assert.Empty(runResult.GeneratedSources);
     }
 
@@ -394,7 +394,7 @@ public class ViewForGeneratorTests
         var (runResult, diagnostics, _) = RunGenerator(
             sources, additionalReferences: new[] { plugin });
 
-        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN014");
+        Assert.Empty(diagnostics);
         Assert.Empty(runResult.GeneratedSources);
     }
 
