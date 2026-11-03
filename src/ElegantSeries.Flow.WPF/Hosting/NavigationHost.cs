@@ -42,7 +42,9 @@ namespace ElegantSeries.Flow.WPF.Hosting;
 /// Lifetime: the navigation service is typically a singleton while the host is a
 /// view. Call <see cref="Dispose"/> (e.g. when the containing window closes) to
 /// unsubscribe from the service; otherwise the event subscription keeps the host
-/// alive.
+/// alive. Unlike the Avalonia host, this host does not unsubscribe when it is
+/// removed from the visual tree — there is no detach handling, so a host that is
+/// removed without being disposed stays subscribed (and alive).
 /// </para>
 /// </remarks>
 public class NavigationHost : ContentControl, IDisposable

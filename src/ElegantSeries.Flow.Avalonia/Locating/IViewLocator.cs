@@ -169,7 +169,7 @@ public interface IViewLocator
     /// <param name="context">The creation context; the lookup uses its ViewModel's exact runtime type.</param>
     /// <returns>The created view.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">No view is registered for the ViewModel's type.</exception>
+    /// <exception cref="InvalidOperationException">No view is registered for the ViewModel's type, or the registered factory returned <see langword="null"/>.</exception>
     Control CreateView(ViewCreationContext context);
 
     /// <summary>

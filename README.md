@@ -148,7 +148,7 @@ namespace — add a `using` for it); the
 attribute's `Lifetime` selects `Transient` (default), `Singleton`, or `ViewOnly`
 (mapping only — register the ViewModel in DI yourself). The runtime never scans the
 attribute. Register a ViewModel either manually or via the attribute, not both:
-duplicates throw `InvalidOperationException` at startup.)
+duplicates throw `InvalidOperationException` at startup.
 
 Views may also live in more than one assembly — for example feature modules, each
 with its own Views and ViewModels, referenced by the desktop app that hosts

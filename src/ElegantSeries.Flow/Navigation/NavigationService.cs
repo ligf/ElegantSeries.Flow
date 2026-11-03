@@ -1031,6 +1031,9 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// <para>
     /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
     /// within a page lifecycle callback. Call it outside the callback instead.
+    /// Exception: once the service has been disposed, a call from within a
+    /// callback returns silently instead of throwing, like any repeated
+    /// <see cref="Dispose"/> call — the disposed check runs first.
     /// </para>
     /// </remarks>
     public void Dispose()

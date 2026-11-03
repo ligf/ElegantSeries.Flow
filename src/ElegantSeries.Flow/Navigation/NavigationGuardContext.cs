@@ -9,12 +9,16 @@ public sealed class NavigationGuardContext
     /// <summary>
     /// Initializes a new instance of the <see cref="NavigationGuardContext"/> class.
     /// </summary>
-    /// <param name="regionName">The region the navigation targets.</param>
+    /// <param name="regionName">
+    /// The region the navigation targets. Null, empty, and whitespace-only names are
+    /// rejected with <see cref="ArgumentException"/>; surrounding whitespace is trimmed.
+    /// </param>
     /// <param name="targetViewModelType">
     /// For a forward navigation, the ViewModel type declared by the navigation call —
     /// the runtime type of the instance that will be created is decided by dependency
     /// injection and may differ. For a back navigation, the runtime type of the
     /// existing page instance being returned to.
+    /// Must not be <see langword="null"/> (<see cref="ArgumentNullException"/>).
     /// </param>
     /// <param name="operation">
     /// The stack operation of the pending navigation, or <see langword="null"/> for

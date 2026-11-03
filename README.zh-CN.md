@@ -498,7 +498,7 @@ Avalonia 示例的 csproj 里开了 `PublishAot=true`，作为框架 AOT 能力�
 | `SetRootAsync<T>(region?, retention?, cancellationToken?)` / `SetRootAsync<T, TParam>(param, region?, retention?, cancellationToken?)` | 以新页面为根替换整个栈 |
 | `Remove<T>(region?)` / `Remove<T, TParam>(param, region?)` | 同步移除栈中被覆盖的页面 |
 | `CanGoBack(region?)` / `GetCurrentViewModel(region?)` / `IsActive<T>(region?)` / `GetCurrentRetention(region?)` / `GetCurrentParameter(viewModel, region?)` / `GetNavigationStack(region?)` | 查询 |
-| `ClearCache(region?)` / `ClearCacheAsync(region?)` | 清空单个 region 的 KeepAlive 缓存 |
+| `ClearCache(region)` / `ClearCacheAsync(region)` | 清空单个 region 的 KeepAlive 缓存 |
 | `ClearAllCache()` / `ClearAllCacheAsync()` | 清空所有 KeepAlive 缓存 |
 | `RegionNavigated` / `ViewModelReleased` / `RegionCacheCleared` / `SubscriberError` | 事件 |
 | `SubscribeRegionNavigated` / `SubscribeViewModelReleased` / `SubscribeRegionCacheCleared` / `SubscribeSubscriberError` | 可释放的事件订阅 |
