@@ -23,8 +23,10 @@ namespace ElegantSeries.Flow.Navigation;
 /// page leaves the active position (covered by another page, popped, replaced, or
 /// cleared) — even if the callback is still running. ViewModels must honor the token:
 /// stop touching the page's dependencies once it fires. The navigation service waits
-/// for an in-flight async callback to complete (up to 5 seconds) before releasing the
-/// page scope; a callback that ignores cancellation cannot block navigation forever,
+/// for an in-flight async callback to complete (up to
+/// <see cref="NavigationOptions.DisposalGateTimeout"/>, 5 seconds by default) before
+/// releasing the page scope; a callback that ignores cancellation cannot block
+/// navigation forever,
 /// but the scope <i>will</i> be released while it is still running. If such an abandoned
 /// callback throws a non-cancellation exception after the navigation it belonged to
 /// has completed, the exception can no longer be delivered to a navigation caller

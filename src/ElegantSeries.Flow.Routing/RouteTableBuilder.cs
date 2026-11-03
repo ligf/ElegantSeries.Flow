@@ -13,7 +13,14 @@ namespace ElegantSeries.Flow.Routing;
 /// either a literal (matched case-insensitively) or a whole-segment
 /// placeholder <c>{name}</c> that captures the segment's text.
 /// Patterns are validated when they are registered — a malformed
-/// pattern fails here, at startup, not at navigation time. The empty
+/// pattern fails here, at startup, not at navigation time. The other
+/// registration arguments are not validated here: the region, operation,
+/// and retention are passed to the navigation service as-is, so an
+/// invalid region (null, empty, or whitespace-only) or an undefined
+/// operation/retention value fails the navigation itself — with
+/// <see cref="ArgumentException"/> or
+/// <see cref="ArgumentOutOfRangeException"/> — the first time the route
+/// is navigated. The empty
 /// pattern (<see langword="&quot;&quot;"/> or <c>"/"</c>) registers
 /// the root route. The builder itself is not thread-safe; it is a
 /// registration-phase object.

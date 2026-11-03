@@ -26,7 +26,9 @@ public interface IViewLocator
 {
     /// <summary>
     /// Registers a view type for a ViewModel type. The view is created with its
-    /// parameterless constructor on the UI thread when first needed.
+    /// parameterless constructor on the UI thread each time
+    /// <see cref="CreateView(INavigationViewModel)"/> is called — the locator itself
+    /// caches nothing; views are cached per ViewModel instance by the navigation host.
     /// </summary>
     /// <typeparam name="TView">The view type. Must derive from <see cref="FrameworkElement"/> and have a public parameterless constructor (a XAML requirement).</typeparam>
     /// <typeparam name="TViewModel">The ViewModel type the view is created for.</typeparam>
@@ -137,7 +139,7 @@ public interface IViewLocator
     /// <param name="viewModel">The ViewModel instance to create a view for. The lookup uses its exact runtime type.</param>
     /// <returns>The created view.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="viewModel"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">No view is registered for the ViewModel's type.</exception>
+    /// <exception cref="InvalidOperationException">No view is registered for the ViewModel's type, or the registered factory returned <see langword="null"/>.</exception>
     FrameworkElement CreateView(INavigationViewModel viewModel);
 
     /// <summary>
@@ -150,7 +152,7 @@ public interface IViewLocator
     /// <param name="context">The creation context; the lookup uses its ViewModel's exact runtime type.</param>
     /// <returns>The created view.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">No view is registered for the ViewModel's type.</exception>
+    /// <exception cref="InvalidOperationException">No view is registered for the ViewModel's type, or the registered factory returned <see langword="null"/>.</exception>
     FrameworkElement CreateView(ViewCreationContext context);
 
     /// <summary>

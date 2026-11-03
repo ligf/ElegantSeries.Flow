@@ -61,6 +61,16 @@ namespace ElegantSeries.Flow.Navigation;
 /// is bypassed rather than adopted and refreshed.
 /// </para>
 /// <para>
+/// <b>Parameters are stored by reference:</b> a navigation parameter is kept on
+/// the stack entry as the very object that was passed in — it is what later
+/// recognition compares against and what <c>GetCurrentParameter</c> returns.
+/// Mutating a mutable parameter object after the navigation therefore changes
+/// the identity the entry is recognized by: the page can become unrecognizable,
+/// or be claimed by a later navigation it was not created for. Prefer immutable
+/// parameters — records, value types, strings — so an entry's identity stays
+/// stable for its whole lifetime.
+/// </para>
+/// <para>
 /// Navigating to an instance that lives on a <i>different</i> region's stack throws
 /// <see cref="InvalidOperationException"/>: a ViewModel has a single
 /// <see cref="INavigationViewModel.Navigation"/> reference and cannot be active in
@@ -388,6 +398,12 @@ public interface INavigationService
     /// Thrown when <paramref name="operation"/> or <paramref name="retention"/> is not a
     /// defined <see cref="NavigationOperation"/> / <see cref="NavigationRetention"/> value.
     /// </exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the target ViewModel consumes its parameter through a
+    /// strongly-typed lifecycle interface (<see cref="INavigationAware{TParam}"/>
+    /// or <see cref="INavigationAwareAsync{TParam}"/>) and the parameter supplied
+    /// for the navigation is not of the expected type.
+    /// </exception>
     /// <exception cref="OperationCanceledException">
     /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
     /// call completes; cancellation while the request is still pending also
@@ -479,6 +495,12 @@ public interface INavigationService
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown when <paramref name="operation"/> or <paramref name="retention"/> is not a
     /// defined <see cref="NavigationOperation"/> / <see cref="NavigationRetention"/> value.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when the target ViewModel consumes its parameter through a
+    /// strongly-typed lifecycle interface (<see cref="INavigationAware{TParam}"/>
+    /// or <see cref="INavigationAwareAsync{TParam}"/>) and the parameter supplied
+    /// for the navigation is not of the expected type.
     /// </exception>
     /// <exception cref="OperationCanceledException">
     /// Thrown when <paramref name="cancellationToken"/> is cancelled before this
@@ -897,6 +919,22 @@ public interface INavigationService
     /// <param name="regionName">The navigation region to clear.</param>
     /// <remarks>
     /// <para>
+    /// Behavior: the region's cached entries are removed first. The lifecycle
+    /// tokens of removed pages that are no longer referenced by a navigation
+    /// stack are cancelled, and the method waits for their in-flight async
+    /// lifecycle callbacks to complete — up to
+    /// <see cref="NavigationOptions.DisposalGateTimeout"/> (default 5 seconds) —
+    /// before releasing their page scopes. A callback that ignores cancellation
+    /// cannot block the clearing: on timeout, a <see cref="TimeoutException"/>
+    /// is reported through <see cref="SubscriberError"/> and the scopes are
+    /// released anyway. Page scopes still referenced by a navigation stack are
+    /// deferred for disposal until their last reference is removed. Scope
+    /// disposal failures are collected and rethrown to the caller (a single
+    /// failure as-is, several wrapped in an <see cref="AggregateException"/>).
+    /// <see cref="RegionCacheCleared"/> is raised only when at least one entry
+    /// was actually removed.
+    /// </para>
+    /// <para>
     /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
     /// within a page lifecycle callback (e.g. <c>OnNavigatedFromAsync</c>).
     /// Call it outside the callback instead.
@@ -912,6 +950,17 @@ public interface INavigationService
     /// preferring <see cref="IAsyncDisposable.DisposeAsync"/> when available.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// Behavior: as <see cref="ClearCacheAsync(string)"/>, applied to every
+    /// region: the cached entries are removed first, the method waits for the
+    /// removed pages' in-flight async lifecycle callbacks (up to
+    /// <see cref="NavigationOptions.DisposalGateTimeout"/>, default 5 seconds)
+    /// before releasing their page scopes, a gate timeout is reported through
+    /// <see cref="SubscriberError"/> and the scopes are released anyway, and
+    /// scope disposal failures are collected and rethrown to the caller.
+    /// <see cref="RegionCacheCleared"/> is raised for each region from which at
+    /// least one entry was actually removed.
+    /// </para>
     /// <para>
     /// Reentrancy: throws <see cref="InvalidOperationException"/> if called from
     /// within a page lifecycle callback. Call it outside the callback instead.

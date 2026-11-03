@@ -13,8 +13,12 @@ namespace ElegantSeries.Flow.Navigation;
 /// the current page remains active.
 /// </para>
 /// <para>
-/// If the guard throws an exception, the exception propagates to the navigation
-/// caller and the navigation is aborted. Guard implementations should return
+/// If the guard throws an exception, the navigation is aborted and the exception
+/// propagates to the navigation caller. When the request has no caller left to
+/// throw to — it was registered from a lifecycle callback, or its caller has
+/// already withdrawn — the exception is reported through
+/// <see cref="INavigationService.SubscriberError"/> instead. Guard implementations
+/// should return
 /// <see langword="false"/> for expected vetoes and only throw for programming errors.
 /// </para>
 /// <para>
@@ -69,7 +73,10 @@ public interface INavigationGuard
 /// Like <see cref="INavigationGuard"/>, the guard is invoked <b>outside</b> the navigation
 /// lock to avoid deadlocks, making it safe to display confirmation dialogs or perform
 /// async I/O. Returning <see langword="false"/> cancels the navigation and the current
-/// page remains active. A thrown exception propagates to the navigation caller.
+/// page remains active. A thrown exception aborts the navigation and propagates to
+/// the navigation caller — or, when the request has no caller left to throw to, is
+/// reported through <see cref="INavigationService.SubscriberError"/> instead (see
+/// <see cref="INavigationGuard"/>).
 /// </para>
 /// <para>
 /// Also like <see cref="INavigationGuard"/>, the guard may wait indefinitely:
