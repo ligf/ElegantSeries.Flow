@@ -972,6 +972,44 @@ public class BlockingGuardViewModel : NavigationViewModelBase, INavigationAware,
 }
 
 /// <summary>
+/// Page whose silent setter, when armed, probes whether the framework is
+/// holding the service's state lock while the setter runs: a second thread
+/// issues a query (queries take the state lock) and the setter waits for
+/// it. If the setter were called under the state lock, the probe thread
+/// could not enter until the setter returned — but the setter is waiting
+/// for the probe, so the wait times out and the probe records failure.
+/// </summary>
+public class StateLockProbeViewModel : INavigationViewModel
+{
+    public static INavigationService? ServiceUnderTest;
+    public static bool ProbeOnDetach;
+    public static bool ProbeOnAttach;
+    public static bool LastProbeCompleted;
+
+    public static void Reset()
+    {
+        ServiceUnderTest = null;
+        ProbeOnDetach = false;
+        ProbeOnAttach = false;
+        LastProbeCompleted = false;
+    }
+
+    INavigationService? INavigationViewModel.Navigation { get; set; }
+
+    void INavigationViewModel.SetNavigationSilent(INavigationService? service)
+    {
+        var armed = service is null ? ProbeOnDetach : ProbeOnAttach;
+        if (armed && ServiceUnderTest is not null)
+        {
+            var probe = Task.Run(() => ServiceUnderTest.GetCurrentViewModel());
+            LastProbeCompleted = probe.Wait(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    void INavigationViewModel.RaiseNavigationChanged() { }
+}
+
+/// <summary>
 /// ViewModel whose navigation attach throws: user code failing inside a
 /// hop's commit section.
 /// </summary>
@@ -1282,6 +1320,7 @@ public class NavigationServiceTests
         services.AddTransient<StackMidViewModel>();
         services.AddTransient<StackTopViewModel>();
         services.AddTransient<DetachThrowingViewModel>();
+        services.AddTransient<StateLockProbeViewModel>();
         services.AddTransient<DetachAndDisposalThrowingViewModel>();
         services.AddTransient<CrossCallerViewModel>();
 
@@ -6372,6 +6411,140 @@ public class NavigationServiceTests
         // The region is fully usable afterwards.
         Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
             .WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task GoBack_DetachThrowOnPoppedPage_SalvagesScope_AndFaultsCaller()
+    {
+        StackBaseViewModel.Reset();
+        DetachThrowingViewModel.Reset();
+
+        await _navigationService.NavigateToAsync<StackBaseViewModel>();
+        await _navigationService.NavigateToAsync<DetachThrowingViewModel>();
+        DetachThrowingViewModel.ThrowOnDetach = true;
+
+        // The popped page's detach throws when the back hop publishes it:
+        // the hop faults, the popped scope is salvaged (disposed, not
+        // orphaned), and the page below becomes current again.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _navigationService.GoBackAsync()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("Detach boom.", ex.Message);
+
+        await WaitUntilAsync(() => DetachThrowingViewModel.DisposedCount == 1);
+        Assert.IsType<StackBaseViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.Single(_navigationService.GetNavigationStack());
+
+        // The region is fully usable afterwards.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task GoBackTo_DetachThrowMidSequence_LeavesEntriesBelowTheThrowingOneOnStack()
+    {
+        StackBaseViewModel.Reset();
+        StackMidViewModel.Reset();
+        StackTopViewModel.Reset();
+        DetachThrowingViewModel.Reset();
+
+        await _navigationService.NavigateToAsync<StackBaseViewModel>();
+        await _navigationService.NavigateToAsync<StackMidViewModel>();
+        await _navigationService.NavigateToAsync<DetachThrowingViewModel>();
+        await _navigationService.NavigateToAsync<StackTopViewModel>();
+        DetachThrowingViewModel.ThrowOnDetach = true;
+
+        // Pop order is top page first, then the throwing page: the first
+        // pop completes normally, the second pop's detach throws and is
+        // salvaged, and the entries below the throwing one are never
+        // popped — the mid page stays on the stack and becomes current.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _navigationService.GoBackToAsync<StackBaseViewModel>()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("Detach boom.", ex.Message);
+
+        await WaitUntilAsync(() => StackTopViewModel.DisposedCount == 1
+            && DetachThrowingViewModel.DisposedCount == 1);
+        Assert.Equal(0, StackMidViewModel.DisposedCount);
+        Assert.Equal(2, _navigationService.GetNavigationStack().Count);
+        Assert.IsType<StackMidViewModel>(_navigationService.GetCurrentViewModel());
+
+        // The region is fully usable afterwards.
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task GoBack_AttachThrowOnReturnedPage_FaultsCaller_AndRegionStaysUsable()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddSingleton<SecondAttachThrowingViewModel>();
+        services.AddTransient<TestHomeViewModel>();
+        var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        Assert.True(await nav.NavigateToAsync<SecondAttachThrowingViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(await nav.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // Going back re-attaches the singleton: its second attach throws
+        // inside the back hop. The exception must reach the caller (not
+        // wedge the region in the Leaving phase), and the returned-to page
+        // is activated by recovery.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await nav.GoBackAsync()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("Second attach boom.", ex.Message);
+        await WaitUntilAsync(() => nav.GetCurrentViewModel() is SecondAttachThrowingViewModel);
+
+        // The region is fully usable afterwards.
+        Assert.True(await nav.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task GoBack_DetachSetter_DoesNotRunUnderStateLock()
+    {
+        StackBaseViewModel.Reset();
+        StateLockProbeViewModel.Reset();
+
+        await _navigationService.NavigateToAsync<StackBaseViewModel>();
+        await _navigationService.NavigateToAsync<StateLockProbeViewModel>();
+
+        // Arm the probe on the top page, then go back: the popped page's
+        // detach setter must be able to take the state lock on another
+        // thread while it runs. If the back hop called the setter while
+        // holding the state lock (the pre-split shape), the probe thread
+        // would block until the setter's wait timed out.
+        StateLockProbeViewModel.ServiceUnderTest = _navigationService;
+        StateLockProbeViewModel.ProbeOnDetach = true;
+
+        Assert.True(await _navigationService.GoBackAsync()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(StateLockProbeViewModel.LastProbeCompleted);
+    }
+
+    [Fact]
+    public async Task GoBack_AttachSetter_DoesNotRunUnderStateLock()
+    {
+        StackTopViewModel.Reset();
+        StateLockProbeViewModel.Reset();
+
+        await _navigationService.NavigateToAsync<StateLockProbeViewModel>();
+        await _navigationService.NavigateToAsync<StackTopViewModel>();
+
+        // Arm the probe on the covered page, then go back: the returned
+        // page's attach setter gets the same guarantee as the detach —
+        // another thread can take the state lock while it runs.
+        StateLockProbeViewModel.ServiceUnderTest = _navigationService;
+        StateLockProbeViewModel.ProbeOnAttach = true;
+
+        Assert.True(await _navigationService.GoBackAsync()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(StateLockProbeViewModel.LastProbeCompleted);
     }
 
     [Fact]
