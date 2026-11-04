@@ -2538,29 +2538,41 @@ public sealed partial class NavigationService
         await _navigationLock.WaitAsync().ConfigureAwait(false);
         try
         {
+            // The state lock covers only the stack change itself. The popped
+            // entry's deactivation (whose detach runs the ViewModel's silent
+            // setter) and the re-activation bookkeeping run after it is
+            // released, under the navigation lock alone — the same shape as
+            // the navigate commit, and the shape QueueOutgoingDisposal's own
+            // contract requires (it acquires the state lock internally when
+            // building the deactivation plan).
+            NavigationEntry? popped = null;
             using (_stateLock.EnterScope())
             {
                 if (_regionStacks.TryGetValue(regionName, out var stack) && stack.Count > 1)
                 {
-                    var popped = stack.Pop();
+                    popped = stack.Pop();
                     previous = stack.Peek();
-                    try
-                    {
-                        QueueOutgoingDisposal(popped, destroy: popped.Retention != NavigationRetention.KeepAlive, work);
-                    }
-                    catch
-                    {
-                        // A throwing detach must not orphan the popped
-                        // entry's scope: salvage its disposal, then let the
-                        // failure fault the hop as in the navigate commit.
-                        SalvageOutgoingDisposal(popped, popped.Retention != NavigationRetention.KeepAlive, work);
-                        throw;
-                    }
-
-                    retiredCts = previous.BeginNewActivation();
-                    AttachNavigation(previous.ViewModel, work);
-                    gate = previous.EnterInFlightLifecycle();
                 }
+            }
+
+            if (popped is not null && previous is not null)
+            {
+                try
+                {
+                    QueueOutgoingDisposal(popped, destroy: popped.Retention != NavigationRetention.KeepAlive, work);
+                }
+                catch
+                {
+                    // A throwing detach must not orphan the popped
+                    // entry's scope: salvage its disposal, then let the
+                    // failure fault the hop as in the navigate commit.
+                    SalvageOutgoingDisposal(popped, popped.Retention != NavigationRetention.KeepAlive, work);
+                    throw;
+                }
+
+                retiredCts = previous.BeginNewActivation();
+                AttachNavigation(previous.ViewModel, work);
+                gate = previous.EnterInFlightLifecycle();
             }
         }
         finally
@@ -2646,42 +2658,66 @@ public sealed partial class NavigationService
             await _navigationLock.WaitAsync().ConfigureAwait(false);
             try
             {
-                using (_stateLock.EnterScope())
+                // Each pop is its own state-lock segment, so the popped
+                // entry's deactivation (whose detach runs the ViewModel's
+                // silent setter) runs after the segment closes, under the
+                // navigation lock alone — the same shape as the back hop and
+                // the navigate commit, and the shape QueueOutgoingDisposal's
+                // own contract requires. The navigation lock is held across
+                // the whole loop, so no other writer can interleave between
+                // the segments; a throwing detach aborts the loop with the
+                // entries below it still on the stack, exactly as before.
+                var poppedAny = false;
+                while (true)
                 {
-                    if (_regionStacks.TryGetValue(regionName, out var stack)
-                        && stack.Count > 0
-                        && !ReferenceEquals(stack.Peek(), target)
-                        && ContainsEntryLocked(stack, target))
+                    NavigationEntry? popped = null;
+                    using (_stateLock.EnterScope())
                     {
-                        while (!ReferenceEquals(stack.Peek(), target))
+                        if (_regionStacks.TryGetValue(regionName, out var stack)
+                            && stack.Count > 0
+                            && !ReferenceEquals(stack.Peek(), target)
+                            && ContainsEntryLocked(stack, target))
                         {
-                            var popped = stack.Pop();
-                            try
-                            {
-                                QueueOutgoingDisposal(popped, destroy: popped.Retention != NavigationRetention.KeepAlive, work);
-                            }
-                            catch
-                            {
-                                // Same salvage discipline as the back hop: a
-                                // throwing detach must not orphan the popped
-                                // entry's scope.
-                                SalvageOutgoingDisposal(popped, popped.Retention != NavigationRetention.KeepAlive, work);
-                                throw;
-                            }
+                            popped = stack.Pop();
                         }
+                    }
 
+                    if (popped is null)
+                    {
+                        break;
+                    }
+
+                    poppedAny = true;
+                    try
+                    {
+                        QueueOutgoingDisposal(popped, destroy: popped.Retention != NavigationRetention.KeepAlive, work);
+                    }
+                    catch
+                    {
+                        // Same salvage discipline as the back hop: a
+                        // throwing detach must not orphan the popped
+                        // entry's scope.
+                        SalvageOutgoingDisposal(popped, popped.Retention != NavigationRetention.KeepAlive, work);
+                        throw;
+                    }
+                }
+
+                if (poppedAny)
+                {
+                    using (_stateLock.EnterScope())
+                    {
                         if (intent.HasParameter)
                         {
                             // The target is re-activated with the intent's
                             // parameter, which becomes its stored parameter.
                             target.Parameter = intent.Parameter;
                         }
-
-                        previous = target;
-                        retiredCts = previous.BeginNewActivation();
-                        AttachNavigation(previous.ViewModel, work);
-                        gate = previous.EnterInFlightLifecycle();
                     }
+
+                    previous = target;
+                    retiredCts = previous.BeginNewActivation();
+                    AttachNavigation(previous.ViewModel, work);
+                    gate = previous.EnterInFlightLifecycle();
                 }
             }
             finally
