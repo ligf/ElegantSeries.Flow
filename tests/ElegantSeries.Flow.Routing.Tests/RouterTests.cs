@@ -381,6 +381,69 @@ public class RouterTests
             new RouteTableBuilder().Map<HomeViewModel, string>("ok", null!));
     }
 
+    [Fact]
+    public void InvalidRegion_ThrowsAtMapTime_BothOverloads()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            new RouteTableBuilder().Map<HomeViewModel>("ok", region: null!));
+        Assert.Throws<ArgumentException>(() =>
+            new RouteTableBuilder().Map<HomeViewModel>("ok", region: ""));
+        Assert.Throws<ArgumentException>(() =>
+            new RouteTableBuilder().Map<HomeViewModel>("ok", region: "   "));
+        Assert.Throws<ArgumentNullException>(() =>
+            new RouteTableBuilder().Map<HomeViewModel, string>("ok", _ => "", region: null!));
+        Assert.Throws<ArgumentException>(() =>
+            new RouteTableBuilder().Map<HomeViewModel, string>("ok", _ => "", region: " "));
+    }
+
+    [Fact]
+    public void UndefinedOperationOrRetention_ThrowsAtMapTime_BothOverloads()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new RouteTableBuilder().Map<HomeViewModel>("ok", operation: (NavigationOperation)99));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new RouteTableBuilder().Map<HomeViewModel>("ok", retention: (NavigationRetention)99));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new RouteTableBuilder().Map<HomeViewModel, string>(
+                "ok", _ => "", operation: (NavigationOperation)99));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new RouteTableBuilder().Map<HomeViewModel, string>(
+                "ok", _ => "", retention: (NavigationRetention)99));
+    }
+
+    [Fact]
+    public async Task PaddedRegion_IsAccepted_NavigationLandsInTrimmedRegion()
+    {
+        var provider = BuildProvider();
+        using var _p = provider;
+        var nav = provider.GetRequiredService<INavigationService>();
+        var router = new Router(nav, new RouteTableBuilder()
+            .Map<HomeViewModel>("a", region: "  Second  ")
+            .Build());
+
+        Assert.True(await router.NavigateAsync("a"));
+        Assert.IsType<HomeViewModel>(nav.GetCurrentViewModel("Second"));
+    }
+
+    [Fact]
+    public async Task RegistrationValidation_MatchesNavigationEntryPoint_ExceptionTypes()
+    {
+        var provider = BuildProvider();
+        using var _p = provider;
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        // The same invalid values handed straight to the navigation
+        // service fail with the same exception types the builder now
+        // throws at Map time: the registration check only moves the
+        // failure earlier, it does not change its shape.
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => nav.NavigateToAsync<HomeViewModel>(null!));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => nav.NavigateToAsync<HomeViewModel>(operation: (NavigationOperation)99));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => nav.NavigateToAsync<HomeViewModel>(retention: (NavigationRetention)99));
+    }
+
     // ── Builder / table behaviour ───────────────────────────────────
 
     [Fact]
