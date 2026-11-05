@@ -12,15 +12,13 @@ namespace ElegantSeries.Flow.Routing;
 /// A pattern is a <c>/</c>-separated list of segments; a segment is
 /// either a literal (matched case-insensitively) or a whole-segment
 /// placeholder <c>{name}</c> that captures the segment's text.
-/// Patterns are validated when they are registered — a malformed
-/// pattern fails here, at startup, not at navigation time. The other
-/// registration arguments are not validated here: the region, operation,
-/// and retention are passed to the navigation service as-is, so an
-/// invalid region (null, empty, or whitespace-only) or an undefined
-/// operation/retention value fails the navigation itself — with
-/// <see cref="ArgumentException"/> or
-/// <see cref="ArgumentOutOfRangeException"/> — the first time the route
-/// is navigated. The empty
+/// All registration arguments are validated when they are registered —
+/// a malformed pattern, an invalid region (null, empty, or
+/// whitespace-only), or an undefined operation/retention value fails
+/// here, at startup, not at navigation time, with the same exception
+/// type the navigation entry point itself would throw for that value. The
+/// region is normalized by trimming, exactly as the navigation service
+/// normalizes it on every call. The empty
 /// pattern (<see langword="&quot;&quot;"/> or <c>"/"</c>) registers
 /// the root route. The builder itself is not thread-safe; it is a
 /// registration-phase object.
@@ -48,6 +46,13 @@ public sealed class RouteTableBuilder
     /// is malformed (unbalanced braces, an illegal or duplicated
     /// placeholder name, or a placeholder that does not span the whole
     /// segment).</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="region"/>
+    /// is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="region"/> is
+    /// empty or whitespace-only.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="operation"/> or <paramref name="retention"/> is
+    /// not a defined value.</exception>
     public RouteTableBuilder Map<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(
         string pattern,
         string region = NavigationDefaults.DefaultRegionName,
@@ -56,6 +61,7 @@ public sealed class RouteTableBuilder
         where TViewModel : INavigationViewModel
     {
         var segments = ParsePattern(pattern);
+        region = ValidateRegistration(region, operation, retention);
         _entries.Add(new RouteEntry(segments,
             (navigation, _, cancellationToken) =>
                 navigation.NavigateToAsync<TViewModel>(region, operation, retention, refreshIfActive: false, cancellationToken)));
@@ -83,6 +89,13 @@ public sealed class RouteTableBuilder
     /// or <paramref name="parameterFactory"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="pattern"/>
     /// is malformed (see the other overload).</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="region"/>
+    /// is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="region"/> is
+    /// empty or whitespace-only.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="operation"/> or <paramref name="retention"/> is
+    /// not a defined value.</exception>
     public RouteTableBuilder Map<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel, TParam>(
         string pattern,
         Func<RouteMatch, TParam> parameterFactory,
@@ -93,6 +106,7 @@ public sealed class RouteTableBuilder
     {
         ArgumentNullException.ThrowIfNull(parameterFactory);
         var segments = ParsePattern(pattern);
+        region = ValidateRegistration(region, operation, retention);
         _entries.Add(new RouteEntry(segments,
             (navigation, match, cancellationToken) =>
                 navigation.NavigateToAsync<TViewModel, TParam>(parameterFactory(match), region, operation, retention, refreshIfActive: false, cancellationToken)));
@@ -105,6 +119,37 @@ public sealed class RouteTableBuilder
     /// routes registered later do not affect tables already built.
     /// </summary>
     public RouteTable Build() => new([.. _entries]);
+
+    // Mirrors the navigation entry point's argument rules
+    // (NavigationService.NavigateIntentAsync), so a registration that
+    // would fail on every navigation fails here instead, with the same
+    // exception types. The region check has the same shape as Core's
+    // private NormalizeRegionName; the enum checks copy Core's
+    // exhaustive member tests rather than Enum.IsDefined, so a future
+    // enum member is rejected in both places until both are updated.
+    // Returns the normalized (trimmed) region name.
+    private static string ValidateRegistration(
+        string region, NavigationOperation operation, NavigationRetention retention)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(region);
+        if (operation is not (NavigationOperation.Push or NavigationOperation.Replace or NavigationOperation.Reset))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(operation),
+                operation,
+                "The operation must be a defined NavigationOperation value (Push, Replace or Reset).");
+        }
+
+        if (retention is not (NavigationRetention.Destroy or NavigationRetention.KeepAlive))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(retention),
+                retention,
+                "The retention must be a defined NavigationRetention value (Destroy or KeepAlive).");
+        }
+
+        return region.Trim();
+    }
 
     private static RouteSegment[] ParsePattern(string pattern)
     {
