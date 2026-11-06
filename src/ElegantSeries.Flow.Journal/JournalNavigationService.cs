@@ -70,7 +70,28 @@ namespace ElegantSeries.Flow.Journal;
 /// instance is container-created; an instance supplied directly as a
 /// registration instance is not owned and is left alone.
 /// <see cref="DisposeAsync"/> first drains the background entry queue;
-/// synchronous <see cref="Dispose"/> does not wait for it.
+/// synchronous <see cref="Dispose"/> does not wait for it. Concurrent
+/// <see cref="DisposeAsync"/> calls join a single disposal, mirroring the
+/// wrapped service: the first call performs the cleanup, callers that
+/// arrive while it is in flight await the same operation (and observe the
+/// same exception), and callers that arrive after it has completed return
+/// immediately. The synchronous <see cref="Dispose"/> never joins an
+/// asynchronous disposal and is never joined by one: if it claims the
+/// service first it performs the synchronous cleanup (without draining),
+/// and an asynchronous operation already in flight then completes without
+/// its drain guarantee. A <see cref="DisposeAsync"/> call made on an
+/// execution context flowing from within the journal's own recording
+/// execution — a store append or a subscriber-error handler running for
+/// this service, including work detached from such a callback under its
+/// captured context — follows the wrapped service's callback rule instead
+/// of starting or joining a disposal: it returns silently once disposal
+/// has been claimed, and faults with
+/// <see cref="InvalidOperationException"/> before that, because the drain
+/// such a disposal performs is waiting on that very execution. (A call from
+/// within a page lifecycle callback carries no signal the decorator can
+/// see; if it joins an in-flight disposal whose wrapped-service cleanup is
+/// waiting on that callback, it completes only when the wrapped service's
+/// disposal-gate timeout releases the callback.)
 /// </para>
 /// </remarks>
 public sealed class JournalNavigationService : INavigationService, IDisposable, IAsyncDisposable
@@ -93,8 +114,35 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     private bool _appendAbandoned;
     private TaskCompletionSource _appendPulse = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    // The enqueue boundary: Enqueue's disposed check, sequence
+    // assignment and channel write are mutually exclusive with the
+    // disposal prologues' claim-and-complete step under this lock, so a
+    // sequence is only ever assigned to an item that is actually
+    // queued, and queued items reach the consumer in sequence order.
+    private readonly object _enqueueLock = new();
+
     private readonly Channel<QueueItem> _queue;
     private readonly Task _queueConsumer;
+
+    // Test seam (null in production): invoked inside the enqueue
+    // boundary after the sequence is assigned and before the item is
+    // written, so tests can stage an enqueue that is in flight across
+    // the start of disposal. Reachable only through the
+    // InternalsVisibleTo grant to the test project.
+    internal Action? EnqueueBoundaryHook;
+
+    // Test seam (null in production): invoked at the top of the
+    // asynchronous disposal core, before it claims the service, so
+    // tests can stage a synchronous Dispose winning the claim race.
+    internal Action? DisposePrologueHook;
+
+    // Set for the duration of AppendSequencedAsync — the decorator's
+    // own recording execution, which runs user code (the store append
+    // and the subscriber-error raise) on the queue consumer or on a
+    // call-site caller's thread. DisposeAsync consults it to refuse
+    // starting or joining a disposal from inside that execution: the
+    // drain such a disposal performs waits on this very execution.
+    private readonly AsyncLocal<bool> _inRecordingExecution = new();
 
     private readonly ConditionalWeakTable<INavigationViewModel, PageBinding> _bindings = new();
     private readonly object _bindingsLock = new();
@@ -129,6 +177,15 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
 
     private readonly IDisposable[] _taps;
     private int _disposed;
+
+    // The single asynchronous disposal operation, shared by every
+    // concurrent DisposeAsync caller (the wrapped service's pattern):
+    // the first caller starts it, callers that arrive while it is in
+    // flight await the same task, and callers that arrive after it has
+    // completed return immediately. Guarded by _disposeTaskLock; null
+    // until the first DisposeAsync call.
+    private readonly object _disposeTaskLock = new();
+    private Task? _disposeTask;
 
     /// <summary>
     /// Creates the decorator. <paramref name="builder"/> supplies the
@@ -501,11 +558,21 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     /// <inheritdoc/>
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-            return;
+        // The claim and the writer completion happen inside the enqueue
+        // boundary (see Enqueue): an enqueue that passed its disposed
+        // check has already written its item before the writer can
+        // complete, so no assigned sequence is ever lost. A call that
+        // finds the flag already set — an asynchronous disposal is in
+        // flight, or a synchronous one already ran — returns at once:
+        // the synchronous path never joins an asynchronous disposal.
+        lock (_enqueueLock)
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                return;
+            _queue.Writer.TryComplete();
+        }
         UnsubscribeTaps();
         AbandonAppends();
-        _queue.Writer.TryComplete();
         if (!_ownsInner)
             return;
         if (_inner is IDisposable disposable)
@@ -532,12 +599,101 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     }
 
     /// <inheritdoc/>
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        TaskCompletionSource? starter = null;
+        Task shared;
+        lock (_disposeTaskLock)
+        {
+            if (_inRecordingExecution.Value)
+            {
+                // Called from within the decorator's own recording
+                // execution — a store append or a subscriber-error
+                // handler running for this service, on the queue
+                // consumer during a drain or on a call-site append the
+                // consumer may be turn-waiting for. Starting or joining
+                // a disposal here would wait on that very execution and
+                // never complete: the wrapped service's
+                // lifecycle-callback rule, applied to the decorator's
+                // own callbacks. Once disposal has been claimed, return
+                // silently; before that, fault instead of starting.
+                return (_disposeTask is not null || Volatile.Read(ref _disposed) != 0)
+                    ? default
+                    : RecordingReentrancyFault();
+            }
+
+            if (_disposeTask is { IsCompleted: true } || (_disposeTask is null && Volatile.Read(ref _disposed) != 0))
+            {
+                // The shared disposal already completed, or a synchronous
+                // Dispose claimed the service (it never starts this task)
+                // and owns the cleanup. Nothing is left to wait for.
+                return default;
+            }
+
+            if (_disposeTask is { IsCompleted: false } inFlight)
+            {
+                // Join the in-flight disposal instead of returning early,
+                // so this caller's completion means the drain and the
+                // wrapped service's disposal have actually finished.
+                return new ValueTask(inFlight);
+            }
+
+            starter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _disposeTask = starter.Task;
+            shared = starter.Task;
+        }
+
+        // The core starts OUTSIDE the lock and off the caller's thread:
+        // its prologue contends for the enqueue boundary — a lock a
+        // caller thread must never block on inside an async API — and
+        // its drain runs store code, so neither the first caller nor a
+        // joining one may be held up by the cleanup's prologue.
+        _ = Task.Run(() => RunDisposeAsync(starter!));
+        return new ValueTask(shared);
+    }
+
+    // The reentrancy failure travels in the returned ValueTask rather
+    // than throwing synchronously (the wrapped service's shape), so a
+    // caller that discards the result without awaiting it is not
+    // faulted at the call site.
+    private static ValueTask RecordingReentrancyFault() => new(Task.FromException(new InvalidOperationException(
+        "DisposeAsync cannot be called from within a journal store append or subscriber-error handler. " +
+        "Call it outside the callback instead.")));
+
+    private async Task RunDisposeAsync(TaskCompletionSource completion)
+    {
+        try
+        {
+            await DisposeAsyncCore().ConfigureAwait(false);
+            completion.TrySetResult();
+        }
+        catch (Exception ex)
+        {
+            completion.TrySetException(ex);
+        }
+    }
+
+    private async Task DisposeAsyncCore()
+    {
+        DisposePrologueHook?.Invoke();
+        bool claimed;
+        lock (_enqueueLock)
+        {
+            claimed = Interlocked.Exchange(ref _disposed, 1) == 0;
+            if (claimed)
+                _queue.Writer.TryComplete();
+        }
+
+        if (!claimed)
+        {
+            // A synchronous Dispose claimed the service first and owns
+            // the cleanup; this operation completes without draining,
+            // exactly as a DisposeAsync that arrives during a synchronous
+            // cleanup does (the wrapped service's rule).
             return;
+        }
+
         UnsubscribeTaps();
-        _queue.Writer.TryComplete();
         // Drain: queued entries land before the wrapped service is
         // disposed. Only then are racing call-site appends abandoned.
         await _queueConsumer.ConfigureAwait(false);
@@ -938,6 +1094,25 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
 
     private async ValueTask AppendSequencedAsync(PendingEntry pending)
     {
+        // Everything the core runs is the decorator's own recording
+        // execution — the turn wait, the store append (user code) and
+        // the error-handler raise (user code). The marker lets
+        // DisposeAsync refuse to start or join a disposal from inside
+        // it. Restored on exit, so the caller's context is unchanged.
+        var previous = _inRecordingExecution.Value;
+        _inRecordingExecution.Value = true;
+        try
+        {
+            await AppendSequencedCoreAsync(pending).ConfigureAwait(false);
+        }
+        finally
+        {
+            _inRecordingExecution.Value = previous;
+        }
+    }
+
+    private async ValueTask AppendSequencedCoreAsync(PendingEntry pending)
+    {
         // No disposed check here: DisposeAsync drains the queue through
         // this path after disposal has begun. The abandon flag alone
         // controls dropping.
@@ -1005,9 +1180,23 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
 
     private void Enqueue(PendingEntry pending)
     {
-        if (Volatile.Read(ref _disposed) != 0)
-            return;
-        _queue.Writer.TryWrite(new EntryItem(pending with { Sequence = AssignSequence() }));
+        // The disposed check, the sequence assignment and the channel
+        // write form one boundary with the disposal prologues, which
+        // claim the disposed flag and complete the writer under the
+        // same lock. A sequence is therefore only assigned to an item
+        // that is actually queued — the write below cannot fail on an
+        // unbounded channel whose completion is lock-ordered after the
+        // check — and items reach the consumer in sequence order, so
+        // the consumer never waits for a sequence that will never
+        // arrive or for one still sitting unread in the channel.
+        lock (_enqueueLock)
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+                return;
+            var sequenced = pending with { Sequence = AssignSequence() };
+            EnqueueBoundaryHook?.Invoke();
+            _queue.Writer.TryWrite(new EntryItem(sequenced));
+        }
     }
 
     private async Task FlushQueueAsync()
