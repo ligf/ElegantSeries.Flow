@@ -137,6 +137,18 @@ namespace ElegantSeries.Flow.Navigation;
 /// names are rejected with <see cref="ArgumentException"/>.
 /// </para>
 /// <para>
+/// <b>Queries:</b> the query methods (<c>CanGoBack</c>,
+/// <c>GetCurrentViewModel</c>, <c>IsActive</c>, <c>GetCurrentRetention</c>,
+/// <c>GetCurrentParameter</c>, <c>GetNavigationStack</c>) return the state
+/// visible at the moment of the call. A navigation that changes a stack in
+/// several steps — <c>GoBackToAsync</c> popping more than one page, for
+/// example — commits those steps one at a time, so a query issued
+/// concurrently from another thread can observe an intermediate stack
+/// rather than the state before or after the whole navigation: each result
+/// is a point-in-time reading, not a snapshot spanning a navigation
+/// transaction.
+/// </para>
+/// <para>
 /// <b>After disposal:</b> navigation requests fail — <c>NavigateToAsync</c>,
 /// <c>GoBackAsync</c>, <c>GoBackToAsync</c> and <c>SetRootAsync</c> throw <see cref="ObjectDisposedException"/>, except a
 /// request registered from within a lifecycle callback after disposal, which
