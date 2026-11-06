@@ -109,6 +109,8 @@ ElegantSeries.Flow.Navigation.NavigationService.SubscribeViewModelReleased(Syste
 ElegantSeries.Flow.Navigation.NavigationService.ViewModelReleased -> System.Action<string!, ElegantSeries.Flow.Navigation.INavigationViewModel!>?
 ElegantSeries.Flow.Routing.GeneratedViewRegistrationsAttribute
 ElegantSeries.Flow.Routing.GeneratedViewRegistrationsAttribute.GeneratedViewRegistrationsAttribute() -> void
+ElegantSeries.Flow.Routing.GeneratedViewRegistrationsAttribute.GeneratedViewRegistrationsAttribute(string! registrationsTypeFullName) -> void
+ElegantSeries.Flow.Routing.GeneratedViewRegistrationsAttribute.RegistrationsTypeFullName.get -> string?
 ElegantSeries.Flow.Routing.ViewForAttribute
 ElegantSeries.Flow.Routing.ViewForAttribute.Lifetime.get -> ElegantSeries.Flow.Routing.ViewModelLifetime
 ElegantSeries.Flow.Routing.ViewForAttribute.Lifetime.set -> void
@@ -117,6 +119,9 @@ ElegantSeries.Flow.Routing.ViewForAttribute<TViewModel>
 ElegantSeries.Flow.Routing.ViewForAttribute<TViewModel>.Lifetime.get -> ElegantSeries.Flow.Routing.ViewModelLifetime
 ElegantSeries.Flow.Routing.ViewForAttribute<TViewModel>.Lifetime.set -> void
 ElegantSeries.Flow.Routing.ViewForAttribute<TViewModel>.ViewForAttribute() -> void
+ElegantSeries.Flow.Routing.ViewForGeneratedNamespaceAttribute
+ElegantSeries.Flow.Routing.ViewForGeneratedNamespaceAttribute.Namespace.get -> string!
+ElegantSeries.Flow.Routing.ViewForGeneratedNamespaceAttribute.ViewForGeneratedNamespaceAttribute(string! namespace) -> void
 ElegantSeries.Flow.Routing.ViewModelLifetime
 ElegantSeries.Flow.Routing.ViewModelLifetime.Singleton = 1 -> ElegantSeries.Flow.Routing.ViewModelLifetime
 ElegantSeries.Flow.Routing.ViewModelLifetime.Transient = 0 -> ElegantSeries.Flow.Routing.ViewModelLifetime

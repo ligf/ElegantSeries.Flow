@@ -166,6 +166,19 @@ attributed views of its own), then each provider's own registrations, in
 assembly-name order, exactly once per provider. Pick one form per module:
 registering the same ViewModel twice throws at startup.
 
+One naming caveat: the generated namespace is derived from the assembly name
+by replacing every character that is invalid in an identifier with `_`, so
+two assemblies whose names differ only in such characters (say `Contoso-UI`
+and `Contoso_UI`) derive the same namespace, and an app referencing both
+cannot tell their registrations apart. The generator detects this and
+reports FLOWGEN015 in the app instead of emitting an ambiguous aggregation;
+resolve it in either of two ways. Give one of the assemblies its own
+generated namespace with an assembly-level attribute in any of its source
+files — `[assembly: ViewForGeneratedNamespace("Contoso.UI")]` replaces the
+derived namespace in full. Or reference one of the two under a distinct
+alias (the `Aliases` metadata on the reference): the aggregator then calls
+that assembly's registrations through its alias automatically.
+
 ## Packages
 
 | Package | Contents |
