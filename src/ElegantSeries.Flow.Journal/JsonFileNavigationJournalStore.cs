@@ -22,6 +22,14 @@ namespace ElegantSeries.Flow.Journal;
 /// is not valid journal JSON surfaces as an exception on the next
 /// operation instead of being silently discarded.
 /// </para>
+/// <para>
+/// Concurrent calls on one instance are serialized internally, but that
+/// coordination does not extend beyond the instance: two store instances
+/// pointed at the same file path — in one process or in several — each
+/// keep their own in-memory copy of the entries list and can overwrite
+/// each other's files. Use a single instance per file path; this store
+/// is not a multi-process shared database.
+/// </para>
 /// </remarks>
 public sealed class JsonFileNavigationJournalStore : INavigationJournalStore, IDisposable
 {
