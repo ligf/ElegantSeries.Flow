@@ -209,6 +209,118 @@ public sealed class FirstAppendBlockingStore : INavigationJournalStore
         _inner.ClearAsync(cancellationToken);
 }
 
+/// <summary>
+/// An in-memory store whose FIRST append calls back into the journal
+/// service's DisposeAsync (a settable target), records how that call
+/// ended, and then appends normally — user code tearing the service
+/// down from inside a store callback.
+/// </summary>
+public sealed class DisposeAsyncCallingStore : INavigationJournalStore
+{
+    private readonly InMemoryJournalStore _inner = new();
+    private int _appendCount;
+
+    public JournalNavigationService? Service { get; set; }
+
+    /// <summary>Null until the first append's callback ran; then either
+    /// <see cref="CompletedSentinel"/> or the observed exception.</summary>
+    public object? CallbackOutcome { get; private set; }
+
+    public static readonly object CompletedSentinel = new();
+
+    public InMemoryJournalStore Inner => _inner;
+
+    public async ValueTask AppendAsync(JournalEntry entry, CancellationToken cancellationToken = default)
+    {
+        if (Interlocked.Increment(ref _appendCount) == 1 && Service is not null)
+        {
+            try
+            {
+                await Service.DisposeAsync();
+                CallbackOutcome = CompletedSentinel;
+            }
+            catch (Exception ex)
+            {
+                CallbackOutcome = ex;
+            }
+        }
+        await _inner.AppendAsync(entry, cancellationToken);
+    }
+
+    public ValueTask<IReadOnlyList<JournalEntry>> ReadEntriesAsync(CancellationToken cancellationToken = default) =>
+        _inner.ReadEntriesAsync(cancellationToken);
+
+    public ValueTask SaveSnapshotAsync(JournalSnapshot snapshot, CancellationToken cancellationToken = default) =>
+        _inner.SaveSnapshotAsync(snapshot, cancellationToken);
+
+    public ValueTask<JournalSnapshot?> LoadSnapshotAsync(CancellationToken cancellationToken = default) =>
+        _inner.LoadSnapshotAsync(cancellationToken);
+
+    public ValueTask ClearAsync(CancellationToken cancellationToken = default) =>
+        _inner.ClearAsync(cancellationToken);
+}
+
+/// <summary>
+/// An in-memory store whose FIRST append blocks until released, and
+/// whose SECOND append first calls back into the journal service's
+/// DisposeAsync and records how that call ended — for staging a store
+/// callback that runs on the queue consumer during a disposal drain.
+/// </summary>
+public sealed class DrainCallbackStore : INavigationJournalStore
+{
+    private readonly InMemoryJournalStore _inner = new();
+    private readonly TaskCompletionSource _firstAppendStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _firstAppendRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _appendCount;
+
+    public JournalNavigationService? Service { get; set; }
+
+    public object? CallbackOutcome { get; private set; }
+
+    public static readonly object CompletedSentinel = new();
+
+    public InMemoryJournalStore Inner => _inner;
+
+    public Task FirstAppendStarted => _firstAppendStarted.Task;
+
+    public void ReleaseFirstAppend() => _firstAppendRelease.TrySetResult();
+
+    public async ValueTask AppendAsync(JournalEntry entry, CancellationToken cancellationToken = default)
+    {
+        var count = Interlocked.Increment(ref _appendCount);
+        if (count == 1)
+        {
+            _firstAppendStarted.TrySetResult();
+            await _firstAppendRelease.Task;
+        }
+        else if (count == 2 && Service is not null)
+        {
+            try
+            {
+                await Service.DisposeAsync();
+                CallbackOutcome = CompletedSentinel;
+            }
+            catch (Exception ex)
+            {
+                CallbackOutcome = ex;
+            }
+        }
+        await _inner.AppendAsync(entry, cancellationToken);
+    }
+
+    public ValueTask<IReadOnlyList<JournalEntry>> ReadEntriesAsync(CancellationToken cancellationToken = default) =>
+        _inner.ReadEntriesAsync(cancellationToken);
+
+    public ValueTask SaveSnapshotAsync(JournalSnapshot snapshot, CancellationToken cancellationToken = default) =>
+        _inner.SaveSnapshotAsync(snapshot, cancellationToken);
+
+    public ValueTask<JournalSnapshot?> LoadSnapshotAsync(CancellationToken cancellationToken = default) =>
+        _inner.LoadSnapshotAsync(cancellationToken);
+
+    public ValueTask ClearAsync(CancellationToken cancellationToken = default) =>
+        _inner.ClearAsync(cancellationToken);
+}
+
 // ── Fake navigation service ─────────────────────────────────────────
 
 /// <summary>
@@ -399,12 +511,23 @@ public sealed class FakeNavigationService : INavigationService, IDisposable, IAs
 
     public ValueTask ClearAllCacheAsync() => ValueTask.CompletedTask;
 
+    /// <summary>Invoked inside DisposeAsync, while the disposal is
+    /// still in flight, so tests can hold it open on a gate.</summary>
+    public Func<Task>? DisposeAsyncHook { get; set; }
+
+    /// <summary>When set, DisposeAsync throws this exception (after the
+    /// hook) instead of completing.</summary>
+    public Exception? DisposeAsyncException { get; set; }
+
     public void Dispose() => DisposeCount++;
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         DisposeAsyncCount++;
-        return ValueTask.CompletedTask;
+        if (DisposeAsyncHook is not null)
+            await DisposeAsyncHook();
+        if (DisposeAsyncException is not null)
+            throw DisposeAsyncException;
     }
 
     private sealed class Token(Action unsubscribe) : IDisposable
