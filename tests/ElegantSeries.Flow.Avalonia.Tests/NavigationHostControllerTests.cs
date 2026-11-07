@@ -181,4 +181,44 @@ public sealed class NavigationHostControllerTests
         var shownEntry = Assert.Single(shown);
         Assert.Same(vmA, shownEntry.ViewModel);
     }
+
+    [Fact]
+    public void SnapshotDeliveryAfterDetach_AppliesNothing()
+    {
+        // An event dispatch iterates a snapshot of its invocation list:
+        // when an earlier subscriber detaches the host mid-dispatch, the
+        // controller's handler still runs — against a detached host whose
+        // service reference is already null. It must apply nothing.
+        var dispatcher = new FakeDispatcher { IsOnUiThread = true };
+        var service = new FakeNavigationService();
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var controller = CreateController(dispatcher, shown);
+        using var detacher = service.SubscribeRegionNavigated((_, _) => controller.Detach());
+        controller.Attach(service);
+
+        service.RaiseRegionNavigated("MainRegion", new TestViewModel());
+
+        Assert.Empty(shown);
+    }
+
+    [Fact]
+    public void SnapshotDeliveryAfterDetach_QueuesNothing()
+    {
+        // The queued path has the same hole without the receipt-time
+        // guard: the captured service and the execution-time service are
+        // both null after a mid-dispatch detach, so the detachment
+        // re-check passes vacuously. Nothing may even be queued.
+        var dispatcher = new FakeDispatcher { IsOnUiThread = false };
+        var service = new FakeNavigationService();
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var controller = CreateController(dispatcher, shown);
+        using var detacher = service.SubscribeRegionNavigated((_, _) => controller.Detach());
+        controller.Attach(service);
+
+        service.RaiseRegionNavigated("MainRegion", new TestViewModel());
+
+        Assert.Empty(dispatcher.PostedActions);
+        dispatcher.RunPosted();
+        Assert.Empty(shown);
+    }
 }

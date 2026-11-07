@@ -341,6 +341,26 @@ public class JournalRecordingTests
     }
 
     [Fact]
+    public async Task GoBackToWithParameter_RecordsParameterOnBackEntry()
+    {
+        var provider = BuildProvider(journal => journal.RegisterParameter<DetailParam>(
+            p => "id=" + p.Id,
+            text => new DetailParam(int.Parse(text["id=".Length..]))));
+        using var _p = provider;
+        var nav = provider.GetRequiredService<INavigationService>();
+        var store = provider.GetRequiredService<INavigationJournalStore>();
+
+        Assert.True(await nav.NavigateToAsync<VoteDetailViewModel, DetailParam>(new DetailParam(1)));
+        Assert.True(await nav.NavigateToAsync<SettingsViewModel>());
+        Assert.True(await nav.GoBackToAsync<VoteDetailViewModel, DetailParam>(new DetailParam(2)));
+
+        var entries = await store.ReadEntriesAsync();
+        var back = Assert.Single(entries, e => e.Kind == JournalEntryKind.Back);
+        Assert.Equal(typeof(DetailParam).AssemblyQualifiedName, back.ParameterType);
+        Assert.Equal("id=2", back.ParameterSnapshot);
+    }
+
+    [Fact]
     public async Task BypassedNavigation_ViaAttachedNavigationProperty_RecordedAtSettle()
     {
         var provider = BuildProvider(journal => journal.RegisterParameter<DetailParam>(

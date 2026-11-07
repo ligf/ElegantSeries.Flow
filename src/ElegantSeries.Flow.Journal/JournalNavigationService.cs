@@ -490,7 +490,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
                 return false;
             TrackRegion(region);
             UpdateCurrentPageParameter<TViewModel>(region, parameter, parameterType, parameterSnapshot);
-            await AppendNowAsync(new PendingEntry(region, JournalEntryKind.Back, LandedViewModelType(region), null, null)).ConfigureAwait(false);
+            await AppendNowAsync(new PendingEntry(region, JournalEntryKind.Back, LandedViewModelType(region), parameterType, parameterSnapshot)).ConfigureAwait(false);
             return true;
         }
         finally

@@ -255,6 +255,15 @@ internal sealed class NavigationHostController<TView> where TView : class
             service = _navigationService;
         }
 
+        if (service is null)
+        {
+            // The host is detached: an event snapshot taken before Detach
+            // can still deliver here, but with no attached service there
+            // is no current page to judge the event against and nothing
+            // may be applied to the detached host.
+            return;
+        }
+
         if (IsSuperseded(service, regionName, viewModel))
         {
             return;

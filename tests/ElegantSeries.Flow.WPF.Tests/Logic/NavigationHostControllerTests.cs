@@ -847,4 +847,56 @@ public sealed class NavigationHostControllerTests
         Assert.Equal(2, shown.Count);
         Assert.Same(shown[0], shown[1]);
     }
+
+    [Fact]
+    public void SnapshotDeliveryAfterDetach_AppliesNothing()
+    {
+        // An event dispatch iterates a snapshot of its invocation list:
+        // when an earlier subscriber detaches the host mid-dispatch, the
+        // controller's handler still runs — against a detached host whose
+        // service reference is already null. It must apply nothing.
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        int factoryCalls = 0;
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => { factoryCalls++; return new object(); },
+            showView: (view, vm) => shown.Add((view, vm)),
+            clearView: () => { });
+        var service = new FakeNavigationService();
+        using var detacher = service.SubscribeRegionNavigated((_, _) => controller.Detach());
+        controller.Attach(service);
+
+        service.RaiseNavigated("MainRegion", new StubViewModel());
+
+        Assert.Equal(0, factoryCalls);
+        Assert.Empty(shown);
+    }
+
+    [Fact]
+    public void SnapshotDeliveryAfterDetach_QueuesNothing()
+    {
+        // The queued path has the same hole without the receipt-time
+        // guard: the captured service and the execution-time service are
+        // both null after a mid-dispatch detach, so the detachment
+        // re-check passes vacuously. Nothing may even be queued.
+        var dispatcher = new FakeDispatcher(hasAccess: false);
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (view, vm) => shown.Add((view, vm)),
+            clearView: () => { });
+        var service = new FakeNavigationService();
+        using var detacher = service.SubscribeRegionNavigated((_, _) => controller.Detach());
+        controller.Attach(service);
+
+        service.RaiseNavigated("MainRegion", new StubViewModel());
+
+        Assert.Equal(0, dispatcher.PostedCount);
+        dispatcher.RunPosted();
+        Assert.Empty(shown);
+    }
 }

@@ -921,7 +921,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// True when the mapping already has a diagnostic error (FLOWGEN003-006/008-010).
+    /// True when the mapping already has a diagnostic error (FLOWGEN003-006/008-012).
     /// Such mappings are excluded from the duplicate check to avoid noise diagnostics.
     /// </summary>
     private static bool HasMappingError(ViewMapping mapping) =>
@@ -1478,9 +1478,10 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     /// method shape against this compilation's platform locator: a public
     /// type, and on it a public, static, non-generic method taking exactly
     /// that locator, so the qualified static call the aggregator emits can
-    /// actually bind. A marked assembly that fails a later check (a
-    /// hand-forged marker, or output of an incompatible generator version)
-    /// is silently skipped. Each result also carries the alias of the
+    /// actually bind. The recorded location must also be emittable as a
+    /// qualified name (every segment a non-keyword identifier). A marked
+    /// assembly that fails a later check (a hand-forged marker, or output
+    /// of an incompatible generator version) is silently skipped. Each result also carries the alias of the
     /// reference that brought the assembly in, which the aggregator
     /// qualifies its call with; assemblies are no longer folded together
     /// when their type names coincide — that is a collision for
@@ -1524,6 +1525,11 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             }
 
             var typeName = recordedTypeName ?? GetGeneratedNamespace(assembly.Name) + ".ViewForRegistrations";
+            if (!IsEmittableTypeName(typeName))
+            {
+                continue;
+            }
+
             var type = FindTypeByFullName(assembly.GlobalNamespace, typeName);
             if (type is null || type.DeclaredAccessibility != Accessibility.Public)
             {
@@ -1599,6 +1605,28 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
         alias = best;
         return best is not null || reference.Properties.Aliases.IsEmpty;
+    }
+
+    /// <summary>
+    /// True when every segment of a dotted type name is an identifier the
+    /// aggregator can emit verbatim into a qualified call. A recorded
+    /// location whose namespace contains a keyword segment (a hand-forged
+    /// marker can point at a type declared inside
+    /// <c>namespace My.@event</c>) resolves through metadata names but
+    /// cannot be written into C# source — such a provider fails
+    /// recognition like any other unbindable shape.
+    /// </summary>
+    private static bool IsEmittableTypeName(string typeName)
+    {
+        foreach (var segment in typeName.Split('.'))
+        {
+            if (!IsValidIdentifier(segment))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static INamedTypeSymbol? FindTypeByFullName(INamespaceSymbol root, string fullMetadataName)

@@ -1653,6 +1653,59 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void ProviderWithKeywordNamespaceSegment_IsSkipped()
+    {
+        // A hand-forged marker can record a registrations type inside a
+        // keyword namespace segment (declared as namespace My.@event):
+        // the type resolves through metadata names and passes the shape
+        // check, but its full name cannot be written into the aggregator's
+        // C# source — emitting it verbatim would produce a bare compiler
+        // error in the generated file. Recognition must reject it like
+        // any other unbindable shape.
+        var forged = BuildProviderLibrary(
+            "Forged",
+            "Forged",
+            "ForgedView",
+            "ForgedViewModel",
+            registrationsOverride: """
+                [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations("My.event.ViewForRegistrations")]
+
+                namespace My.@event
+                {
+                    public static class ViewForRegistrations
+                    {
+                        public static void RegisterAttributedViews(this global::ElegantSeries.Flow.Avalonia.Locating.IViewLocator views)
+                        {
+                        }
+                    }
+                }
+                """);
+        var sources = """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, forged });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.DoesNotContain(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
     public void ProviderWithGenericRegistrationMethod_IsSkipped()
     {
         // A generic registration method cannot be called without type
