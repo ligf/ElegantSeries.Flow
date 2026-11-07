@@ -143,7 +143,7 @@ inferred from the View's `BaseView<TViewModel>` base class, or named explicitly
 as `[ViewFor<TViewModel>]` for Views without that base —
 and let the ElegantSeries.Flow source generator emit the same registrations into a
 generated `RegisterAttributedViews()` extension (call it inside `AddElegantSeriesFlowViews`;
-the generated code lives in your own assembly's `<assembly name>.FlowGenerated`
+the generated code lives in the `ElegantSeries.Flow.Generated.<assembly name>`
 namespace — add a `using` for it); the
 attribute's `Lifetime` selects `Transient` (default), `Singleton`, or `ViewOnly`
 (mapping only — register the ViewModel in DI yourself). The runtime never scans the
@@ -155,8 +155,8 @@ with its own Views and ViewModels, referenced by the desktop app that hosts
 navigation; each assembly's generated registrations cover only that assembly's
 views. Compose them in the app's `AddElegantSeriesFlowViews` in either of two
 ways. Manually: one fully qualified static call per module,
-`Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);` (the
-extension-method form takes one `using <module>.FlowGenerated;` per file, and importing two
+`ElegantSeries.Flow.Generated.Plugin.ViewForRegistrations.RegisterAttributedViews(views);` (the
+extension-method form takes one `using ElegantSeries.Flow.Generated.<module>;` per file, and importing two
 modules' generated namespaces into one file makes a bare
 `RegisterAttributedViews()` call ambiguous). Or aggregated: when the app
 references assemblies that carry generated registrations, the generator also
@@ -166,11 +166,12 @@ attributed views of its own), then each provider's own registrations, in
 assembly-name order, exactly once per provider. Pick one form per module:
 registering the same ViewModel twice throws at startup.
 
-One naming caveat: the generated namespace is derived from the assembly name
-by replacing every character that is invalid in an identifier with `_`, so
-two assemblies whose names differ only in such characters (say `Contoso-UI`
-and `Contoso_UI`) derive the same namespace, and an app referencing both
-cannot tell their registrations apart. The generator detects this and
+One naming caveat: the generated namespace is
+`ElegantSeries.Flow.Generated.<assembly name>`, with the assembly name
+sanitized by replacing every character that is invalid in an identifier
+with `_`, so two assemblies whose names differ only in such characters
+(say `Contoso-UI` and `Contoso_UI`) derive the same namespace, and an app
+referencing both cannot tell their registrations apart. The generator detects this and
 reports FLOWGEN015 in the app instead of emitting an ambiguous aggregation;
 resolve it in either of two ways. Give one of the assemblies its own
 generated namespace with an assembly-level attribute in any of its source

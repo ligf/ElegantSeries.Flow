@@ -26,7 +26,25 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\GeneratedLayerReservation.cs" Link="Shared\GeneratedLayerReservation.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\ElegantSeries.Flow\ElegantSeries.Flow.csproj" />
+    <!-- Referenced so GeneratedNamespaceGuardTests can inspect the library
+         assemblies' metadata; the tests themselves exercise Core only. The
+         WPF package (net10.0-windows) cannot be referenced from net10.0 —
+         its guard lives in the WPF test project's windows leg instead. -->
+    <ProjectReference Include="..\..\src\ElegantSeries.Flow.Mvvm\ElegantSeries.Flow.Mvvm.csproj" />
+    <ProjectReference Include="..\..\src\ElegantSeries.Flow.Avalonia\ElegantSeries.Flow.Avalonia.csproj" />
+    <ProjectReference Include="..\..\src\ElegantSeries.Flow.Generator\ElegantSeries.Flow.Generator.csproj" />
+    <ProjectReference Include="..\..\src\ElegantSeries.Flow.Diagnostics\ElegantSeries.Flow.Diagnostics.csproj" />
+    <ProjectReference Include="..\..\src\ElegantSeries.Flow.Routing\ElegantSeries.Flow.Routing.csproj" />
+    <ProjectReference Include="..\..\src\ElegantSeries.Flow.Journal\ElegantSeries.Flow.Journal.csproj" />
   </ItemGroup>
 
 </Project>

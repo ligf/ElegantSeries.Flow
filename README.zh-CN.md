@@ -134,8 +134,8 @@ ViewModel→View 映射方式：在 `services.AddElegantSeriesFlowViews(...)` �
 `BaseView<TViewModel>` 基类推断，没有该基类的 View 用 `[ViewFor<TViewModel>]`
 显式写明——让 ElegantSeries.Flow
 source generator 在编译期生成等价的注册代码，生成一个 `RegisterAttributedViews()`
-扩展方法（在 `AddElegantSeriesFlowViews` 里调用；生成代码位于你自己程序集的
-`<程序集名>.FlowGenerated` 命名空间，需要加对应的 `using`）；attribute 的 `Lifetime` 可选 `Transient`
+扩展方法（在 `AddElegantSeriesFlowViews` 里调用；生成代码位于
+`ElegantSeries.Flow.Generated.<程序集名>` 命名空间，需要加对应的 `using`）；attribute 的 `Lifetime` 可选 `Transient`
 （默认）、`Singleton` 或 `ViewOnly`（只生成映射，ViewModel 的 DI 注册自己管）。
 运行时从不扫描这个 attribute。每个 ViewModel 二选一：手动注册或 attribute 生成，
 不要两边都做——重复注册会在启动时抛 `InvalidOperationException`。
@@ -143,15 +143,16 @@ source generator 在编译期生成等价的注册代码，生成一个 `Registe
 View 也可以分布在多个程序集里——例如功能模块各自包含 View 与 ViewModel、
 被负责页面调度的桌面应用引用；每个程序集生成的注册只覆盖它自己的视图。
 在应用的 `AddElegantSeriesFlowViews` 里组合它们有两种方式。手动：每个模块一行
-全限定静态调用 `Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);`
-（扩展方法形式需要每个文件一个 `using <模块>.FlowGenerated;`，同一文件导入两个模块的
+全限定静态调用 `ElegantSeries.Flow.Generated.Plugin.ViewForRegistrations.RegisterAttributedViews(views);`
+（扩展方法形式需要每个文件一个 `using ElegantSeries.Flow.Generated.<模块>;`，同一文件导入两个模块的
 生成命名空间会让裸调用 `RegisterAttributedViews()` 产生二义性）。或聚合：当
 应用引用了带生成注册的程序集时，生成器还会在应用自己的生成命名空间里生成
 `RegisterAllAttributedViews()` 扩展方法——先调用应用自己的注册（应用本身声明
 了 attribute 视图时），再按程序集名顺序调用每个提供者的自身注册，每个
 提供者恰好一次。每个模块只选一种形式：同一 ViewModel 注册两次会在启动时抛错。
 
-一个命名注意点：生成命名空间由程序集名推导——把标识符非法字符一律换成
+一个命名注意点：生成命名空间为 `ElegantSeries.Flow.Generated.<程序集名>`，
+其中程序集名经净化——把标识符非法字符一律换成
 `_`——所以名字只差在这类字符上的两个程序集（如 `Contoso-UI` 与
 `Contoso_UI`）会推导出同一命名空间，引用两者的应用无法区分它们的注册。
 生成器会检出这种情况、在应用里报 FLOWGEN015，而不是生成有二义性的聚合

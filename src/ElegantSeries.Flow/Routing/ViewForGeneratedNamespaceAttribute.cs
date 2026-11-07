@@ -8,9 +8,10 @@ namespace ElegantSeries.Flow.Routing;
 /// <remarks>
 /// <para>
 /// Without this attribute, the generator emits the <c>ViewForRegistrations</c>
-/// class into <c>&lt;sanitized assembly name&gt;.FlowGenerated</c> (or the bare
-/// <c>ElegantSeries.Flow.Generated</c> namespace when the assembly has no
-/// name). Sanitization maps every character that is invalid in an identifier
+/// class into <c>ElegantSeries.Flow.Generated.&lt;sanitized assembly
+/// name&gt;</c> (with a fixed <c>Unknown</c> segment in place of the assembly
+/// name when the assembly has no name). Sanitization maps every character
+/// that is invalid in an identifier
 /// to <c>_</c>, so two assemblies whose names differ only in such characters
 /// (for example <c>Contoso-UI</c> and <c>Contoso_UI</c>) derive the same
 /// namespace, and an application referencing both cannot tell their

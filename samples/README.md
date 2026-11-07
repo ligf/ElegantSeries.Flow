@@ -128,7 +128,7 @@ Both samples demonstrate the library's full feature set:
     `IViewLocator.Register*` calls inside the generated
     `RegisterAttributedViews()` extension (called from `AddElegantSeriesFlowViews`; the
     generated code lives in the sample assembly's own
-    `<assembly name>.FlowGenerated` namespace). The
+    `ElegantSeries.Flow.Generated.<assembly name>` namespace). The
     attribute's `Lifetime` selects the registration: `Transient` (default) →
     `RegisterTransient`, `Singleton` → `RegisterSingleton`, `ViewOnly` →
     mapping-only `Register` (used by Home/Detail, whose DI stays manual).

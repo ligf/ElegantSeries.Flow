@@ -1361,7 +1361,7 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrations.g.cs");
         Assert.Contains(
-            "namespace TestCompilation.FlowGenerated",
+            "namespace ElegantSeries.Flow.Generated.TestCompilation",
             generated.SourceText.ToString());
     }
 
@@ -1379,7 +1379,7 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrations.g.cs");
         Assert.Contains(
-            "namespace _2_cool.namespace_.FlowGenerated",
+            "namespace ElegantSeries.Flow.Generated._2_cool.namespace_",
             generated.SourceText.ToString());
         Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
     }
@@ -1398,7 +1398,7 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrations.g.cs");
         Assert.Contains(
-            "namespace TestCompilation.FlowGenerated",
+            "namespace ElegantSeries.Flow.Generated.TestCompilation",
             generated.SourceText.ToString());
         Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
     }
@@ -1415,10 +1415,11 @@ public class ViewForGeneratorTests
             dotRunResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrations.g.cs");
         Assert.Contains(
-            "namespace Foo._.FlowGenerated",
+            "namespace ElegantSeries.Flow.Generated.Foo._",
             dotGenerated.SourceText.ToString());
 
-        // A whitespace-only assembly name falls back to the bare namespace.
+        // A whitespace-only assembly name falls back to the fixed Unknown
+        // segment under the generated layer.
         // (The compilation itself is invalid — CS8203 — so only the emitted
         // namespace line is pinned here, not the updated compilation.)
         var (blankRunResult, blankDiagnostics, _) = RunGenerator(sources, " ");
@@ -1427,8 +1428,8 @@ public class ViewForGeneratorTests
             blankRunResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrations.g.cs");
         var blankText = blankGenerated.SourceText.ToString();
-        Assert.Contains("namespace ElegantSeries.Flow.Generated", blankText);
-        Assert.DoesNotContain("namespace ElegantSeries.Flow.Generated.", blankText);
+        Assert.Contains("namespace ElegantSeries.Flow.Generated.Unknown", blankText);
+        Assert.DoesNotContain("namespace ElegantSeries.Flow.Generated.Unknown.", blankText);
     }
 
     [Fact]
@@ -1456,7 +1457,7 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrations.g.cs");
         Assert.Contains(
-            "[assembly: global::ElegantSeries.Flow.Routing.GeneratedViewRegistrations(\"TestCompilation.FlowGenerated.ViewForRegistrations\")]",
+            "[assembly: global::ElegantSeries.Flow.Routing.GeneratedViewRegistrations(\"ElegantSeries.Flow.Generated.TestCompilation.ViewForRegistrations\")]",
             generated.SourceText.ToString());
     }
 
@@ -1488,8 +1489,8 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
         var text = aggregator.SourceText.ToString();
-        var ownCall = "global::TestCompilation.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
-        var providerCall = "global::Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
+        var ownCall = "global::ElegantSeries.Flow.Generated.TestCompilation.ViewForRegistrations.RegisterAttributedViews(views);";
+        var providerCall = "global::ElegantSeries.Flow.Generated.Plugin.ViewForRegistrations.RegisterAttributedViews(views);";
         Assert.Contains(ownCall, text);
         Assert.Contains(providerCall, text);
         Assert.True(
@@ -1549,8 +1550,8 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
         var text = aggregator.SourceText.ToString();
-        Assert.Contains("global::Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);", text);
-        Assert.DoesNotContain("TestCompilation.FlowGenerated.ViewForRegistrations.RegisterAttributedViews", text);
+        Assert.Contains("global::ElegantSeries.Flow.Generated.Plugin.ViewForRegistrations.RegisterAttributedViews(views);", text);
+        Assert.DoesNotContain("ElegantSeries.Flow.Generated.TestCompilation.ViewForRegistrations.RegisterAttributedViews", text);
     }
 
     [Fact]
@@ -1568,7 +1569,7 @@ public class ViewForGeneratorTests
             registrationsOverride: """
                 [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
 
-                namespace Impostor.FlowGenerated
+                namespace ElegantSeries.Flow.Generated.Impostor
                 {
                     public static class ViewForRegistrations
                     {
@@ -1617,7 +1618,7 @@ public class ViewForGeneratorTests
             registrationsOverride: """
                 [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
 
-                namespace Cloaked.FlowGenerated
+                namespace ElegantSeries.Flow.Generated.Cloaked
                 {
                     internal static class ViewForRegistrations
                     {
@@ -1665,7 +1666,7 @@ public class ViewForGeneratorTests
             registrationsOverride: """
                 [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
 
-                namespace Generic.FlowGenerated
+                namespace ElegantSeries.Flow.Generated.Generic
                 {
                     public static class ViewForRegistrations
                     {
@@ -1703,8 +1704,8 @@ public class ViewForGeneratorTests
     public void MultipleProviders_SortKeyIsRawAssemblyName()
     {
         // "Z-Mod" sorts before "Z.Mod" by raw assembly name ('-' 0x2D <
-        // '.' 0x2E), but after it by sanitized type name ("Z.Mod.FlowGenerated" vs
-        // "Z_Mod.FlowGenerated": '.' 0x2E < '_' 0x5F). The aggregation order is the raw
+        // '.' 0x2E), but after it by sanitized type name ("ElegantSeries.Flow.Generated.Z.Mod" vs
+        // "ElegantSeries.Flow.Generated.Z_Mod": '.' 0x2E < '_' 0x5F). The aggregation order is the raw
         // assembly-name order.
         var hyphen = BuildProviderLibrary("Z-Mod", "ZMod", "AlphaView", "AlphaViewModel");
         var dotted = BuildProviderLibrary("Z.Mod", "ZDotMod", "BetaView", "BetaViewModel");
@@ -1731,8 +1732,8 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
         var text = aggregator.SourceText.ToString();
-        var hyphenCall = "global::Z_Mod.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
-        var dottedCall = "global::Z.Mod.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
+        var hyphenCall = "global::ElegantSeries.Flow.Generated.Z_Mod.ViewForRegistrations.RegisterAttributedViews(views);";
+        var dottedCall = "global::ElegantSeries.Flow.Generated.Z.Mod.ViewForRegistrations.RegisterAttributedViews(views);";
         Assert.Contains(hyphenCall, text);
         Assert.Contains(dottedCall, text);
         Assert.True(
@@ -1774,7 +1775,7 @@ public class ViewForGeneratorTests
             registrationsOverride: """
                 [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
 
-                namespace Impostor.FlowGenerated
+                namespace ElegantSeries.Flow.Generated.Impostor
                 {
                     public static class ViewForRegistrations
                     {
@@ -1852,8 +1853,8 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
         var text = aggregator.SourceText.ToString();
-        var pluginCall = "global::Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
-        var reportsCall = "global::Reports.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
+        var pluginCall = "global::ElegantSeries.Flow.Generated.Plugin.ViewForRegistrations.RegisterAttributedViews(views);";
+        var reportsCall = "global::ElegantSeries.Flow.Generated.Reports.ViewForRegistrations.RegisterAttributedViews(views);";
         Assert.Contains(pluginCall, text);
         Assert.Contains(reportsCall, text);
         Assert.True(
@@ -1876,7 +1877,7 @@ public class ViewForGeneratorTests
                 {
                     public static void RegisterModuleViews(ElegantSeries.Flow.Avalonia.Locating.IViewLocator views)
                     {
-                        global::Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);
+                        global::ElegantSeries.Flow.Generated.Plugin.ViewForRegistrations.RegisterAttributedViews(views);
                     }
                 }
             }
@@ -1892,8 +1893,8 @@ public class ViewForGeneratorTests
     public void UserTypeInsideGeneratedNamespace_CoexistsWithRegistrations()
     {
         // A namespace is not a type: user code may live in the same
-        // <assembly>.FlowGenerated namespace as the generated registrations without
-        // colliding with them.
+        // ElegantSeries.Flow.Generated.<assembly> namespace as the generated
+        // registrations without colliding with them.
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
@@ -1909,7 +1910,7 @@ public class ViewForGeneratorTests
                 }
             }
 
-            namespace TestCompilation.FlowGenerated
+            namespace ElegantSeries.Flow.Generated.TestCompilation
             {
                 public static class UsersOwnHelpers { }
             }
@@ -1922,14 +1923,20 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
-    public void RootTypeNamedFlowGenerated_CollidesWithGeneratedNamespaceSegment()
+    public void OwnTypeNamedGeneratedInLibraryRoot_CollidesWithGeneratedLayer()
     {
-        // The accepted residual boundary of the FlowGenerated segment word:
-        // a consumer type named exactly FlowGenerated inside the assembly
-        // root namespace cannot coexist with the generated namespace
-        // segment of the same name (CS0101, reported on the consumer's own
-        // declaration). Renaming or relocating that one type is the remedy;
-        // this pins the boundary so it is a recorded cost, not a surprise.
+        // The accepted residual boundary of the umbrella derivation: the
+        // generated registrations live under the library's root namespace,
+        // in the ElegantSeries.Flow.Generated layer. A consumer who
+        // declares their own type named Generated inside the
+        // ElegantSeries.Flow namespace of their own assembly cannot
+        // coexist with that layer's namespace in the same compilation
+        // (CS0101, reported on the consumer's own declaration). Renaming
+        // or relocating that one type is the remedy; this pins the
+        // boundary so it is a recorded cost, not a surprise. (The library
+        // side of the same boundary — no library type named Generated, no
+        // library types in the layer — is pinned by the guard tests in
+        // ElegantSeries.Flow.Tests.)
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
@@ -1945,9 +1952,9 @@ public class ViewForGeneratorTests
                 }
             }
 
-            namespace TestCompilation
+            namespace ElegantSeries.Flow
             {
-                public class FlowGenerated { }
+                public class Generated { }
             }
             """;
 
@@ -2047,10 +2054,10 @@ public class ViewForGeneratorTests
                 }
             }
             """;
-        var generatedNamespace = string.Join(
+        var generatedNamespace = "ElegantSeries.Flow.Generated." + string.Join(
             ".",
             assemblyName.Split('.').Select(segment => new string(
-                segment.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_').ToArray()))) + ".FlowGenerated";
+                segment.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_').ToArray())));
         var registrations = registrationsOverride ?? $$"""
             [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
 
@@ -2233,7 +2240,7 @@ public class ViewForGeneratorTests
         Assert.Contains(
             "[assembly: global::ElegantSeries.Flow.Routing.GeneratedViewRegistrations(\"Contoso.UI.ViewForRegistrations\")]",
             text);
-        Assert.DoesNotContain("TestCompilation.FlowGenerated", text);
+        Assert.DoesNotContain("ElegantSeries.Flow.Generated.TestCompilation", text);
     }
 
     [Fact]
@@ -2314,7 +2321,7 @@ public class ViewForGeneratorTests
         var message = collision.GetMessage();
         Assert.Contains("Contoso-UI", message);
         Assert.Contains("Contoso_UI", message);
-        Assert.Contains("Contoso_UI.FlowGenerated.ViewForRegistrations", message);
+        Assert.Contains("ElegantSeries.Flow.Generated.Contoso_UI.ViewForRegistrations", message);
         Assert.Empty(runResult.GeneratedSources.Where(
             s => s.HintName == "ViewForRegistrationsAggregator.g.cs"));
         Assert.DoesNotContain(updatedCompilation.GetDiagnostics(), d => d.Id == "CS0433");
@@ -2359,7 +2366,7 @@ public class ViewForGeneratorTests
             s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
         var text = aggregator.SourceText.ToString();
         Assert.Contains(
-            "global::Contoso_UI.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);", text);
+            "global::ElegantSeries.Flow.Generated.Contoso_UI.ViewForRegistrations.RegisterAttributedViews(views);", text);
         Assert.Contains(
             "global::Contoso.UI.ViewForRegistrations.RegisterAttributedViews(views);", text);
     }
@@ -2388,10 +2395,10 @@ public class ViewForGeneratorTests
         var text = aggregator.SourceText.ToString();
         Assert.Contains("extern alias ContosoUnderscore;", text);
         Assert.Contains(
-            "ContosoUnderscore::Contoso_UI.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);",
+            "ContosoUnderscore::ElegantSeries.Flow.Generated.Contoso_UI.ViewForRegistrations.RegisterAttributedViews(views);",
             text);
         Assert.Contains(
-            "global::Contoso_UI.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);", text);
+            "global::ElegantSeries.Flow.Generated.Contoso_UI.ViewForRegistrations.RegisterAttributedViews(views);", text);
     }
 
     [Fact]
@@ -2399,7 +2406,7 @@ public class ViewForGeneratorTests
     {
         // The marker records where the registrations type actually is; the
         // aggregator must read it instead of deriving the location from the
-        // assembly name (derivation would look for Plugin.FlowGenerated and
+        // assembly name (derivation would look for ElegantSeries.Flow.Generated.Plugin and
         // find nothing).
         var custom = BuildProviderLibrary(
             "Plugin",
@@ -2513,10 +2520,10 @@ public class ViewForGeneratorTests
         Assert.Contains("extern alias ContosoDash;", text);
         Assert.Contains("extern alias ContosoUnderscore;", text);
         Assert.Contains(
-            "ContosoDash::Contoso_UI.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);",
+            "ContosoDash::ElegantSeries.Flow.Generated.Contoso_UI.ViewForRegistrations.RegisterAttributedViews(views);",
             text);
         Assert.Contains(
-            "ContosoUnderscore::Contoso_UI.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);",
+            "ContosoUnderscore::ElegantSeries.Flow.Generated.Contoso_UI.ViewForRegistrations.RegisterAttributedViews(views);",
             text);
     }
 
