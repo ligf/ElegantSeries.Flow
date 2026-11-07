@@ -2027,6 +2027,54 @@ public class ViewForGeneratorTests
         return compilation.ToMetadataReference();
     }
 
+    // Mirrors the generator's SanitizeNamespaceRoot rule for rule (invalid
+    // characters to '_', empty segment to '_', '_' prefix for a leading
+    // digit, '_' suffix for a reserved keyword): the aggregator predicts a
+    // payload-less provider's location with the real sanitizer, so any
+    // divergence here would place the replica's registrations where
+    // aggregation never looks, and the provider would silently vanish
+    // from the test instead of failing in it.
+    private static string SanitizeReplica(string assemblyName)
+    {
+        var segments = assemblyName.Split('.');
+        for (var i = 0; i < segments.Length; i++)
+        {
+            var segment = new string(segments[i]
+                .Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_')
+                .ToArray());
+            if (segment.Length == 0)
+            {
+                segment = "_";
+            }
+            else if (char.IsDigit(segment[0]))
+            {
+                segment = "_" + segment;
+            }
+
+            if (ReplicaReservedKeywords.Contains(segment))
+            {
+                segment += "_";
+            }
+
+            segments[i] = segment;
+        }
+
+        return string.Join(".", segments);
+    }
+
+    private static readonly HashSet<string> ReplicaReservedKeywords = new()
+    {
+        "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
+        "class", "const", "continue", "decimal", "default", "delegate", "do", "double", "else",
+        "enum", "event", "explicit", "extern", "false", "finally", "fixed", "float", "for",
+        "foreach", "goto", "if", "implicit", "in", "int", "interface", "internal", "is", "lock",
+        "long", "namespace", "new", "null", "object", "operator", "out", "override", "params",
+        "private", "protected", "public", "readonly", "ref", "return", "sbyte", "sealed",
+        "short", "sizeof", "stackalloc", "static", "string", "struct", "switch", "this",
+        "throw", "true", "try", "typeof", "uint", "ulong", "unchecked", "unsafe", "ushort",
+        "using", "virtual", "void", "volatile", "while",
+    };
+
     /// <summary>
     /// Builds a stand-in provider library: an assembly with one attributed
     /// view plus a hand-written replica of the file the generator would have
@@ -2054,10 +2102,7 @@ public class ViewForGeneratorTests
                 }
             }
             """;
-        var generatedNamespace = "ElegantSeries.Flow.Generated." + string.Join(
-            ".",
-            assemblyName.Split('.').Select(segment => new string(
-                segment.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_').ToArray())));
+        var generatedNamespace = "ElegantSeries.Flow.Generated." + SanitizeReplica(assemblyName);
         var registrations = registrationsOverride ?? $$"""
             [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
 

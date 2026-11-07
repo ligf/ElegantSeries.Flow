@@ -127,7 +127,7 @@ Both samples demonstrate the library's full feature set:
     (`ElegantSeries.Flow.Generator`, referenced as an Analyzer) turns them into
     `IViewLocator.Register*` calls inside the generated
     `RegisterAttributedViews()` extension (called from `AddElegantSeriesFlowViews`; the
-    generated code lives in the sample assembly's own
+    generated code lives in the
     `ElegantSeries.Flow.Generated.<assembly name>` namespace). The
     attribute's `Lifetime` selects the registration: `Transient` (default) →
     `RegisterTransient`, `Singleton` → `RegisterSingleton`, `ViewOnly` →
