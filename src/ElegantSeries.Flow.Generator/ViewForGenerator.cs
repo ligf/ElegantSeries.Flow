@@ -48,6 +48,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     private const string AvaloniaLocatorMetadataName = AvaloniaNamespaceRoot + ".Locating.IViewLocator";
     private const string WpfLocatorMetadataName = WpfNamespaceRoot + ".Locating.IViewLocator";
     private const string GeneratedRegistrationsMarkerMetadataName = "ElegantSeries.Flow.Routing.GeneratedViewRegistrationsAttribute";
+    private const string GeneratedNamespaceOverrideMetadataName = "ElegantSeries.Flow.Routing.ViewForGeneratedNamespaceAttribute";
 
     private const string AvaloniaViewsNamespace = "global::" + AvaloniaNamespaceRoot + ".Views";
     private const string WpfViewsNamespace = "global::" + WpfNamespaceRoot + ".Views";
@@ -292,13 +293,15 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     {
         private CompilationSnapshot(
             string? assemblyName,
+            string? namespaceOverride,
             bool hasAvaloniaLocator,
             bool hasWpfLocator,
             string? singleLocatorDisplayName,
-            ImmutableArray<string> avaloniaProviders,
-            ImmutableArray<string> wpfProviders)
+            ImmutableArray<ProviderRegistration> avaloniaProviders,
+            ImmutableArray<ProviderRegistration> wpfProviders)
         {
             AssemblyName = assemblyName;
+            NamespaceOverride = namespaceOverride;
             HasAvaloniaLocator = hasAvaloniaLocator;
             HasWpfLocator = hasWpfLocator;
             SingleLocatorDisplayName = singleLocatorDisplayName;
@@ -307,6 +310,30 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         }
 
         public string? AssemblyName { get; }
+
+        /// <summary>
+        /// The raw value of this assembly's
+        /// <c>[assembly: ViewForGeneratedNamespace]</c> attribute, or
+        /// <see langword="null"/> when the attribute is absent. An attribute
+        /// whose value cannot be read as a string projects as the empty
+        /// string (present but invalid).
+        /// </summary>
+        public string? NamespaceOverride { get; }
+
+        /// <summary>
+        /// The namespace this compilation's generated registrations and
+        /// aggregator are emitted into: the override when one is given and
+        /// valid, otherwise the namespace derived from the assembly name.
+        /// <see langword="null"/> exactly when an override is present but
+        /// invalid — <c>Generate</c> then reports FLOWGEN016 and emits
+        /// nothing.
+        /// </summary>
+        public string? GeneratedNamespace =>
+            NamespaceOverride is null
+                ? GetGeneratedNamespace(AssemblyName)
+                : IsValidNamespace(NamespaceOverride)
+                    ? NamespaceOverride
+                    : null;
 
         public bool HasAvaloniaLocator { get; }
 
@@ -328,21 +355,21 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         /// the Avalonia locator; empty when that locator is not
         /// referenced or no provider validates.
         /// </summary>
-        public ImmutableArray<string> AvaloniaProviders { get; }
+        public ImmutableArray<ProviderRegistration> AvaloniaProviders { get; }
 
         /// <summary>
         /// Registration types of provider assemblies validated against
         /// the WPF locator; empty when that locator is not referenced
         /// or no provider validates.
         /// </summary>
-        public ImmutableArray<string> WpfProviders { get; }
+        public ImmutableArray<ProviderRegistration> WpfProviders { get; }
 
         /// <summary>
         /// The providers validated against the single referenced
         /// platform's locator. Only meaningful when
         /// <see cref="PlatformCount"/> is exactly one.
         /// </summary>
-        public ImmutableArray<string> SinglePlatformProviders =>
+        public ImmutableArray<ProviderRegistration> SinglePlatformProviders =>
             HasAvaloniaLocator ? AvaloniaProviders : WpfProviders;
 
         public static CompilationSnapshot Create(Compilation compilation)
@@ -351,10 +378,10 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             var wpfLocator = compilation.GetTypeByMetadataName(WpfLocatorMetadataName);
 
             var avaloniaProviders = avaloniaLocator is null
-                ? ImmutableArray<string>.Empty
+                ? ImmutableArray<ProviderRegistration>.Empty
                 : FindReferencedProviders(compilation, avaloniaLocator).ToImmutableArray();
             var wpfProviders = wpfLocator is null
-                ? ImmutableArray<string>.Empty
+                ? ImmutableArray<ProviderRegistration>.Empty
                 : FindReferencedProviders(compilation, wpfLocator).ToImmutableArray();
 
             string? singleLocatorDisplayName = null;
@@ -365,8 +392,24 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                     .Substring("global::".Length);
             }
 
+            string? namespaceOverride = null;
+            foreach (var attribute in compilation.Assembly.GetAttributes())
+            {
+                if (attribute.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) ==
+                    "global::" + GeneratedNamespaceOverrideMetadataName)
+                {
+                    namespaceOverride =
+                        attribute.ConstructorArguments.Length > 0 &&
+                        attribute.ConstructorArguments[0].Value is string value
+                            ? value
+                            : string.Empty;
+                    break;
+                }
+            }
+
             return new CompilationSnapshot(
                 compilation.AssemblyName,
+                namespaceOverride,
                 avaloniaLocator is not null,
                 wpfLocator is not null,
                 singleLocatorDisplayName,
@@ -377,6 +420,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         public bool Equals(CompilationSnapshot? other) =>
             other is not null &&
             string.Equals(AssemblyName, other.AssemblyName, StringComparison.Ordinal) &&
+            string.Equals(NamespaceOverride, other.NamespaceOverride, StringComparison.Ordinal) &&
             HasAvaloniaLocator == other.HasAvaloniaLocator &&
             HasWpfLocator == other.HasWpfLocator &&
             string.Equals(SingleLocatorDisplayName, other.SingleLocatorDisplayName, StringComparison.Ordinal) &&
@@ -391,19 +435,66 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             {
                 var hash = 17;
                 hash = (hash * 31) + (AssemblyName is null ? 0 : StringComparer.Ordinal.GetHashCode(AssemblyName));
+                hash = (hash * 31) + (NamespaceOverride is null ? 0 : StringComparer.Ordinal.GetHashCode(NamespaceOverride));
                 hash = (hash * 31) + HasAvaloniaLocator.GetHashCode();
                 hash = (hash * 31) + HasWpfLocator.GetHashCode();
                 hash = (hash * 31) + (SingleLocatorDisplayName is null ? 0 : StringComparer.Ordinal.GetHashCode(SingleLocatorDisplayName));
                 foreach (var provider in AvaloniaProviders)
                 {
-                    hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(provider);
+                    hash = (hash * 31) + provider.GetHashCode();
                 }
 
                 foreach (var provider in WpfProviders)
                 {
-                    hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(provider);
+                    hash = (hash * 31) + provider.GetHashCode();
                 }
 
+                return hash;
+            }
+        }
+    }
+
+    /// <summary>
+    /// One referenced provider assembly's validated registrations type, as
+    /// projected into <see cref="CompilationSnapshot"/>: the raw assembly
+    /// name (the aggregation ordering key and the name FLOWGEN015 reports),
+    /// the registrations type's full name (recorded in the provider's
+    /// marker, or derived from the assembly name for markers that carry
+    /// none), and the reference alias the aggregator qualifies its call
+    /// with — <see langword="null"/> when the type is reachable through
+    /// <c>global::</c>.
+    /// </summary>
+    private sealed class ProviderRegistration : IEquatable<ProviderRegistration>
+    {
+        public ProviderRegistration(string assemblyName, string typeName, string? alias)
+        {
+            AssemblyName = assemblyName;
+            TypeName = typeName;
+            Alias = alias;
+        }
+
+        public string AssemblyName { get; }
+
+        public string TypeName { get; }
+
+        public string? Alias { get; }
+
+        public bool Equals(ProviderRegistration? other) =>
+            other is not null &&
+            string.Equals(AssemblyName, other.AssemblyName, StringComparison.Ordinal) &&
+            string.Equals(TypeName, other.TypeName, StringComparison.Ordinal) &&
+            string.Equals(Alias, other.Alias, StringComparison.Ordinal);
+
+        public override bool Equals(object? obj) => Equals(obj as ProviderRegistration);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                var hash = 17;
+                hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(AssemblyName);
+                hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(TypeName);
+                hash = (hash * 31) + (Alias is null ? 0 : StringComparer.Ordinal.GetHashCode(Alias));
                 return hash;
             }
         }
@@ -845,31 +936,43 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         mapping.ViewModelNotReferenceType is not null;
 
     /// <summary>
-    /// Computes the namespace the registrations are generated into for one
-    /// compilation: the sanitized assembly name plus a ".FlowGenerated"
-    /// segment, so the namespace stays unique per assembly while the
-    /// segment marks the code as generated by ElegantSeries.Flow and is
-    /// not a word a consumer type in the assembly root could plausibly be
-    /// named. A missing assembly name falls back to the bare
-    /// <c>ElegantSeries.Flow.Generated</c> namespace.
+    /// Computes the default namespace the registrations are generated into
+    /// for one compilation: the sanitized assembly name as a sub-namespace
+    /// of <c>ElegantSeries.Flow.Generated</c>, the layer that holds the
+    /// library's generated code — the registrations stay out of the
+    /// consuming assembly's own namespace tree, and the layer is reserved
+    /// for generated code: no library type lives in it, and the root
+    /// namespace never gains a type named <c>Generated</c> (a guard test
+    /// pins that reservation, because a library type at either spot would
+    /// collide with this namespace in consuming compilations). The
+    /// derivation is the default only — a
+    /// <c>[assembly: ViewForGeneratedNamespace]</c> attribute replaces it
+    /// in full (see <see cref="CompilationSnapshot.GeneratedNamespace"/>),
+    /// and because sanitization is many-to-one, two different assembly
+    /// names can still derive the same namespace; that collision is the
+    /// consuming compilation's to resolve (FLOWGEN015). A missing assembly
+    /// name falls back to a fixed <c>Unknown</c> segment under the same
+    /// layer.
     /// </summary>
     private static string GetGeneratedNamespace(string? assemblyName)
     {
         var root = SanitizeNamespaceRoot(assemblyName);
-        return root is null
-            ? "ElegantSeries.Flow.Generated"
-            : root + ".FlowGenerated";
+        return "ElegantSeries.Flow.Generated." + (root ?? "Unknown");
     }
 
     /// <summary>
-    /// Turns an assembly name into a namespace root (the generated namespace
-    /// is the root plus ".FlowGenerated") so that two assemblies using
-    /// <c>[ViewFor]</c> never emit the same registrations type: dots are
-    /// kept as segment separators, every other invalid character becomes
-    /// '_', a segment that would start with a digit is prefixed with '_',
-    /// and a segment equal to a reserved keyword gets a trailing '_'.
-    /// Returns null for a missing assembly name (the caller then falls back
-    /// to the bare generated namespace).
+    /// Turns an assembly name into a namespace root (the generated
+    /// namespace is <c>ElegantSeries.Flow.Generated</c> plus this root as
+    /// its sub-namespace): dots are kept as segment separators, every
+    /// other invalid character becomes '_', a segment that would start
+    /// with a digit is prefixed with '_', and a segment equal to a
+    /// reserved keyword gets a trailing '_'. The mapping is many-to-one —
+    /// names that differ only in invalid characters (such as
+    /// <c>Contoso-UI</c> and <c>Contoso_UI</c>) produce the same root — so
+    /// it does not by itself guarantee distinct registrations types across
+    /// assemblies; see <see cref="GetGeneratedNamespace"/>. Returns null
+    /// for a missing assembly name (the caller then falls back to a fixed
+    /// placeholder segment).
     /// </summary>
     private static string? SanitizeNamespaceRoot(string? assemblyName)
     {
@@ -911,6 +1014,57 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         return sb.ToString();
     }
 
+    /// <summary>
+    /// True when <paramref name="value"/> can be emitted verbatim as a
+    /// namespace: one or more dot-separated identifiers under
+    /// <see cref="IsValidIdentifier"/>. This is the validity rule for a
+    /// <c>[assembly: ViewForGeneratedNamespace]</c> value (FLOWGEN016) —
+    /// the strict counterpart of <see cref="SanitizeNamespaceRoot"/>,
+    /// which repairs an assembly name instead of judging a chosen one.
+    /// </summary>
+    private static bool IsValidNamespace(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        foreach (var segment in value.Split('.'))
+        {
+            if (!IsValidIdentifier(segment))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// True when <paramref name="value"/> is an identifier the generator
+    /// can emit unescaped: it starts with a letter or '_', continues with
+    /// letters, digits or '_', and is not a reserved keyword. Used for
+    /// namespace segments and for reference aliases (an
+    /// <c>extern alias</c> name obeys the same rule).
+    /// </summary>
+    private static bool IsValidIdentifier(string value)
+    {
+        if (value.Length == 0 || !(char.IsLetter(value[0]) || value[0] == '_'))
+        {
+            return false;
+        }
+
+        for (var i = 1; i < value.Length; i++)
+        {
+            if (!(char.IsLetterOrDigit(value[i]) || value[i] == '_'))
+            {
+                return false;
+            }
+        }
+
+        return !ReservedKeywords.Contains(value);
+    }
+
     private static readonly HashSet<string> ReservedKeywords = new HashSet<string>
     {
         "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
@@ -929,6 +1083,23 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         CompilationSnapshot snapshot,
         ViewMappings mappings)
     {
+        if (snapshot.GeneratedNamespace is null &&
+            (!mappings.Items.IsEmpty ||
+             (snapshot.PlatformCount == 1 && !snapshot.SinglePlatformProviders.IsEmpty)))
+        {
+            // An invalid [assembly: ViewForGeneratedNamespace] value leaves
+            // no namespace to generate into; like this compilation's own
+            // mapping errors, it cancels all generation for the assembly.
+            // The report is gated on the compilation actually generating —
+            // attributed views of its own, or an aggregation it would emit:
+            // a compilation with neither stays silent, the same gating the
+            // ambiguous-platform report follows, so a stray attribute in a
+            // shared assembly-info file cannot break inert projects.
+            spc.ReportDiagnostic(Diagnostic.Create(
+                DiagnosticDescriptors.InvalidGeneratedNamespace, Location.None, snapshot.NamespaceOverride));
+            return;
+        }
+
         if (mappings.Items.IsEmpty)
         {
             // No attributed views of our own: the only possible output is the
@@ -1102,9 +1273,10 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         sb.AppendLine("// [ViewFor] attributes. Do not edit manually.");
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
-        sb.AppendLine("[assembly: global::ElegantSeries.Flow.Routing.GeneratedViewRegistrations]");
+        var generatedNamespace = snapshot.GeneratedNamespace!;
+        sb.AppendLine("[assembly: global::ElegantSeries.Flow.Routing.GeneratedViewRegistrations(\"" + generatedNamespace + ".ViewForRegistrations\")]");
         sb.AppendLine();
-        sb.AppendLine("namespace " + GetGeneratedNamespace(snapshot.AssemblyName));
+        sb.AppendLine("namespace " + generatedNamespace);
         sb.AppendLine("{");
         sb.AppendLine("    /// <summary>");
         sb.AppendLine("    /// View registrations generated from <c>[ViewFor]</c> attributes.");
@@ -1180,7 +1352,12 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     /// aggregator calls this assembly's own registrations first (when they
     /// were emitted), then each provider's own
     /// <c>RegisterAttributedViews</c> — never a provider's aggregator, so
-    /// every assembly's views are registered exactly once per call.
+    /// every assembly's views are registered exactly once per call. A call
+    /// is qualified by the provider reference's alias when the type is not
+    /// reachable through <c>global::</c>. When two registrations types
+    /// share a full name under the same qualifier (this assembly's own
+    /// included) the calls cannot be told apart: the group is reported as
+    /// FLOWGEN015 and no aggregator is emitted.
     /// </summary>
     private static void EmitAggregator(
         SourceProductionContext spc,
@@ -1193,13 +1370,60 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             return;
         }
 
-        var generatedNamespace = GetGeneratedNamespace(snapshot.AssemblyName);
+        var generatedNamespace = snapshot.GeneratedNamespace!;
         var locatorName = snapshot.SingleLocatorDisplayName!;
+
+        var calls = new List<(string AssemblyName, string TypeName, string? Alias)>();
+        if (ownEmitted)
+        {
+            calls.Add((snapshot.AssemblyName ?? "this assembly", generatedNamespace + ".ViewForRegistrations", null));
+        }
+
+        foreach (var provider in providers)
+        {
+            calls.Add((provider.AssemblyName, provider.TypeName, provider.Alias));
+        }
+
+        var hasCollision = false;
+        foreach (var group in calls.GroupBy(call => (call.TypeName, call.Alias)))
+        {
+            if (group.Count() < 2)
+            {
+                continue;
+            }
+
+            hasCollision = true;
+            var assemblies = string.Join(", ", group.Select(call => "'" + call.AssemblyName + "'"));
+            spc.ReportDiagnostic(Diagnostic.Create(
+                DiagnosticDescriptors.RegistrationNamespaceCollision, Location.None, assemblies, group.Key.TypeName));
+        }
+
+        if (hasCollision)
+        {
+            return;
+        }
 
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated>");
         sb.AppendLine("// This file was generated by the ElegantSeries.Flow source generator.");
         sb.AppendLine("// Do not edit manually.");
+        var aliases = providers
+            .Select(provider => provider.Alias)
+            .Where(alias => alias is not null)
+            .Select(alias => alias!)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(alias => alias, StringComparer.Ordinal)
+            .ToList();
+        foreach (var alias in aliases)
+        {
+            sb.AppendLine("extern alias " + alias + ";");
+        }
+
+        if (aliases.Count > 0)
+        {
+            sb.AppendLine();
+        }
+
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
         sb.AppendLine("namespace " + generatedNamespace);
@@ -1230,8 +1454,9 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
         foreach (var provider in providers)
         {
-            sb.Append("            global::");
-            sb.Append(provider);
+            sb.Append("            ");
+            sb.Append(provider.Alias is null ? "global::" : provider.Alias + "::");
+            sb.Append(provider.TypeName);
             sb.AppendLine(".RegisterAttributedViews(views);");
         }
 
@@ -1242,23 +1467,28 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Finds the registration types of referenced provider assemblies, as
-    /// fully qualified type names, sorted ordinally. Recognition is
-    /// deliberately structural and self-referential — every signal is an
-    /// artifact this generator itself emits, and no user code is matched by
-    /// name: the assembly must carry the generated-registrations marker, a
-    /// type must exist at the deterministic generated location for its
-    /// assembly name, and (when <paramref name="locator"/> is given) that
-    /// type must offer the exact registration method shape against this
-    /// compilation's platform locator: a public type, and on it a public,
-    /// static, non-generic method taking exactly that locator, so the fully
-    /// qualified static call the aggregator emits can actually bind. A
-    /// marked assembly that fails a later check (a hand-forged marker, or
-    /// output of an incompatible generator version) is silently skipped.
+    /// Finds the registration types of referenced provider assemblies,
+    /// sorted by raw assembly name. Recognition is deliberately structural
+    /// and self-referential — every signal is an artifact this generator
+    /// itself emits, and no user code is matched by name: the assembly must
+    /// carry the generated-registrations marker, a type must exist at the
+    /// location the marker records (or, for markers emitted by older
+    /// generator versions that record none, the location derived from the
+    /// assembly name), and that type must offer the exact registration
+    /// method shape against this compilation's platform locator: a public
+    /// type, and on it a public, static, non-generic method taking exactly
+    /// that locator, so the qualified static call the aggregator emits can
+    /// actually bind. A marked assembly that fails a later check (a
+    /// hand-forged marker, or output of an incompatible generator version)
+    /// is silently skipped. Each result also carries the alias of the
+    /// reference that brought the assembly in, which the aggregator
+    /// qualifies its call with; assemblies are no longer folded together
+    /// when their type names coincide — that is a collision for
+    /// <see cref="EmitAggregator"/> to report, not a duplicate to hide.
     /// </summary>
-    private static List<string> FindReferencedProviders(Compilation compilation, INamedTypeSymbol locator)
+    private static List<ProviderRegistration> FindReferencedProviders(Compilation compilation, INamedTypeSymbol locator)
     {
-        var result = new List<(string AssemblyName, string TypeName)>();
+        var result = new List<ProviderRegistration>();
         var seen = new HashSet<IAssemblySymbol>(SymbolEqualityComparer.Default);
         foreach (var reference in compilation.References)
         {
@@ -1270,12 +1500,20 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             }
 
             var marked = false;
+            string? recordedTypeName = null;
             foreach (var attribute in assembly.GetAttributes())
             {
                 if (attribute.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) ==
                     "global::" + GeneratedRegistrationsMarkerMetadataName)
                 {
                     marked = true;
+                    if (attribute.ConstructorArguments.Length > 0 &&
+                        attribute.ConstructorArguments[0].Value is string recorded &&
+                        recorded.Length > 0)
+                    {
+                        recordedTypeName = recorded;
+                    }
+
                     break;
                 }
             }
@@ -1285,7 +1523,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                 continue;
             }
 
-            var typeName = GetGeneratedNamespace(assembly.Name) + ".ViewForRegistrations";
+            var typeName = recordedTypeName ?? GetGeneratedNamespace(assembly.Name) + ".ViewForRegistrations";
             var type = FindTypeByFullName(assembly.GlobalNamespace, typeName);
             if (type is null || type.DeclaredAccessibility != Accessibility.Public)
             {
@@ -1311,19 +1549,56 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                 continue;
             }
 
-            result.Add((assembly.Name, typeName));
+            if (!TryChooseCallAlias(reference, out var alias))
+            {
+                continue;
+            }
+
+            result.Add(new ProviderRegistration(assembly.Name, typeName, alias));
         }
 
         // Sorted by the raw assembly name, ordinal — the ordering the
         // aggregation contract promises; the sanitized type name would order
-        // some name pairs differently. Distinct assemblies whose names
-        // sanitize to the same generated type collapse to a single entry.
+        // some name pairs differently.
         return result
             .OrderBy(p => p.AssemblyName, System.StringComparer.Ordinal)
             .ThenBy(p => p.TypeName, System.StringComparer.Ordinal)
-            .Select(p => p.TypeName)
-            .Distinct(System.StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// Picks the qualifier the aggregator calls a provider through, from
+    /// the aliases of the reference that brought its assembly in:
+    /// <paramref name="alias"/> is <see langword="null"/> (a
+    /// <c>global::</c> call) when the alias list is empty or contains
+    /// <c>global</c>, otherwise the ordinally smallest usable alias name.
+    /// Returns <see langword="false"/> when the list offers neither — such
+    /// a provider cannot be called at all and is skipped like any other
+    /// unbindable provider. Only the binding reference is consulted: when
+    /// the same assembly is referenced more than once, the compilation
+    /// itself binds the first reference and yields no symbol for the rest,
+    /// so the qualifier follows the compilation's own binding.
+    /// </summary>
+    private static bool TryChooseCallAlias(MetadataReference reference, out string? alias)
+    {
+        string? best = null;
+        foreach (var candidate in reference.Properties.Aliases)
+        {
+            if (candidate == "global")
+            {
+                alias = null;
+                return true;
+            }
+
+            if (IsValidIdentifier(candidate) &&
+                (best is null || StringComparer.Ordinal.Compare(candidate, best) < 0))
+            {
+                best = candidate;
+            }
+        }
+
+        alias = best;
+        return best is not null || reference.Properties.Aliases.IsEmpty;
     }
 
     private static INamedTypeSymbol? FindTypeByFullName(INamespaceSymbol root, string fullMetadataName)
@@ -1446,6 +1721,22 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             id: "FLOWGEN014",
             title: "No view locator platform referenced",
             messageFormat: "This compilation declares [ViewFor] view mappings, but neither the WPF nor the Avalonia view locator is referenced, so no view registrations can be generated for it. Reference ElegantSeries.Flow.WPF or ElegantSeries.Flow.Avalonia in this project.",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor RegistrationNamespaceCollision = new DiagnosticDescriptor(
+            id: "FLOWGEN015",
+            title: "Generated view registration namespace collision",
+            messageFormat: "Assemblies {0} resolve to the same generated view registrations type '{1}', so the aggregator cannot tell them apart and no aggregation was generated. Specify a different generated namespace for one of them with [assembly: ViewForGeneratedNamespace(\"...\")], or reference one of them under a distinct alias (the Aliases metadata on the reference) so its registrations can be called through that alias.",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor InvalidGeneratedNamespace = new DiagnosticDescriptor(
+            id: "FLOWGEN016",
+            title: "Invalid [ViewForGeneratedNamespace] namespace",
+            messageFormat: "'{0}' is not a valid namespace for [assembly: ViewForGeneratedNamespace]. Use one or more dot-separated identifiers, each starting with a letter or '_' and containing only letters, digits and '_', and none equal to a C# keyword.",
             category: "ElegantSeries.Flow.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);

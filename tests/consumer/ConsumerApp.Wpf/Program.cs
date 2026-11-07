@@ -6,7 +6,7 @@ using ElegantSeries.Flow.ViewModels;
 using ElegantSeries.Flow.WPF.Extensions;
 using ElegantSeries.Flow.WPF.Locating;
 using ElegantSeries.Flow.WPF.Views;
-using ConsumerApp.Wpf.FlowGenerated;
+using ElegantSeries.Flow.Generated.ConsumerApp.Wpf;
 
 // WPF NuGet consumer smoke test: everything below uses ONLY the
 // published packages (restored from the local feed — see

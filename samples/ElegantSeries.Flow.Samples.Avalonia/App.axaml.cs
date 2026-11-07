@@ -3,7 +3,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using ElegantSeries.Flow.Avalonia.Extensions;
 using ElegantSeries.Flow.Extensions;
-using ElegantSeries.Flow.Samples.Avalonia.FlowGenerated;
+using ElegantSeries.Flow.Generated.ElegantSeries.Flow.Samples.Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 using ElegantSeries.Flow.Samples.Shared;
 using ElegantSeries.Flow.Samples.Avalonia.Views;

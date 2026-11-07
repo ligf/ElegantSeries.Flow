@@ -31,6 +31,15 @@ public class ViewForGeneratorTests
             [System.AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
             public sealed class GeneratedViewRegistrationsAttribute : System.Attribute
             {
+                public GeneratedViewRegistrationsAttribute() { }
+                public GeneratedViewRegistrationsAttribute(string registrationsTypeFullName) { }
+            }
+
+            [System.AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
+            public sealed class ViewForGeneratedNamespaceAttribute : System.Attribute
+            {
+                public ViewForGeneratedNamespaceAttribute(string @namespace) { Namespace = @namespace; }
+                public string Namespace { get; }
             }
 
             public enum ViewModelLifetime { Transient, Singleton, ViewOnly }
@@ -1352,7 +1361,7 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrations.g.cs");
         Assert.Contains(
-            "namespace TestCompilation.FlowGenerated",
+            "namespace ElegantSeries.Flow.Generated.TestCompilation",
             generated.SourceText.ToString());
     }
 
@@ -1370,7 +1379,7 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrations.g.cs");
         Assert.Contains(
-            "namespace _2_cool.namespace_.FlowGenerated",
+            "namespace ElegantSeries.Flow.Generated._2_cool.namespace_",
             generated.SourceText.ToString());
         Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
     }
@@ -1389,7 +1398,7 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrations.g.cs");
         Assert.Contains(
-            "namespace TestCompilation.FlowGenerated",
+            "namespace ElegantSeries.Flow.Generated.TestCompilation",
             generated.SourceText.ToString());
         Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
     }
@@ -1406,10 +1415,11 @@ public class ViewForGeneratorTests
             dotRunResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrations.g.cs");
         Assert.Contains(
-            "namespace Foo._.FlowGenerated",
+            "namespace ElegantSeries.Flow.Generated.Foo._",
             dotGenerated.SourceText.ToString());
 
-        // A whitespace-only assembly name falls back to the bare namespace.
+        // A whitespace-only assembly name falls back to the fixed Unknown
+        // segment under the generated layer.
         // (The compilation itself is invalid — CS8203 — so only the emitted
         // namespace line is pinned here, not the updated compilation.)
         var (blankRunResult, blankDiagnostics, _) = RunGenerator(sources, " ");
@@ -1418,8 +1428,8 @@ public class ViewForGeneratorTests
             blankRunResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrations.g.cs");
         var blankText = blankGenerated.SourceText.ToString();
-        Assert.Contains("namespace ElegantSeries.Flow.Generated", blankText);
-        Assert.DoesNotContain("namespace ElegantSeries.Flow.Generated.", blankText);
+        Assert.Contains("namespace ElegantSeries.Flow.Generated.Unknown", blankText);
+        Assert.DoesNotContain("namespace ElegantSeries.Flow.Generated.Unknown.", blankText);
     }
 
     [Fact]
@@ -1447,7 +1457,7 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrations.g.cs");
         Assert.Contains(
-            "[assembly: global::ElegantSeries.Flow.Routing.GeneratedViewRegistrations]",
+            "[assembly: global::ElegantSeries.Flow.Routing.GeneratedViewRegistrations(\"ElegantSeries.Flow.Generated.TestCompilation.ViewForRegistrations\")]",
             generated.SourceText.ToString());
     }
 
@@ -1479,8 +1489,8 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
         var text = aggregator.SourceText.ToString();
-        var ownCall = "global::TestCompilation.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
-        var providerCall = "global::Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
+        var ownCall = "global::ElegantSeries.Flow.Generated.TestCompilation.ViewForRegistrations.RegisterAttributedViews(views);";
+        var providerCall = "global::ElegantSeries.Flow.Generated.Plugin.ViewForRegistrations.RegisterAttributedViews(views);";
         Assert.Contains(ownCall, text);
         Assert.Contains(providerCall, text);
         Assert.True(
@@ -1540,8 +1550,8 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
         var text = aggregator.SourceText.ToString();
-        Assert.Contains("global::Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);", text);
-        Assert.DoesNotContain("TestCompilation.FlowGenerated.ViewForRegistrations.RegisterAttributedViews", text);
+        Assert.Contains("global::ElegantSeries.Flow.Generated.Plugin.ViewForRegistrations.RegisterAttributedViews(views);", text);
+        Assert.DoesNotContain("ElegantSeries.Flow.Generated.TestCompilation.ViewForRegistrations.RegisterAttributedViews", text);
     }
 
     [Fact]
@@ -1559,7 +1569,7 @@ public class ViewForGeneratorTests
             registrationsOverride: """
                 [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
 
-                namespace Impostor.FlowGenerated
+                namespace ElegantSeries.Flow.Generated.Impostor
                 {
                     public static class ViewForRegistrations
                     {
@@ -1608,7 +1618,7 @@ public class ViewForGeneratorTests
             registrationsOverride: """
                 [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
 
-                namespace Cloaked.FlowGenerated
+                namespace ElegantSeries.Flow.Generated.Cloaked
                 {
                     internal static class ViewForRegistrations
                     {
@@ -1656,7 +1666,7 @@ public class ViewForGeneratorTests
             registrationsOverride: """
                 [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
 
-                namespace Generic.FlowGenerated
+                namespace ElegantSeries.Flow.Generated.Generic
                 {
                     public static class ViewForRegistrations
                     {
@@ -1694,8 +1704,8 @@ public class ViewForGeneratorTests
     public void MultipleProviders_SortKeyIsRawAssemblyName()
     {
         // "Z-Mod" sorts before "Z.Mod" by raw assembly name ('-' 0x2D <
-        // '.' 0x2E), but after it by sanitized type name ("Z.Mod.FlowGenerated" vs
-        // "Z_Mod.FlowGenerated": '.' 0x2E < '_' 0x5F). The aggregation order is the raw
+        // '.' 0x2E), but after it by sanitized type name ("ElegantSeries.Flow.Generated.Z.Mod" vs
+        // "ElegantSeries.Flow.Generated.Z_Mod": '.' 0x2E < '_' 0x5F). The aggregation order is the raw
         // assembly-name order.
         var hyphen = BuildProviderLibrary("Z-Mod", "ZMod", "AlphaView", "AlphaViewModel");
         var dotted = BuildProviderLibrary("Z.Mod", "ZDotMod", "BetaView", "BetaViewModel");
@@ -1722,8 +1732,8 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
         var text = aggregator.SourceText.ToString();
-        var hyphenCall = "global::Z_Mod.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
-        var dottedCall = "global::Z.Mod.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
+        var hyphenCall = "global::ElegantSeries.Flow.Generated.Z_Mod.ViewForRegistrations.RegisterAttributedViews(views);";
+        var dottedCall = "global::ElegantSeries.Flow.Generated.Z.Mod.ViewForRegistrations.RegisterAttributedViews(views);";
         Assert.Contains(hyphenCall, text);
         Assert.Contains(dottedCall, text);
         Assert.True(
@@ -1765,7 +1775,7 @@ public class ViewForGeneratorTests
             registrationsOverride: """
                 [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
 
-                namespace Impostor.FlowGenerated
+                namespace ElegantSeries.Flow.Generated.Impostor
                 {
                     public static class ViewForRegistrations
                     {
@@ -1843,8 +1853,8 @@ public class ViewForGeneratorTests
             runResult.GeneratedSources,
             s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
         var text = aggregator.SourceText.ToString();
-        var pluginCall = "global::Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
-        var reportsCall = "global::Reports.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);";
+        var pluginCall = "global::ElegantSeries.Flow.Generated.Plugin.ViewForRegistrations.RegisterAttributedViews(views);";
+        var reportsCall = "global::ElegantSeries.Flow.Generated.Reports.ViewForRegistrations.RegisterAttributedViews(views);";
         Assert.Contains(pluginCall, text);
         Assert.Contains(reportsCall, text);
         Assert.True(
@@ -1867,7 +1877,7 @@ public class ViewForGeneratorTests
                 {
                     public static void RegisterModuleViews(ElegantSeries.Flow.Avalonia.Locating.IViewLocator views)
                     {
-                        global::Plugin.FlowGenerated.ViewForRegistrations.RegisterAttributedViews(views);
+                        global::ElegantSeries.Flow.Generated.Plugin.ViewForRegistrations.RegisterAttributedViews(views);
                     }
                 }
             }
@@ -1883,8 +1893,8 @@ public class ViewForGeneratorTests
     public void UserTypeInsideGeneratedNamespace_CoexistsWithRegistrations()
     {
         // A namespace is not a type: user code may live in the same
-        // <assembly>.FlowGenerated namespace as the generated registrations without
-        // colliding with them.
+        // ElegantSeries.Flow.Generated.<assembly> namespace as the generated
+        // registrations without colliding with them.
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
@@ -1900,7 +1910,7 @@ public class ViewForGeneratorTests
                 }
             }
 
-            namespace TestCompilation.FlowGenerated
+            namespace ElegantSeries.Flow.Generated.TestCompilation
             {
                 public static class UsersOwnHelpers { }
             }
@@ -1913,14 +1923,20 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
-    public void RootTypeNamedFlowGenerated_CollidesWithGeneratedNamespaceSegment()
+    public void OwnTypeNamedGeneratedInLibraryRoot_CollidesWithGeneratedLayer()
     {
-        // The accepted residual boundary of the FlowGenerated segment word:
-        // a consumer type named exactly FlowGenerated inside the assembly
-        // root namespace cannot coexist with the generated namespace
-        // segment of the same name (CS0101, reported on the consumer's own
-        // declaration). Renaming or relocating that one type is the remedy;
-        // this pins the boundary so it is a recorded cost, not a surprise.
+        // The accepted residual boundary of the umbrella derivation: the
+        // generated registrations live under the library's root namespace,
+        // in the ElegantSeries.Flow.Generated layer. A consumer who
+        // declares their own type named Generated inside the
+        // ElegantSeries.Flow namespace of their own assembly cannot
+        // coexist with that layer's namespace in the same compilation
+        // (CS0101, reported on the consumer's own declaration). Renaming
+        // or relocating that one type is the remedy; this pins the
+        // boundary so it is a recorded cost, not a surprise. (The library
+        // side of the same boundary — no library type named Generated, no
+        // library types in the layer — is pinned by the guard tests in
+        // ElegantSeries.Flow.Tests.)
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
             namespace TestApp.Views
             {
@@ -1936,9 +1952,9 @@ public class ViewForGeneratorTests
                 }
             }
 
-            namespace TestCompilation
+            namespace ElegantSeries.Flow
             {
-                public class FlowGenerated { }
+                public class Generated { }
             }
             """;
 
@@ -2011,6 +2027,54 @@ public class ViewForGeneratorTests
         return compilation.ToMetadataReference();
     }
 
+    // Mirrors the generator's SanitizeNamespaceRoot rule for rule (invalid
+    // characters to '_', empty segment to '_', '_' prefix for a leading
+    // digit, '_' suffix for a reserved keyword): the aggregator predicts a
+    // payload-less provider's location with the real sanitizer, so any
+    // divergence here would place the replica's registrations where
+    // aggregation never looks, and the provider would silently vanish
+    // from the test instead of failing in it.
+    private static string SanitizeReplica(string assemblyName)
+    {
+        var segments = assemblyName.Split('.');
+        for (var i = 0; i < segments.Length; i++)
+        {
+            var segment = new string(segments[i]
+                .Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_')
+                .ToArray());
+            if (segment.Length == 0)
+            {
+                segment = "_";
+            }
+            else if (char.IsDigit(segment[0]))
+            {
+                segment = "_" + segment;
+            }
+
+            if (ReplicaReservedKeywords.Contains(segment))
+            {
+                segment += "_";
+            }
+
+            segments[i] = segment;
+        }
+
+        return string.Join(".", segments);
+    }
+
+    private static readonly HashSet<string> ReplicaReservedKeywords = new()
+    {
+        "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
+        "class", "const", "continue", "decimal", "default", "delegate", "do", "double", "else",
+        "enum", "event", "explicit", "extern", "false", "finally", "fixed", "float", "for",
+        "foreach", "goto", "if", "implicit", "in", "int", "interface", "internal", "is", "lock",
+        "long", "namespace", "new", "null", "object", "operator", "out", "override", "params",
+        "private", "protected", "public", "readonly", "ref", "return", "sbyte", "sealed",
+        "short", "sizeof", "stackalloc", "static", "string", "struct", "switch", "this",
+        "throw", "true", "try", "typeof", "uint", "ulong", "unchecked", "unsafe", "ushort",
+        "using", "virtual", "void", "volatile", "while",
+    };
+
     /// <summary>
     /// Builds a stand-in provider library: an assembly with one attributed
     /// view plus a hand-written replica of the file the generator would have
@@ -2038,10 +2102,7 @@ public class ViewForGeneratorTests
                 }
             }
             """;
-        var generatedNamespace = string.Join(
-            ".",
-            assemblyName.Split('.').Select(segment => new string(
-                segment.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_').ToArray()))) + ".FlowGenerated";
+        var generatedNamespace = "ElegantSeries.Flow.Generated." + SanitizeReplica(assemblyName);
         var registrations = registrationsOverride ?? $$"""
             [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations]
 
@@ -2184,6 +2245,369 @@ public class ViewForGeneratorTests
         var (_, diagnostics, _) = RunGenerator(sources);
 
         Assert.Empty(diagnostics.Where(d => d.Id == "FLOWGEN010"));
+    }
+
+    private static string OneViewAppSources(string? assemblyAttributeLine = null)
+    {
+        var attribute = assemblyAttributeLine is null ? string.Empty : assemblyAttributeLine + "\n\n";
+        return attribute + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.HomeViewModel>]
+                public class HomeView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+            """;
+    }
+
+    [Fact]
+    public void GeneratedNamespaceOverride_ReplacesGeneratedNamespaceAndMarkerPayload()
+    {
+        var sources = OneViewAppSources(
+            "[assembly: ElegantSeries.Flow.Routing.ViewForGeneratedNamespace(\"Contoso.UI\")]");
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+        var registrations = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        var text = registrations.SourceText.ToString();
+        Assert.Contains("namespace Contoso.UI", text);
+        Assert.Contains(
+            "[assembly: global::ElegantSeries.Flow.Routing.GeneratedViewRegistrations(\"Contoso.UI.ViewForRegistrations\")]",
+            text);
+        Assert.DoesNotContain("ElegantSeries.Flow.Generated.TestCompilation", text);
+    }
+
+    [Fact]
+    public void GeneratedNamespaceOverride_InvalidValues_ReportFlowGen016AndEmitNothing()
+    {
+        foreach (var value in new[] { "", "1abc", "Contoso..UI", "Contoso.", ".Contoso", "class", "Contoso UI" })
+        {
+            var sources = OneViewAppSources(
+                "[assembly: ElegantSeries.Flow.Routing.ViewForGeneratedNamespace(\"" + value + "\")]");
+
+            var (runResult, diagnostics, _) = RunGenerator(
+                sources, additionalReferences: new[] { FlowStubsReference });
+            Assert.Contains(diagnostics, d => d.Id == "FLOWGEN016");
+            Assert.Empty(runResult.GeneratedSources);
+        }
+    }
+
+    [Fact]
+    public void GeneratedNamespaceOverride_ProviderOnlyApp_AggregatorUsesOverrideNamespace()
+    {
+        var plugin = BuildProviderLibrary("Plugin", "Plugin", "ReportView", "ReportViewModel");
+        var sources = """
+            [assembly: ElegantSeries.Flow.Routing.ViewForGeneratedNamespace("Contoso.UI")]
+
+            namespace TestApp
+            {
+                public class ShellMarker { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, plugin });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var aggregator = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+        Assert.Contains("namespace Contoso.UI", aggregator.SourceText.ToString());
+    }
+
+    [Fact]
+    public void GeneratedNamespaceOverride_InvalidValueOnProviderOnlyPath_ReportsFlowGen016AndEmitsNothing()
+    {
+        var plugin = BuildProviderLibrary("Plugin", "Plugin", "ReportView", "ReportViewModel");
+        var sources = """
+            [assembly: ElegantSeries.Flow.Routing.ViewForGeneratedNamespace("1bad")]
+
+            namespace TestApp
+            {
+                public class ShellMarker { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, plugin });
+        Assert.Contains(diagnostics, d => d.Id == "FLOWGEN016");
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
+    [Fact]
+    public void ProviderNamespaceCollision_ReportsFlowGen015AndSkipsAggregator()
+    {
+        // Contoso-UI and Contoso_UI sanitize to the same generated namespace;
+        // with no override and no reference aliases the aggregator cannot
+        // tell their registrations apart. The outcome must be one clear
+        // FLOWGEN015, not a CS0433 inside a generated file.
+        var dash = BuildProviderLibrary("Contoso-UI", "ContosoDash", "ProductView", "ProductViewModel");
+        var underscore = BuildProviderLibrary("Contoso_UI", "ContosoUnderscore", "OrderView", "OrderViewModel");
+        var sources = """
+            namespace TestApp
+            {
+                public class ShellMarker { }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, dash, underscore });
+        var collision = Assert.Single(diagnostics, d => d.Id == "FLOWGEN015");
+        var message = collision.GetMessage();
+        Assert.Contains("Contoso-UI", message);
+        Assert.Contains("Contoso_UI", message);
+        Assert.Contains("ElegantSeries.Flow.Generated.Contoso_UI.ViewForRegistrations", message);
+        Assert.Empty(runResult.GeneratedSources.Where(
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs"));
+        Assert.DoesNotContain(updatedCompilation.GetDiagnostics(), d => d.Id == "CS0433");
+    }
+
+    [Fact]
+    public void ProviderNamespaceCollision_ResolvedByProviderOverride_BothCallsEmitted()
+    {
+        var dash = BuildProviderLibrary("Contoso-UI", "ContosoDash", "ProductView", "ProductViewModel");
+        var underscore = BuildProviderLibrary(
+            "Contoso_UI",
+            "ContosoUnderscore",
+            "OrderView",
+            "OrderViewModel",
+            registrationsOverride: """
+                [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations("Contoso.UI.ViewForRegistrations")]
+
+                namespace Contoso.UI
+                {
+                    public static class ViewForRegistrations
+                    {
+                        public static void RegisterAttributedViews(this global::ElegantSeries.Flow.Avalonia.Locating.IViewLocator views)
+                        {
+                            views.RegisterTransient<global::ContosoUnderscore.Views.OrderView, global::ContosoUnderscore.ViewModels.OrderViewModel>();
+                        }
+                    }
+                }
+                """);
+        var sources = """
+            namespace TestApp
+            {
+                public class ShellMarker { }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, dash, underscore });
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN015");
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+        var aggregator = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+        var text = aggregator.SourceText.ToString();
+        Assert.Contains(
+            "global::ElegantSeries.Flow.Generated.Contoso_UI.ViewForRegistrations.RegisterAttributedViews(views);", text);
+        Assert.Contains(
+            "global::Contoso.UI.ViewForRegistrations.RegisterAttributedViews(views);", text);
+    }
+
+    [Fact]
+    public void ProviderNamespaceCollision_ResolvedByReferenceAlias_AliasQualifiedCallEmitted()
+    {
+        var dash = BuildProviderLibrary("Contoso-UI", "ContosoDash", "ProductView", "ProductViewModel");
+        var underscore = BuildProviderLibrary("Contoso_UI", "ContosoUnderscore", "OrderView", "OrderViewModel")
+            .WithProperties(new MetadataReferenceProperties(
+                aliases: ImmutableArray.Create("ContosoUnderscore")));
+        var sources = """
+            namespace TestApp
+            {
+                public class ShellMarker { }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, dash, underscore });
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN015");
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+        var aggregator = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+        var text = aggregator.SourceText.ToString();
+        Assert.Contains("extern alias ContosoUnderscore;", text);
+        Assert.Contains(
+            "ContosoUnderscore::ElegantSeries.Flow.Generated.Contoso_UI.ViewForRegistrations.RegisterAttributedViews(views);",
+            text);
+        Assert.Contains(
+            "global::ElegantSeries.Flow.Generated.Contoso_UI.ViewForRegistrations.RegisterAttributedViews(views);", text);
+    }
+
+    [Fact]
+    public void ProviderWithMarkerPayloadAtUnpredictedNamespace_IsAggregated()
+    {
+        // The marker records where the registrations type actually is; the
+        // aggregator must read it instead of deriving the location from the
+        // assembly name (derivation would look for ElegantSeries.Flow.Generated.Plugin and
+        // find nothing).
+        var custom = BuildProviderLibrary(
+            "Plugin",
+            "Plugin",
+            "ReportView",
+            "ReportViewModel",
+            registrationsOverride: """
+                [assembly: ElegantSeries.Flow.Routing.GeneratedViewRegistrations("Totally.Custom.Registrations.ViewForRegistrations")]
+
+                namespace Totally.Custom.Registrations
+                {
+                    public static class ViewForRegistrations
+                    {
+                        public static void RegisterAttributedViews(this global::ElegantSeries.Flow.Avalonia.Locating.IViewLocator views)
+                        {
+                            views.RegisterTransient<global::Plugin.Views.ReportView, global::Plugin.ViewModels.ReportViewModel>();
+                        }
+                    }
+                }
+                """);
+        var sources = """
+            namespace TestApp
+            {
+                public class ShellMarker { }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, custom });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+        var aggregator = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+        Assert.Contains(
+            "global::Totally.Custom.Registrations.ViewForRegistrations.RegisterAttributedViews(views);",
+            aggregator.SourceText.ToString());
+    }
+
+    [Fact]
+    public void OwnNamespaceCollidesWithProvider_ReportsFlowGen015AndKeepsOwnRegistrations()
+    {
+        // The app's own assembly (Shop_App) derives the same generated
+        // namespace as the referenced Shop-App provider. The collision is
+        // reported and the aggregator withheld, but the app's own
+        // registrations file is unaffected.
+        var provider = BuildProviderLibrary("Shop-App", "ShopApp", "ReportView", "ReportViewModel");
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            OneViewAppSources(),
+            assemblyName: "Shop_App",
+            additionalReferences: new[] { FlowStubsReference, provider });
+        var collision = Assert.Single(diagnostics, d => d.Id == "FLOWGEN015");
+        var message = collision.GetMessage();
+        Assert.Contains("Shop-App", message);
+        Assert.Contains("Shop_App", message);
+        Assert.Single(runResult.GeneratedSources, s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Empty(runResult.GeneratedSources.Where(
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs"));
+    }
+
+    [Fact]
+    public void GeneratedNamespaceOverride_InvalidValueOnInertCompilation_StaysSilent()
+    {
+        // No views of its own and no referenced providers: nothing would be
+        // generated, so an invalid override must not switch on a build
+        // error — the same gating the ambiguous-platform report follows.
+        var sources = """
+            [assembly: ElegantSeries.Flow.Routing.ViewForGeneratedNamespace("1bad")]
+
+            namespace TestApp
+            {
+                public class ShellMarker { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference });
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN016");
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
+    [Fact]
+    public void ProviderNamespaceCollision_BothProvidersAliasedDifferently_BothCallsEmitted()
+    {
+        // Same generated type name on both sides, but each reference
+        // carries its own alias: the (name, qualifier) groups are distinct,
+        // so there is no collision — the aggregator declares both extern
+        // aliases and qualifies each call with its own.
+        var dash = BuildProviderLibrary("Contoso-UI", "ContosoDash", "ProductView", "ProductViewModel")
+            .WithProperties(new MetadataReferenceProperties(
+                aliases: ImmutableArray.Create("ContosoDash")));
+        var underscore = BuildProviderLibrary("Contoso_UI", "ContosoUnderscore", "OrderView", "OrderViewModel")
+            .WithProperties(new MetadataReferenceProperties(
+                aliases: ImmutableArray.Create("ContosoUnderscore")));
+        var sources = """
+            namespace TestApp
+            {
+                public class ShellMarker { }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, dash, underscore });
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN015");
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+        var aggregator = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrationsAggregator.g.cs");
+        var text = aggregator.SourceText.ToString();
+        Assert.Contains("extern alias ContosoDash;", text);
+        Assert.Contains("extern alias ContosoUnderscore;", text);
+        Assert.Contains(
+            "ContosoDash::ElegantSeries.Flow.Generated.Contoso_UI.ViewForRegistrations.RegisterAttributedViews(views);",
+            text);
+        Assert.Contains(
+            "ContosoUnderscore::ElegantSeries.Flow.Generated.Contoso_UI.ViewForRegistrations.RegisterAttributedViews(views);",
+            text);
+    }
+
+    [Fact]
+    public void GeneratedNamespaceOverride_InvalidValue_TakesPrecedenceOverMappingDiagnostics()
+    {
+        // The invalid override is the root cause: with it present, the
+        // per-mapping reports stay suppressed (the same root-cause-first
+        // precedence FLOWGEN002/014 follow) instead of double-reporting.
+        var sources = "[assembly: ElegantSeries.Flow.Routing.ViewForGeneratedNamespace(\"1bad\")]\n\n" + """
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.BadViewModel>]
+                public class BadView : Avalonia.Controls.UserControl { }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class BadViewModel { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference });
+        Assert.Contains(diagnostics, d => d.Id == "FLOWGEN016");
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN010");
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
+    [Fact]
+    public void GeneratedNamespaceOverride_InvalidValue_TakesPrecedenceOverNoPlatformDiagnostic()
+    {
+        var sources = "[assembly: ElegantSeries.Flow.Routing.ViewForGeneratedNamespace(\"1bad\")]\n\n"
+            + AttributeStub + BasicViews;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+        Assert.Contains(diagnostics, d => d.Id == "FLOWGEN016");
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN014");
+        Assert.Empty(runResult.GeneratedSources);
     }
 
     private const string NavigationViewModelStub = """
