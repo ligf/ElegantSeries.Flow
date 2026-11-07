@@ -783,9 +783,12 @@ public sealed partial class NavigationService
     /// <summary>
     /// Settles entering state that a hop stored but the pump will never
     /// consume (the service was disposed in between): exits the entry's
-    /// commit-time in-flight registration and completes the landed intent as
-    /// discarded. Called only on the owning pump's flow: when a successor
-    /// pump has already taken ownership of the window (its token is in
+    /// commit-time in-flight registration, delivers the hop's queued
+    /// notifications and events (the entering step that would have raised
+    /// them never runs, but the departed page's release really happened),
+    /// and completes the landed intent as discarded. Called only on the
+    /// owning pump's flow: when a successor pump has already taken
+    /// ownership of the window (its token is in
     /// <see cref="RegionWindow.PumpOwner"/>), the entering state belongs to
     /// the successor — its own loop-top disposal check settles it — and this
     /// call leaves it untouched.
@@ -795,6 +798,7 @@ public sealed partial class NavigationService
         NavigationEntry? entry;
         Task? gate;
         NavigationIntent? intent;
+        TransitionWork? work;
         using (_stateLock.EnterScope())
         {
             if (window.PumpOwner is not null && !ReferenceEquals(window.PumpOwner, owner))
@@ -805,6 +809,7 @@ public sealed partial class NavigationService
             entry = window.EnteringEntry;
             gate = window.EnteringGate;
             intent = window.EnteredIntent;
+            work = window.EnteredWork;
             window.EnteringEntry = null;
             window.EnteringGate = null;
             window.EnteredIntent = null;
@@ -815,6 +820,18 @@ public sealed partial class NavigationService
         if (entry is not null && gate is not null)
         {
             entry.ExitInFlightLifecycle(gate);
+        }
+
+        if (work is not null)
+        {
+            var notificationErrors = new List<Exception>();
+            RaiseNavigationChangedNotifications(work, notificationErrors);
+            foreach (var notificationError in notificationErrors)
+            {
+                ReportSubscriberError(notificationError);
+            }
+
+            RaiseEvents(work.Events, ReportSubscriberError);
         }
 
         if (intent is not null)
@@ -1324,6 +1341,8 @@ public sealed partial class NavigationService
             window.CloseSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             window.CurrentPageSurfaced = false;
         }
+
+        EnteringStoredHook?.Invoke();
     }
 
     /// <summary>

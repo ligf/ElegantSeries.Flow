@@ -79,7 +79,7 @@ public class NavigationHost : ContentControl, IDisposable
         AvaloniaProperty.Register<NavigationHost, IViewLocator?>(nameof(ViewLocator));
 
     private readonly NavigationHostController<Control> _controller;
-    private INavigationService? _subscribedService;
+    private volatile INavigationService? _subscribedService;
     private volatile bool _disposed;
 
     // Set while the host sits detached from the visual tree after having been

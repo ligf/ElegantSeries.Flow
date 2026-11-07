@@ -696,4 +696,49 @@ public class DisposalInterleavingTests
         await ((IAsyncDisposable)nav).DisposeAsync();
         await WaitForScopeBalanceAsync(ledger, "after callback self-dispose attempt");
     }
+
+    // ── Abandoned entering state: queued release events ──────
+
+    /// <summary>
+    /// A Replace hop commits — the outgoing page's scope is disposed
+    /// inside the hop and its ViewModelReleased is queued for the
+    /// entering step — and a disposal starts at the exact moment the
+    /// entering state is stored, so the entering step never runs. The
+    /// abandon path must still deliver the queued release: the page was
+    /// really released, and subscribers must not be left believing it
+    /// is still owned. The incoming page never surfaces, the navigation
+    /// reports false, and every scope is disposed exactly once.
+    /// </summary>
+    [Fact]
+    public async Task DisposeAsync_AtEnteringStored_DeliversQueuedReleaseOfReplacedPage()
+    {
+        var provider = BuildProvider();
+        var ledger = provider.GetRequiredService<PageScopeLedger>();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var released = new List<INavigationViewModel>();
+        var surfaced = new List<INavigationViewModel>();
+        nav.ViewModelReleased += (_, vm) => { lock (released) released.Add(vm); };
+        nav.RegionNavigated += (_, vm) => { lock (surfaced) surfaced.Add(vm); };
+
+        Assert.True(await nav.NavigateToAsync<StressPageA>());
+        var pageA = nav.GetCurrentViewModel();
+        Assert.NotNull(pageA);
+
+        Task? disposal = null;
+        var service = (NavigationService)nav;
+        service.EnteringStoredHook = () =>
+        {
+            service.EnteringStoredHook = null;
+            disposal = ((IAsyncDisposable)nav).DisposeAsync().AsTask();
+        };
+
+        Assert.False(await nav.NavigateToAsync<StressPageB>(operation: NavigationOperation.Replace));
+        Assert.NotNull(disposal);
+        await disposal!.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Contains(pageA!, released);
+        Assert.DoesNotContain(typeof(StressPageB), surfaced.Select(vm => vm.GetType()));
+        await WaitForScopeBalanceAsync(ledger, "after disposal at entering-stored");
+    }
 }

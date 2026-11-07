@@ -169,6 +169,15 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     private readonly Lock _disposeTaskLock = new();
 
     /// <summary>
+    /// Test seam (always null in production): invoked at the end of
+    /// SetEntering, after a hop's entering state has been stored and
+    /// before the pump continues, so a test can interpose an action —
+    /// such as starting a disposal — at exactly that point of the
+    /// window's life.
+    /// </summary>
+    internal Action? EnteringStoredHook;
+
+    /// <summary>
     /// Defers a scope disposal until the given gate task completes, then disposes
     /// the scope on the thread pool. The returned task is tracked so
     /// <see cref="DisposeAsync"/> can wait for all deferred disposals.
