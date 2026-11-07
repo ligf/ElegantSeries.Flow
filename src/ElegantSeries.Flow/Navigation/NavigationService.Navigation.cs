@@ -55,7 +55,6 @@ public sealed partial class NavigationService
         // _navigationLock and the resolution is retried when it went stale. Without
         // this, navigation could push a page whose scope was already disposed.
         var cacheKey = (regionName, typeof(TViewModel));
-        bool useKeepAlive = retention == NavigationRetention.KeepAlive;
 
         IServiceScope? ownedScope = null;
         INavigationViewModel targetVm = null!;
@@ -112,7 +111,11 @@ public sealed partial class NavigationService
 
             // After repeated races, stop consulting the cache and resolve a fresh page.
             // (Practically unreachable; guards against a pathological ClearCache loop.)
-            bool consultCache = useKeepAlive && attempt < 4;
+            // The cache is consulted for every forward operation and every
+            // retention: whether a cached entry may be adopted is decided by
+            // the recognition gate below, not by the incoming retention — an
+            // adopted entry takes the incoming retention for its stack life.
+            bool consultCache = attempt < 4;
             recognizedCacheEntry = null;
             if (consultCache)
             {
@@ -356,7 +359,7 @@ public sealed partial class NavigationService
                             var entryRetention = retention;
                             if (cachedEntry is not null)
                             {
-                                // KeepAlive reuse: share the cached entry's page scope.
+                                // Cache adoption: share the cached entry's page scope.
                                 // Mutual exclusion: the entry moves from cache to stack.
                                 // Propagate the cache key so a later pop writes it back
                                 // under the same key.
@@ -371,12 +374,12 @@ public sealed partial class NavigationService
                                 // have been cached concurrently. Re-check under the locks already
                                 // held and adopt it: pushing a never-cached KeepAlive page would
                                 // leak its scope (it pops with destroy=false, and with no cache
-                                // entry nothing would ever reclaim it).
+                                // entry nothing would ever reclaim it), and for any retention a
+                                // winner that is this hop's own resolution or the entry it already
+                                // recognized is the same adoption the consultation above would
+                                // have made, so the race window behaves like the direct path.
                                 NavigationEntry? winner = null;
-                                if (useKeepAlive)
-                                {
-                                    _keepAliveCache.TryGetValue(cacheKey, out winner);
-                                }
+                                _keepAliveCache.TryGetValue(cacheKey, out winner);
 
                                 // Adopt the winner only when it is this navigation's own
                                 // resolution (a singleton resolved a second time) or the

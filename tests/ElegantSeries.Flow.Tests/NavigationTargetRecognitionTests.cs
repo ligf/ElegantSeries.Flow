@@ -504,6 +504,39 @@ public class NavigationTargetRecognitionTests
     }
 
     [Fact]
+    public async Task Reset_DefaultRetention_UnrecognizedCachedInstance_IsBypassed_RecognizedOneIsAdopted()
+    {
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await _navigationService.NavigateToAsync<RecordParamDetailViewModel, OrderRef>(
+            new OrderRef(42), retention: NavigationRetention.KeepAlive);
+        var first = (RecordParamDetailViewModel)_navigationService.GetCurrentViewModel()!;
+
+        // Pop the page into the KeepAlive cache.
+        Assert.True(await _navigationService.GoBackAsync());
+
+        // The same recognition gate under the default (Destroy) retention:
+        // a Reset addressed to 43 does not adopt the cached 42 instance,
+        // and the bypassed entry stays in the cache.
+        var reset = await _navigationService.NavigateToAsync<RecordParamDetailViewModel, OrderRef>(
+            new OrderRef(43), operation: NavigationOperation.Reset);
+
+        Assert.True(reset);
+        var second = (RecordParamDetailViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.NotSame(first, second);
+        Assert.Single(_navigationService.GetNavigationStack("MainRegion"));
+        Assert.False(first.Disposed);
+
+        // A Reset addressed to 42 recognizes and adopts the cached instance.
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        var resetBack = await _navigationService.NavigateToAsync<RecordParamDetailViewModel, OrderRef>(
+            new OrderRef(42), operation: NavigationOperation.Reset);
+
+        Assert.True(resetBack);
+        Assert.Same(first, _navigationService.GetCurrentViewModel());
+        Assert.Single(_navigationService.GetNavigationStack("MainRegion"));
+    }
+
+    [Fact]
     public async Task Singleton_UnmatchableParameter_AdoptedByIdentity_DoesNotReportDiagnostic()
     {
         var errors = new List<Exception>();
@@ -537,6 +570,70 @@ public class NavigationTargetRecognitionTests
         await _navigationService.NavigateToAsync<DtoParamViewModel, PlainOrderDto>(
             new PlainOrderDto(7), retention: NavigationRetention.KeepAlive);
         Assert.Single(errors);
+    }
+
+    [Fact]
+    public async Task Singleton_UnmatchableParameter_DefaultRetention_AdoptedByIdentity_DoesNotReportDiagnostic()
+    {
+        var errors = new List<Exception>();
+        _navigationService.SubscriberError += errors.Add;
+
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await _navigationService.NavigateToAsync<SingletonDtoPageViewModel, PlainOrderDto>(
+            new PlainOrderDto(7), retention: NavigationRetention.KeepAlive);
+        var page = (SingletonDtoPageViewModel)_navigationService.GetCurrentViewModel()!;
+
+        // Pop the singleton page into the KeepAlive cache.
+        Assert.True(await _navigationService.GoBackAsync());
+
+        // Under the default (Destroy) retention the same identity adoption
+        // applies: the commit re-check adopts the cached entry because the
+        // fresh resolution is the same singleton instance, so the
+        // unmatchable-parameter diagnostic must not fire either.
+        var result = await _navigationService.NavigateToAsync<SingletonDtoPageViewModel, PlainOrderDto>(
+            new PlainOrderDto(8));
+
+        Assert.True(result);
+        Assert.Same(page, _navigationService.GetCurrentViewModel());
+        Assert.Empty(errors);
+
+        // The adoption consumed the cache entry: clearing the cache now
+        // removes nothing and raises no RegionCacheCleared. (Had the entry
+        // been bypassed rather than adopted, it would still be cached and
+        // this clear would report the region.)
+        var clearedRegions = new List<string>();
+        _navigationService.RegionCacheCleared += clearedRegions.Add;
+        _navigationService.ClearCache("MainRegion");
+        Assert.Empty(clearedRegions);
+    }
+
+    [Fact]
+    public async Task PlainDtoParameter_DefaultRetention_ReportsDiagnosticOncePerType()
+    {
+        var errors = new List<Exception>();
+        _navigationService.SubscriberError += errors.Add;
+
+        await _navigationService.NavigateToAsync<TestHomeViewModel>();
+        await _navigationService.NavigateToAsync<DtoParamViewModel, PlainOrderDto>(
+            new PlainOrderDto(7), retention: NavigationRetention.KeepAlive);
+        var first = (DtoParamViewModel)_navigationService.GetCurrentViewModel()!;
+
+        // Pop the page into the KeepAlive cache.
+        Assert.True(await _navigationService.GoBackAsync());
+
+        // Under the default (Destroy) retention the cache is consulted too:
+        // the cached entry's parameter cannot be matched (its type has no
+        // value equality), the entry is bypassed, a fresh instance lands —
+        // and the unmatchable-parameter diagnostic fires, once per type.
+        await _navigationService.NavigateToAsync<DtoParamViewModel, PlainOrderDto>(
+            new PlainOrderDto(7));
+        var second = (DtoParamViewModel)_navigationService.GetCurrentViewModel()!;
+        Assert.NotSame(first, second);
+
+        var diagnostic = Assert.Single(errors);
+        Assert.IsType<InvalidOperationException>(diagnostic);
+        Assert.Contains(nameof(PlainOrderDto), diagnostic.Message);
+        Assert.Contains("value equality", diagnostic.Message);
     }
 
     [Fact]
