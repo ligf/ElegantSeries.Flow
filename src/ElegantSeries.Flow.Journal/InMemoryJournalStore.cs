@@ -2,7 +2,10 @@ namespace ElegantSeries.Flow.Journal;
 
 /// <summary>
 /// The default <see cref="INavigationJournalStore"/>: entries and the
-/// saved snapshot live in process memory only. Thread-safe.
+/// saved snapshot live in process memory only. Thread-safe. Snapshots
+/// are copied on save and on load, so a caller mutating a snapshot it
+/// handed in — or one it got back — never rewrites the saved one (the
+/// isolation the JSON file store gets from serialization).
 /// </summary>
 public sealed class InMemoryJournalStore : INavigationJournalStore
 {
@@ -61,7 +64,7 @@ public sealed class InMemoryJournalStore : INavigationJournalStore
         cancellationToken.ThrowIfCancellationRequested();
         lock (_lock)
         {
-            _snapshot = snapshot;
+            _snapshot = CloneSnapshot(snapshot);
         }
         return ValueTask.CompletedTask;
     }
@@ -72,9 +75,31 @@ public sealed class InMemoryJournalStore : INavigationJournalStore
         cancellationToken.ThrowIfCancellationRequested();
         lock (_lock)
         {
-            return new ValueTask<JournalSnapshot?>(_snapshot);
+            return new ValueTask<JournalSnapshot?>(
+                _snapshot is null ? null : CloneSnapshot(_snapshot));
         }
     }
+
+    private static JournalSnapshot CloneSnapshot(JournalSnapshot snapshot) => new()
+    {
+        FormatVersion = snapshot.FormatVersion,
+        CapturedUtc = snapshot.CapturedUtc,
+        Regions = snapshot.Regions
+            .Select(region => new JournalRegionSnapshot
+            {
+                Region = region.Region,
+                Pages = region.Pages
+                    .Select(page => new JournalPageSnapshot
+                    {
+                        ViewModelType = page.ViewModelType,
+                        ParameterType = page.ParameterType,
+                        Parameter = page.Parameter,
+                        Retention = page.Retention,
+                    })
+                    .ToList(),
+            })
+            .ToList(),
+    };
 
     /// <inheritdoc/>
     public ValueTask ClearAsync(CancellationToken cancellationToken = default)
