@@ -731,6 +731,31 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         }
     }
 
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, IReadOnlyList<INavigationViewModel>> GetAllNavigationStacks()
+    {
+        using (_stateLock.EnterScope())
+        {
+            var result = new Dictionary<string, IReadOnlyList<INavigationViewModel>>(_regionStacks.Count);
+            foreach (var (regionName, stack) in _regionStacks)
+            {
+                // Stack enumeration is top-first; each region's snapshot
+                // reports bottom-to-top (navigation order), exactly as
+                // GetNavigationStack projects a single region.
+                var snapshot = new INavigationViewModel[stack.Count];
+                var index = stack.Count;
+                foreach (var entry in stack)
+                {
+                    snapshot[--index] = entry.ViewModel;
+                }
+
+                result[regionName] = snapshot;
+            }
+
+            return result;
+        }
+    }
+
     // ───────────────────── Cache management (sync) ─────────────────────
 
     /// <inheritdoc />

@@ -149,6 +149,9 @@ internal class FakeNavigationService : INavigationService
 
     public IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = "MainRegion") => [];
 
+    public IReadOnlyDictionary<string, IReadOnlyList<INavigationViewModel>> GetAllNavigationStacks() =>
+        new Dictionary<string, IReadOnlyList<INavigationViewModel>>();
+
     public Task<bool> NavigateToAsync<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(string regionName = "MainRegion", NavigationOperation operation = NavigationOperation.Push, NavigationRetention retention = NavigationRetention.Destroy, bool refreshIfActive = false, CancellationToken cancellationToken = default)
         where TViewModel : INavigationViewModel
         => throw new NotImplementedException();

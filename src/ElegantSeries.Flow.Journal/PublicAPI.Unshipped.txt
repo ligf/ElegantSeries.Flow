@@ -55,6 +55,7 @@ ElegantSeries.Flow.Journal.JournalNavigationService.ClearCache(string! regionNam
 ElegantSeries.Flow.Journal.JournalNavigationService.ClearCacheAsync(string! regionName) -> System.Threading.Tasks.ValueTask
 ElegantSeries.Flow.Journal.JournalNavigationService.Dispose() -> void
 ElegantSeries.Flow.Journal.JournalNavigationService.DisposeAsync() -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Journal.JournalNavigationService.GetAllNavigationStacks() -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Navigation.INavigationViewModel!>!>!
 ElegantSeries.Flow.Journal.JournalNavigationService.GetCurrentParameter(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel, string! regionName = "MainRegion") -> object?
 ElegantSeries.Flow.Journal.JournalNavigationService.GetCurrentRetention(string! regionName = "MainRegion") -> ElegantSeries.Flow.Navigation.NavigationRetention?
 ElegantSeries.Flow.Journal.JournalNavigationService.GetCurrentViewModel(string! regionName = "MainRegion") -> ElegantSeries.Flow.Navigation.INavigationViewModel?

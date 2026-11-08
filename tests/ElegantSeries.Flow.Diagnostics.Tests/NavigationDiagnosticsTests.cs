@@ -646,6 +646,8 @@ public class NavigationDiagnosticsTests
         public NavigationRetention? GetCurrentRetention(string regionName = "MainRegion") => throw new NotImplementedException();
         public object? GetCurrentParameter(INavigationViewModel viewModel, string regionName = "MainRegion") => throw new NotImplementedException();
         public IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = "MainRegion") => throw new NotImplementedException();
+
+        public IReadOnlyDictionary<string, IReadOnlyList<INavigationViewModel>> GetAllNavigationStacks() => throw new NotImplementedException();
         public Task<bool> NavigateToAsync<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicConstructors)] TViewModel>(string regionName = "MainRegion", NavigationOperation operation = NavigationOperation.Push, NavigationRetention retention = NavigationRetention.Destroy, bool refreshIfActive = false, CancellationToken cancellationToken = default)
             where TViewModel : INavigationViewModel
             => throw new NotImplementedException();

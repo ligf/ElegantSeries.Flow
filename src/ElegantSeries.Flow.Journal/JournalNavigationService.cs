@@ -166,7 +166,6 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
 
     private readonly ConditionalWeakTable<INavigationViewModel, PageBinding> _bindings = new();
     private readonly object _bindingsLock = new();
-    private readonly HashSet<string> _knownRegions = new(StringComparer.Ordinal);
 
     // Settle announcements are lossy: the wrapped service announces only
     // the page a region finally settles on, possibly after the producing
@@ -244,7 +243,6 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
                 Enqueue(new PendingEntry(region, JournalEntryKind.CacheCleared, null, null, null))),
             _inner.SubscribeRegionNavigated((region, vm) =>
             {
-                TrackRegion(region);
                 OnPageSettled(region, vm);
                 RaiseHandlers(Snapshot(ref _regionNavigatedHandlers), region, vm);
             }),
@@ -346,6 +344,10 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         _inner.GetNavigationStack(regionName);
 
     /// <inheritdoc/>
+    public IReadOnlyDictionary<string, IReadOnlyList<INavigationViewModel>> GetAllNavigationStacks() =>
+        _inner.GetAllNavigationStacks();
+
+    /// <inheritdoc/>
     public bool IsInLifecycleCallback => _inner.IsInLifecycleCallback;
 
     // ──────────────────────────── Forward navigation ────────────────────────────
@@ -365,7 +367,6 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         {
             if (!await _inner.NavigateToAsync<TViewModel>(regionName, operation, retention, refreshIfActive, cancellationToken).ConfigureAwait(false))
                 return false;
-            TrackRegion(region);
             BindAfterNavigation(region, typeof(TViewModel), passedParameter: null, null, null, retention);
             await AppendNowAsync(new PendingEntry(region, JournalEntryKind.Navigated, typeof(TViewModel).AssemblyQualifiedName, null, null)).ConfigureAwait(false);
             return true;
@@ -393,7 +394,6 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         {
             if (!await _inner.NavigateToAsync<TViewModel, TParam>(parameter, regionName, operation, retention, refreshIfActive, cancellationToken).ConfigureAwait(false))
                 return false;
-            TrackRegion(region);
             BindAfterNavigation(region, typeof(TViewModel), parameter, parameterType, parameterSnapshot, retention);
             await AppendNowAsync(new PendingEntry(region, JournalEntryKind.Navigated, typeof(TViewModel).AssemblyQualifiedName, parameterType, parameterSnapshot)).ConfigureAwait(false);
             return true;
@@ -417,7 +417,6 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         {
             if (!await _inner.SetRootAsync<TViewModel>(regionName, retention, cancellationToken).ConfigureAwait(false))
                 return false;
-            TrackRegion(region);
             BindAfterNavigation(region, typeof(TViewModel), passedParameter: null, null, null, retention);
             await AppendNowAsync(new PendingEntry(region, JournalEntryKind.Navigated, typeof(TViewModel).AssemblyQualifiedName, null, null)).ConfigureAwait(false);
             return true;
@@ -443,7 +442,6 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         {
             if (!await _inner.SetRootAsync<TViewModel, TParam>(parameter, regionName, retention, cancellationToken).ConfigureAwait(false))
                 return false;
-            TrackRegion(region);
             BindAfterNavigation(region, typeof(TViewModel), parameter, parameterType, parameterSnapshot, retention);
             await AppendNowAsync(new PendingEntry(region, JournalEntryKind.Navigated, typeof(TViewModel).AssemblyQualifiedName, parameterType, parameterSnapshot)).ConfigureAwait(false);
             return true;
@@ -511,7 +509,6 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         {
             if (!await _inner.GoBackToAsync<TViewModel, TParam>(parameter, regionName, cancellationToken).ConfigureAwait(false))
                 return false;
-            TrackRegion(region);
             UpdateCurrentPageParameter<TViewModel>(region, parameter, parameterType, parameterSnapshot);
             await AppendNowAsync(new PendingEntry(region, JournalEntryKind.Back, LandedViewModelType(region), parameterType, parameterSnapshot)).ConfigureAwait(false);
             return true;
@@ -532,7 +529,6 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         if (removed > 0)
         {
             var region = NormalizeRegion(regionName);
-            TrackRegion(region);
             Enqueue(new PendingEntry(region, JournalEntryKind.Removed, typeof(TViewModel).AssemblyQualifiedName, null, null));
         }
         return removed;
@@ -547,7 +543,6 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         {
             var region = NormalizeRegion(regionName);
             var (parameterType, parameterSnapshot) = FreezeParameter(parameter);
-            TrackRegion(region);
             Enqueue(new PendingEntry(region, JournalEntryKind.Removed, typeof(TViewModel).AssemblyQualifiedName, parameterType, parameterSnapshot));
         }
         return removed;
@@ -791,18 +786,27 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         await _appendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            string[] regions;
-            lock (_stateLock)
-                regions = [.. _knownRegions];
+            // One atomic read: the region set and every region's stack
+            // come from a single instant of the wrapped service, so the
+            // snapshot pictures a state that actually existed. Reading
+            // region by region instead could stitch stacks from
+            // different moments into a combination that never coexisted
+            // (and could only cover regions this decorator had seen).
+            var stacks = _inner.GetAllNavigationStacks();
+            var capturedUtc = DateTimeOffset.UtcNow;
             var regionSnapshots = new List<JournalRegionSnapshot>();
-            foreach (var region in regions)
+            foreach (var (region, stack) in stacks)
             {
-                var stack = _inner.GetNavigationStack(region);
                 if (stack.Count == 0)
                     continue;
                 var pages = new List<JournalPageSnapshot>(stack.Count);
                 foreach (var viewModel in stack)
                 {
+                    // Parameter and retention are attributed from this
+                    // decorator's bindings after the read: a page
+                    // reactivated in between is attributed its newest
+                    // recorded activation — the rule GetCurrentParameter
+                    // documents for the wrapped service.
                     TryGetBinding(viewModel, out var binding);
                     pages.Add(new JournalPageSnapshot
                     {
@@ -821,7 +825,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
             return new JournalSnapshot
             {
                 FormatVersion = 1,
-                CapturedUtc = DateTimeOffset.UtcNow,
+                CapturedUtc = capturedUtc,
                 Regions = regionSnapshots,
             };
         }
@@ -837,7 +841,6 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
 
     private async Task RecordBackAsync(string region)
     {
-        TrackRegion(region);
         // The landed page's recording is this Back entry: mark the
         // instance so a later announcement does not synthesize a
         // second, Navigated entry for the same landing.
@@ -1120,12 +1123,6 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
 
     private void MarkRecorded(INavigationViewModel viewModel) =>
         _recordedInstances.GetValue(viewModel, static _ => RecordedInstance);
-
-    private void TrackRegion(string region)
-    {
-        lock (_stateLock)
-            _knownRegions.Add(region);
-    }
 
     private static string NormalizeRegion(string regionName)
     {
