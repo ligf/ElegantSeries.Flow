@@ -477,7 +477,37 @@ public sealed class FakeNavigationService : INavigationService, IDisposable, IAs
     public object? GetCurrentParameter(INavigationViewModel viewModel, string regionName = "MainRegion") =>
         ReferenceEquals(viewModel, ParameterOwner) ? ParameterValue : null;
 
-    public IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = "MainRegion") => Stack;
+    public IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = "MainRegion")
+    {
+        GetNavigationStackCallCount++;
+        return Stack;
+    }
+
+    private IReadOnlyDictionary<string, IReadOnlyList<INavigationViewModel>>? _allStacksValue;
+
+    /// <summary>The value <see cref="GetAllNavigationStacks"/> reports.
+    /// Settable so capture tests can stage regions the decorator has
+    /// never seen; when unset, the atomic read derives from
+    /// <see cref="Stack"/> as the MainRegion stack — a real service's two
+    /// stack queries always agree with each other, so the fake's do
+    /// too.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<INavigationViewModel>> AllStacksValue
+    {
+        get => _allStacksValue ??
+            (Stack.Count == 0
+                ? new Dictionary<string, IReadOnlyList<INavigationViewModel>>()
+                : new Dictionary<string, IReadOnlyList<INavigationViewModel>> { ["MainRegion"] = Stack });
+        set => _allStacksValue = value;
+    }
+
+    public int GetNavigationStackCallCount { get; private set; }
+    public int GetAllNavigationStacksCallCount { get; private set; }
+
+    public IReadOnlyDictionary<string, IReadOnlyList<INavigationViewModel>> GetAllNavigationStacks()
+    {
+        GetAllNavigationStacksCallCount++;
+        return AllStacksValue;
+    }
 
     public Task<bool> NavigateToAsync<TViewModel>(
         string regionName = "MainRegion",

@@ -147,14 +147,19 @@ namespace ElegantSeries.Flow.Navigation;
 /// <para>
 /// <b>Queries:</b> the query methods (<c>CanGoBack</c>,
 /// <c>GetCurrentViewModel</c>, <c>IsActive</c>, <c>GetCurrentRetention</c>,
-/// <c>GetCurrentParameter</c>, <c>GetNavigationStack</c>) return the state
+/// <c>GetCurrentParameter</c>, <c>GetNavigationStack</c>,
+/// <c>GetAllNavigationStacks</c>) return the state
 /// visible at the moment of the call. A navigation that changes a stack in
 /// several steps — <c>GoBackToAsync</c> popping more than one page, for
 /// example — commits those steps one at a time, so a query issued
 /// concurrently from another thread can observe an intermediate stack
 /// rather than the state before or after the whole navigation: each result
 /// is a point-in-time reading, not a snapshot spanning a navigation
-/// transaction.
+/// transaction. <c>GetAllNavigationStacks</c> is the one refinement of
+/// that rule: it reads every region under a single lock acquisition, so
+/// its regions are mutually consistent — a state the service occupied at
+/// one instant — where reading regions one by one could stitch together
+/// stacks from different moments.
 /// </para>
 /// <para>
 /// <b>After disposal:</b> navigation requests fail — <c>NavigateToAsync</c>,
@@ -169,7 +174,8 @@ namespace ElegantSeries.Flow.Navigation;
 /// <see langword="false"/>, <c>GetCurrentViewModel</c>,
 /// <c>GetCurrentRetention</c> and <c>GetCurrentParameter</c> return
 /// <see langword="null"/>, and
-/// <c>GetNavigationStack</c> returns an empty list. The cache-clearing methods
+/// <c>GetNavigationStack</c> returns an empty list and
+/// <c>GetAllNavigationStacks</c> returns an empty dictionary. The cache-clearing methods
 /// are silent no-ops, and <c>Remove</c> returns 0. Event subscriptions remain valid and no new navigation
 /// activity is raised, but work already in flight at disposal — a deferred
 /// scope disposal, or a guard fault the pump had abandoned — can still
@@ -381,6 +387,30 @@ public interface INavigationService
     /// </returns>
     /// <remarks>After the service is disposed, returns an empty list (the stacks are empty); query methods never throw <see cref="ObjectDisposedException"/>.</remarks>
     IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = DefaultRegionName);
+
+    /// <summary>
+    /// Gets a snapshot of every region's navigation stack, read at a
+    /// single instant.
+    /// </summary>
+    /// <returns>
+    /// One entry per region the service knows, keyed by the region name;
+    /// each value is that region's stack ordered bottom-to-top, as in
+    /// <see cref="GetNavigationStack(string)"/>. The order of the entries
+    /// is unspecified. A new dictionary with new lists on every call;
+    /// later navigations do not affect a snapshot already returned.
+    /// </returns>
+    /// <remarks>
+    /// All regions are read under a single lock acquisition, so the
+    /// stacks are mutually consistent — unlike reading regions one by
+    /// one through <see cref="GetNavigationStack(string)"/>, which can
+    /// stitch together stacks from different moments. A navigation that
+    /// changes a stack in several steps commits those steps one at a
+    /// time, so the picture can still catch such a navigation between
+    /// steps; it is always a state the service actually occupied. After
+    /// the service is disposed, returns an empty dictionary; query
+    /// methods never throw <see cref="ObjectDisposedException"/>.
+    /// </remarks>
+    IReadOnlyDictionary<string, IReadOnlyList<INavigationViewModel>> GetAllNavigationStacks();
 
     /// <summary>
     /// Gets whether the calling execution flow is currently inside a page

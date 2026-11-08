@@ -26,6 +26,7 @@ ElegantSeries.Flow.Navigation.INavigationService.ClearAllCache() -> void
 ElegantSeries.Flow.Navigation.INavigationService.ClearAllCacheAsync() -> System.Threading.Tasks.ValueTask
 ElegantSeries.Flow.Navigation.INavigationService.ClearCache(string! regionName) -> void
 ElegantSeries.Flow.Navigation.INavigationService.ClearCacheAsync(string! regionName) -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Navigation.INavigationService.GetAllNavigationStacks() -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Navigation.INavigationViewModel!>!>!
 ElegantSeries.Flow.Navigation.INavigationService.GetCurrentParameter(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel, string! regionName = "MainRegion") -> object?
 ElegantSeries.Flow.Navigation.INavigationService.GetCurrentRetention(string! regionName = "MainRegion") -> ElegantSeries.Flow.Navigation.NavigationRetention?
 ElegantSeries.Flow.Navigation.INavigationService.GetCurrentViewModel(string! regionName = "MainRegion") -> ElegantSeries.Flow.Navigation.INavigationViewModel?
@@ -85,6 +86,7 @@ ElegantSeries.Flow.Navigation.NavigationService.ClearCache(string! regionName) -
 ElegantSeries.Flow.Navigation.NavigationService.ClearCacheAsync(string! regionName) -> System.Threading.Tasks.ValueTask
 ElegantSeries.Flow.Navigation.NavigationService.Dispose() -> void
 ElegantSeries.Flow.Navigation.NavigationService.DisposeAsync() -> System.Threading.Tasks.ValueTask
+ElegantSeries.Flow.Navigation.NavigationService.GetAllNavigationStacks() -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<ElegantSeries.Flow.Navigation.INavigationViewModel!>!>!
 ElegantSeries.Flow.Navigation.NavigationService.GetCurrentParameter(ElegantSeries.Flow.Navigation.INavigationViewModel! viewModel, string! regionName = "MainRegion") -> object?
 ElegantSeries.Flow.Navigation.NavigationService.GetCurrentRetention(string! regionName = "MainRegion") -> ElegantSeries.Flow.Navigation.NavigationRetention?
 ElegantSeries.Flow.Navigation.NavigationService.GetCurrentViewModel(string! regionName = "MainRegion") -> ElegantSeries.Flow.Navigation.INavigationViewModel?

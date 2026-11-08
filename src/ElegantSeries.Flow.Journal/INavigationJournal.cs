@@ -18,10 +18,11 @@ public interface INavigationJournal
     Task<IReadOnlyList<JournalEntry>> GetEntriesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Captures the current stacks of all regions the journal has seen
-    /// and saves the snapshot to the store (replacing the previously
-    /// saved one). Pages carry the parameter snapshot and retention they
-    /// were navigated with; the KeepAlive cache is not captured.
+    /// Captures the current stacks of all regions in a single atomic
+    /// read and saves the snapshot to the store (replacing the
+    /// previously saved one). Pages carry the parameter snapshot and
+    /// retention they were navigated with; the KeepAlive cache is not
+    /// captured.
     /// </summary>
     Task<JournalSnapshot> CaptureSnapshotAsync(CancellationToken cancellationToken = default);
 
