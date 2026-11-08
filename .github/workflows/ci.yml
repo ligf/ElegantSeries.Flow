@@ -63,3 +63,30 @@ jobs:
 
       - name: Run AOT smoke test
         run: ./samples/ElegantSeries.Flow.Samples.Avalonia/bin/Release/net10.0/${{ matrix.rid }}/publish/ElegantSeries.Flow.Samples.Avalonia${{ matrix.rid == 'win-x64' && '.exe' || '' }} --smoke-test
+
+  consumer-verify:
+    name: Consumer verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+  
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+  
+      - name: Consumer verify (Linux)
+        if: runner.os == 'Linux'
+        run: bash tests/consumer/verify.sh
+  
+      - name: Consumer verify (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          FLOW_VERIFY_RID: win-x64
+        run: bash tests/consumer/verify.sh
