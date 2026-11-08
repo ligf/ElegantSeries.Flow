@@ -8,6 +8,8 @@ namespace ElegantSeries.Flow.Journal;
 /// saved snapshot as plain JSON files, so a journal survives process
 /// restarts. Entries live in the file at the given path; the snapshot
 /// lives beside it with <c>.snapshot</c> inserted before the extension.
+/// A relative path is anchored at construction time: later changes to
+/// the process's current directory do not move either file.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -68,10 +70,13 @@ public sealed class JsonFileNavigationJournalStore : INavigationJournalStore, ID
             throw new ArgumentOutOfRangeException(
                 nameof(options), options.MaxHistoryEntries,
                 "MaxHistoryEntries must be positive.");
-        _entriesPath = path;
+        // Anchor both paths at construction: a relative entries path
+        // must not drift with the process's current directory while
+        // the derived snapshot path stays behind (or vice versa).
+        _entriesPath = Path.GetFullPath(path);
         _maxEntries = options.MaxHistoryEntries;
-        var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
-        var snapshotName = Path.GetFileNameWithoutExtension(path) + ".snapshot" + Path.GetExtension(path);
+        var directory = Path.GetDirectoryName(_entriesPath)!;
+        var snapshotName = Path.GetFileNameWithoutExtension(_entriesPath) + ".snapshot" + Path.GetExtension(_entriesPath);
         _snapshotPath = Path.Combine(directory, snapshotName);
     }
 

@@ -178,6 +178,86 @@ public class JournalStoreTests
         }
     }
 
+    [Fact]
+    public async Task InMemory_SavedSnapshot_IsIsolatedFromCallerMutation()
+    {
+        var store = new InMemoryJournalStore();
+        var regions = new List<JournalRegionSnapshot>
+        {
+            new()
+            {
+                Region = "MainRegion",
+                Pages = [new JournalPageSnapshot { ViewModelType = typeof(HomeViewModel).AssemblyQualifiedName! }],
+            },
+        };
+        await store.SaveSnapshotAsync(new JournalSnapshot { Regions = regions });
+
+        // The caller still holds the lists it handed over; clearing
+        // them must not rewrite what the store saved.
+        regions.Clear();
+
+        var loaded = await store.LoadSnapshotAsync();
+        Assert.NotNull(loaded);
+        var region = Assert.Single(loaded.Regions);
+        Assert.Single(region.Pages);
+    }
+
+    [Fact]
+    public async Task InMemory_LoadedSnapshot_IsIsolatedFromTheStore()
+    {
+        var store = new InMemoryJournalStore();
+        await store.SaveSnapshotAsync(new JournalSnapshot
+        {
+            Regions =
+            [
+                new JournalRegionSnapshot
+                {
+                    Region = "MainRegion",
+                    Pages = [new JournalPageSnapshot { ViewModelType = typeof(HomeViewModel).AssemblyQualifiedName! }],
+                },
+            ],
+        });
+
+        var loaded = await store.LoadSnapshotAsync();
+        Assert.NotNull(loaded);
+        ((List<JournalRegionSnapshot>)loaded.Regions).Clear();
+
+        var reloaded = await store.LoadSnapshotAsync();
+        Assert.NotNull(reloaded);
+        Assert.Single(reloaded.Regions);
+    }
+
+    [Fact]
+    public async Task JsonFile_RelativePath_IsAnchoredAtConstruction()
+    {
+        var directoryA = CreateTempDirectory();
+        var directoryB = CreateTempDirectory();
+        var originalDirectory = Environment.CurrentDirectory;
+        try
+        {
+            Environment.CurrentDirectory = directoryA;
+            using var store = new JsonFileNavigationJournalStore("journal.json");
+            Environment.CurrentDirectory = directoryB;
+
+            await store.AppendAsync(Entry(1));
+            await store.SaveSnapshotAsync(new JournalSnapshot());
+
+            // Both files belong beside each other in the directory the
+            // relative path resolved to at construction time — the
+            // entries file must not follow the moved current directory
+            // while the snapshot file stays behind.
+            Assert.True(File.Exists(Path.Combine(directoryA, "journal.json")));
+            Assert.True(File.Exists(Path.Combine(directoryA, "journal.snapshot.json")));
+            Assert.False(File.Exists(Path.Combine(directoryB, "journal.json")));
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalDirectory;
+            Directory.Delete(directoryA, recursive: true);
+            Directory.Delete(directoryB, recursive: true);
+        }
+    }
+
     private static JournalEntry Entry(long sequence) => new()
     {
         Sequence = sequence,

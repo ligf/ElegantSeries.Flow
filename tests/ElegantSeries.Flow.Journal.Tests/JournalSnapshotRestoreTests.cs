@@ -40,7 +40,18 @@ public class JournalSnapshotRestoreTests
         var loaded = await journal.LoadSnapshotAsync();
         Assert.NotNull(loaded);
         Assert.Equal(snapshot.CapturedUtc, loaded.CapturedUtc);
-        Assert.Same(snapshot, await store.LoadSnapshotAsync());
+
+        // The store persisted the captured snapshot's content. (Not the
+        // same instance: stores isolate the saved snapshot from the
+        // caller's object, as the JSON store does via serialization.)
+        var stored = await store.LoadSnapshotAsync();
+        Assert.NotNull(stored);
+        Assert.Equal(snapshot.CapturedUtc, stored.CapturedUtc);
+        Assert.Equal(snapshot.Regions.Count, stored.Regions.Count);
+        var storedMain = stored.Regions.Single(r => r.Region == "MainRegion");
+        Assert.Equal(
+            main.Pages.Select(p => (p.ViewModelType, p.Parameter, p.Retention)),
+            storedMain.Pages.Select(p => (p.ViewModelType, p.Parameter, p.Retention)));
     }
 
     [Fact]

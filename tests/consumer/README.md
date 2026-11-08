@@ -61,11 +61,10 @@ Windows). Set `FLOW_VERIFY_RID=win-x64` etc. on other platforms.
 
 ## CI wiring
 
-The workflow files are maintained outside this repository's agent
-scope; add a job that runs `tests/consumer/verify.sh` on the
-packaging branch (and on Windows with `FLOW_VERIFY_RID=win-x64`
-under Git Bash, or by running the four steps manually). A red run
-here means the packages — not the code — are broken; do not publish
-from a tree whose consumer verification has not passed.
+The `CI` workflow runs this harness as its `consumer-verify` job on
+both `ubuntu-latest` and `windows-latest` — on Windows under Git Bash
+with `FLOW_VERIFY_RID=win-x64`, so the WPF consumer also runs there.
+A red run here means the packages — not the code — are broken; do not
+publish from a tree whose consumer verification has not passed.
 
 `feed/` and `.work/` are scratch output and are git-ignored.
