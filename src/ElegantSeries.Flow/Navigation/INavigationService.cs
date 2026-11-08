@@ -382,6 +382,39 @@ public interface INavigationService
     /// <remarks>After the service is disposed, returns an empty list (the stacks are empty); query methods never throw <see cref="ObjectDisposedException"/>.</remarks>
     IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = DefaultRegionName);
 
+    /// <summary>
+    /// Gets whether the calling execution flow is currently inside a page
+    /// lifecycle callback of this service.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> while this service is invoking a page's navigation
+    /// guard, <c>OnNavigatedTo</c> or <c>OnNavigatedFrom</c> on the calling flow
+    /// and that invocation has not yet returned; otherwise <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// This is the same classification the service itself applies: a navigation
+    /// call made while this property is <see langword="true"/> is registered as
+    /// a callback-originated request instead of executing immediately, and
+    /// calling the service's <c>DisposeAsync</c> while it is
+    /// <see langword="true"/> is refused with an
+    /// <see cref="InvalidOperationException"/> unless disposal cleanup has
+    /// already begun, in which case the call returns silently. The answer is a
+    /// point-in-time fact about the calling flow only — another flow, or the
+    /// same flow after the callback has returned, reads its own answer — so
+    /// read it synchronously at the point of decision: a read deferred to
+    /// another thread or a later moment describes that flow and moment instead.
+    /// </para>
+    /// <para>
+    /// Event subscribers and property-change notification handlers are not
+    /// lifecycle callbacks: the service clears the classification while raising
+    /// them, so they read <see langword="false"/>. Unlike the region queries
+    /// above, this property reports the calling flow rather than service state;
+    /// it never throws, including after the service is disposed.
+    /// </para>
+    /// </remarks>
+    bool IsInLifecycleCallback { get; }
+
     // ─────────────────── Navigation Methods (Async) ───────────────────
 
     /// <summary>

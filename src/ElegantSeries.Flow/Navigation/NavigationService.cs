@@ -641,6 +641,9 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     }
 
     /// <inheritdoc />
+    public bool IsInLifecycleCallback => CurrentOwnLifecycleEntry is not null;
+
+    /// <inheritdoc />
     public INavigationViewModel? GetCurrentViewModel(string regionName = DefaultRegionName)
     {
         regionName = NormalizeRegionName(regionName);

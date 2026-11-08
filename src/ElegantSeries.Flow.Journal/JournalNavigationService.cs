@@ -101,11 +101,17 @@ namespace ElegantSeries.Flow.Journal;
 /// of starting or joining a disposal: it returns silently once disposal
 /// has been claimed, and faults with
 /// <see cref="InvalidOperationException"/> before that, because the drain
-/// such a disposal performs is waiting on that very execution. (A call from
-/// within a page lifecycle callback carries no signal the decorator can
-/// see; if it joins an in-flight disposal whose wrapped-service cleanup is
-/// waiting on that callback, it completes only when the wrapped service's
-/// disposal-gate timeout releases the callback.)
+/// such a disposal performs is waiting on that very execution. A call from
+/// within a page lifecycle callback of the wrapped service follows the
+/// wrapped service's own rule, read from
+/// <see cref="INavigationService.IsInLifecycleCallback"/> before anything
+/// is claimed: it faults with <see cref="InvalidOperationException"/>
+/// before cleanup has begun — leaving the decorator fully alive — and
+/// returns silently once cleanup has begun. Synchronous
+/// <see cref="Dispose"/> mirrors the wrapped service's rule the same
+/// way: it throws <see cref="InvalidOperationException"/> from within a
+/// page lifecycle callback before claiming anything, and returns
+/// silently once the decorator has been disposed.
 /// </para>
 /// </remarks>
 public sealed class JournalNavigationService : INavigationService, IDisposable, IAsyncDisposable
@@ -338,6 +344,9 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     /// <inheritdoc/>
     public IReadOnlyList<INavigationViewModel> GetNavigationStack(string regionName = NavigationDefaults.DefaultRegionName) =>
         _inner.GetNavigationStack(regionName);
+
+    /// <inheritdoc/>
+    public bool IsInLifecycleCallback => _inner.IsInLifecycleCallback;
 
     // ──────────────────────────── Forward navigation ────────────────────────────
 
@@ -572,6 +581,21 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     /// <inheritdoc/>
     public void Dispose()
     {
+        // The wrapped service's synchronous rule, mirrored before the
+        // claim: once this decorator is disposed a call returns silently
+        // (the disposed check runs first, as on the wrapped service);
+        // from within a page lifecycle callback it throws, claiming
+        // nothing. Forwarding first and letting the wrapped service
+        // throw instead would leave this decorator claimed and the
+        // wrapped service alive — the synchronous twin of the
+        // half-disposal the DisposeAsync pre-check prevents.
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+        if (_inner.IsInLifecycleCallback)
+            throw new InvalidOperationException(
+                "Dispose cannot be called from within a page lifecycle callback. " +
+                "Call it outside the callback instead.");
+
         // The claim and the writer completion happen inside the enqueue
         // boundary (see Enqueue): an enqueue that passed its disposed
         // check has already written its item before the writer can
@@ -644,6 +668,33 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
                 return default;
             }
 
+            // The wrapped service's callback classification is read
+            // HERE: synchronously, on the caller's flow (the lock above
+            // is taken on it), at the point of decision — the disposal
+            // core runs on another flow (the Task.Run below), where a
+            // read would describe the wrong execution context, which is
+            // exactly how a callback call used to slip past and claim
+            // the decorator before the wrapped service's refusal could
+            // arrive. Reading it only after the two silent-return
+            // checks above keeps those checks' silent returns even if a
+            // custom wrapped service's getter misbehaves.
+            if (_inner.IsInLifecycleCallback)
+            {
+                // The wrapped service refuses DisposeAsync from within a
+                // page lifecycle callback before claiming any state of
+                // its own; mirror that refusal here, before this decorator
+                // claims anything either, so the caller can dispose
+                // later, outside the callback, and no half-disposed
+                // decorator is left behind. Exception, mirroring the
+                // wrapped service: once this decorator's cleanup has
+                // begun (the disposed flag is set), the disposal is
+                // already waiting on this callback among others — return
+                // silently instead of faulting into it.
+                return Volatile.Read(ref _disposed) != 0
+                    ? default
+                    : CallbackReentrancyFault();
+            }
+
             if (_disposeTask is { IsCompleted: false } inFlight)
             {
                 // Join the in-flight disposal instead of returning early,
@@ -672,6 +723,13 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     // faulted at the call site.
     private static ValueTask RecordingReentrancyFault() => new(Task.FromException(new InvalidOperationException(
         "DisposeAsync cannot be called from within a journal store append or subscriber-error handler. " +
+        "Call it outside the callback instead.")));
+
+    // The wrapped service's lifecycle-callback refusal, mirrored: same
+    // exception type, same message, same faulted-ValueTask delivery, so
+    // a caller learns one disposal rule across both services.
+    private static ValueTask CallbackReentrancyFault() => new(Task.FromException(new InvalidOperationException(
+        "DisposeAsync cannot be called from within a page lifecycle callback. " +
         "Call it outside the callback instead.")));
 
     private async Task RunDisposeAsync(TaskCompletionSource completion)
