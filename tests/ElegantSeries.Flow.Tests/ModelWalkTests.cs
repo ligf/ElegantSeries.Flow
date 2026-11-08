@@ -456,11 +456,12 @@ public class ModelWalkTests
                 return plan;
             }
 
-            // Cache consult (KeepAlive intents only): the cached entry must
-            // claim the parameter; stack recognition below still outranks it.
+            // Cache consult (every forward intent, any retention): the
+            // cached entry must claim the parameter; stack recognition
+            // below still outranks it. An adopted entry takes the intent's
+            // retention for its stack life (see the Adopted landing below).
             Entry? cacheClaim = null;
-            if (retention == NavigationRetention.KeepAlive
-                && m.Cache.TryGetValue(kind, out var cached)
+            if (m.Cache.TryGetValue(kind, out var cached)
                 && Equals(cached.Param, param))
             {
                 cacheClaim = cached;

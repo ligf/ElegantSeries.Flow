@@ -5370,6 +5370,87 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task SetRoot_DefaultRetention_AdoptsRecognizedCacheEntry()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<ParamAwareKeepAliveViewModel, string>(
+            "p", retention: NavigationRetention.KeepAlive));
+        var cached = (ParamAwareKeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        // Pop it into the cache, then cover the stack with other pages.
+        Assert.True(await _navigationService.GoBackAsync());
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        // No retention argument: the default is Destroy. Adoption is
+        // decided by the recognition gate, not by the incoming retention,
+        // so the recognized cache entry is adopted as the new root anyway.
+        Assert.True(await _navigationService.SetRootAsync<ParamAwareKeepAliveViewModel, string>("p"));
+
+        Assert.Same(cached, _navigationService.GetCurrentViewModel());
+        Assert.Single(_navigationService.GetNavigationStack());
+        Assert.False(cached.Disposed);
+    }
+
+    [Fact]
+    public async Task Push_DefaultRetention_AdoptsRecognizedCacheEntry()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(retention: NavigationRetention.KeepAlive));
+        var cached = (KeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        // Pop it into the cache.
+        Assert.True(await _navigationService.GoBackAsync());
+
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>());
+
+        Assert.Same(cached, _navigationService.GetCurrentViewModel());
+        Assert.False(cached.Disposed);
+    }
+
+    [Fact]
+    public async Task Replace_DefaultRetention_AdoptsRecognizedCacheEntry()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(retention: NavigationRetention.KeepAlive));
+        var cached = (KeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        // Pop it into the cache, then put another page on top.
+        Assert.True(await _navigationService.GoBackAsync());
+        Assert.True(await _navigationService.NavigateToAsync<SimpleAwareViewModel>());
+
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(
+            operation: NavigationOperation.Replace));
+
+        Assert.Same(cached, _navigationService.GetCurrentViewModel());
+        Assert.Equal(2, _navigationService.GetNavigationStack().Count);
+        Assert.False(cached.Disposed);
+    }
+
+    [Fact]
+    public async Task DestroyAdoption_OnExit_DisposesInstanceAndDoesNotReturnItToCache()
+    {
+        Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(retention: NavigationRetention.KeepAlive));
+        var cached = (KeepAliveViewModel)_navigationService.GetCurrentViewModel()!;
+        // Pop it into the cache.
+        Assert.True(await _navigationService.GoBackAsync());
+
+        // Adopt it under the default (Destroy) retention: the entry takes
+        // the incoming retention for its stack life.
+        Assert.True(await _navigationService.SetRootAsync<KeepAliveViewModel>());
+        Assert.Same(cached, _navigationService.GetCurrentViewModel());
+        Assert.False(cached.Disposed);
+
+        // Leaving the stack under Destroy disposes the adopted instance
+        // instead of returning it to the cache...
+        Assert.True(await _navigationService.SetRootAsync<SimpleAwareViewModel>());
+        Assert.True(cached.Disposed);
+        Assert.Equal(1, cached.DisposeCallCount);
+
+        // ...so a later KeepAlive navigation constructs a fresh instance
+        // rather than resurrecting the adopted one.
+        Assert.True(await _navigationService.NavigateToAsync<KeepAliveViewModel>(retention: NavigationRetention.KeepAlive));
+        Assert.NotSame(cached, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
     public async Task SetRoot_VetoedByGuard_ReturnsFalse()
     {
         Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>());
