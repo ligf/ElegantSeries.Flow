@@ -204,6 +204,15 @@ public class ViewForGeneratorTests
             "views.Register<global::TestApp.Views.DetailView, global::TestApp.ViewModels.DetailViewModel>();",
             text);
 
+        // The generated method's documentation carries the DI-backed
+        // registration requirement (the locator-without-services trap).
+        Assert.Contains(
+            "Registrations whose <c>Lifetime</c> selects a DI-backed registration",
+            text);
+        Assert.Contains(
+            "service collection they throw <c>InvalidOperationException</c>.",
+            text);
+
         // The generated code must compile against the stub locator.
         Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
     }
@@ -1496,6 +1505,15 @@ public class ViewForGeneratorTests
         Assert.True(
             text.IndexOf(ownCall, System.StringComparison.Ordinal) < text.IndexOf(providerCall, System.StringComparison.Ordinal),
             "The aggregation must call this assembly's own registrations before the providers'.");
+
+        // The aggregator's documentation carries the same DI-backed
+        // registration requirement as the per-assembly method it calls.
+        Assert.Contains(
+            "Registrations whose <c>Lifetime</c> selects a DI-backed registration",
+            text);
+        Assert.Contains(
+            "service collection they throw <c>InvalidOperationException</c>.",
+            text);
     }
 
     [Fact]

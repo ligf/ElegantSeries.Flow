@@ -1290,6 +1290,12 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         sb.AppendLine("        /// given view locator, using the registration method selected by the");
         sb.AppendLine("        /// attribute's <c>Lifetime</c>.");
         sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        /// <remarks>");
+        sb.AppendLine("        /// Registrations whose <c>Lifetime</c> selects a DI-backed registration");
+        sb.AppendLine("        /// (<c>Transient</c> or <c>Singleton</c>) require a view locator created by");
+        sb.AppendLine("        /// <c>AddElegantSeriesFlowViews(configure)</c>; on a locator without a");
+        sb.AppendLine("        /// service collection they throw <c>InvalidOperationException</c>.");
+        sb.AppendLine("        /// </remarks>");
         sb.AppendLine("        /// <param name=\"views\">The view locator to register on.</param>");
         sb.Append("        public static void RegisterAttributedViews(this global::");
         sb.Append(locatorName);
@@ -1440,6 +1446,12 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         sb.AppendLine("        /// Registers this assembly's attributed views and the attributed views");
         sb.AppendLine("        /// of every referenced view-registration provider assembly.");
         sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        /// <remarks>");
+        sb.AppendLine("        /// Registrations whose <c>Lifetime</c> selects a DI-backed registration");
+        sb.AppendLine("        /// (<c>Transient</c> or <c>Singleton</c>) require a view locator created by");
+        sb.AppendLine("        /// <c>AddElegantSeriesFlowViews(configure)</c>; on a locator without a");
+        sb.AppendLine("        /// service collection they throw <c>InvalidOperationException</c>.");
+        sb.AppendLine("        /// </remarks>");
         sb.AppendLine("        /// <param name=\"views\">The view locator to register on.</param>");
         sb.Append("        public static void RegisterAllAttributedViews(this global::");
         sb.Append(locatorName);
