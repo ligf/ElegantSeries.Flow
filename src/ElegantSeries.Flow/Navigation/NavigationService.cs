@@ -1160,7 +1160,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// call performs the cleanup, every call that arrives while it is in
     /// flight awaits the same operation (and observes the same collected
     /// errors), and calls that arrive after it has completed return
-    /// immediately. The one exception is a call from within a page
+    /// immediately. That includes a completion with collected errors: the
+    /// errors are observed only by the callers that awaited the operation
+    /// while it ran and are not presented again to later calls. The one
+    /// exception is a call from within a page
     /// lifecycle callback after cleanup has begun, which returns silently
     /// instead of joining (see Reentrancy). The synchronous
     /// <see cref="Dispose"/> never joins an

@@ -59,6 +59,20 @@ namespace ElegantSeries.Flow.Journal;
 /// captured.
 /// </para>
 /// <para>
+/// <b>Calls registered from lifecycle callbacks.</b> A navigation issued
+/// through this decorator from within a page lifecycle callback is
+/// accepted by the wrapped service at registration time — before its
+/// landing is decided — because a callback cannot await the landing
+/// without stalling the transition that is waiting on it; the entry is
+/// therefore recorded at registration. If the registered navigation is
+/// then superseded by a later registration in the same window, or vetoed
+/// by a leave guard, the page never lands but the entry remains: the
+/// journal can contain an entry for a navigation that did not take
+/// place, and a snapshot restore will navigate to that page. (Calls
+/// issued through a ViewModel's own <c>Navigation</c> property do not
+/// pass through this decorator and are unaffected.)
+/// </para>
+/// <para>
 /// <b>Events.</b> The four events are republished from the wrapped service
 /// on the same thread that raised them, with the same per-subscriber
 /// isolation; subscribers therefore observe exactly the wrapped service's

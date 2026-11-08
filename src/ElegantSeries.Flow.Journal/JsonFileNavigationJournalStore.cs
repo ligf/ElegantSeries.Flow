@@ -30,6 +30,14 @@ namespace ElegantSeries.Flow.Journal;
 /// each other's files. Use a single instance per file path; this store
 /// is not a multi-process shared database.
 /// </para>
+/// <para>
+/// Because the snapshot path is derived from the entries path, two
+/// stores can also collide without sharing a path: the snapshot of a
+/// store at <c>a.json</c> lives at <c>a.snapshot.json</c>, so a second
+/// store whose entries path is <c>a.snapshot.json</c> overwrites the
+/// first store's snapshot (and has its entries overwritten by it). Do
+/// not pick entries paths that are each other's derived snapshot path.
+/// </para>
 /// </remarks>
 public sealed class JsonFileNavigationJournalStore : INavigationJournalStore, IDisposable
 {

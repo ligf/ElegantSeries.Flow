@@ -36,6 +36,8 @@ public sealed class RouteMatch
 
     /// <summary>Query key → decoded value. A key without
     /// <c>=</c> maps to an empty string; when a key repeats, the last
-    /// value wins.</summary>
+    /// value wins. A pair that begins with <c>=</c> (such as the query
+    /// <c>"=x"</c>) yields an entry under the empty key, as in
+    /// <c>URLSearchParams</c>.</summary>
     public IReadOnlyDictionary<string, string> Query { get; }
 }

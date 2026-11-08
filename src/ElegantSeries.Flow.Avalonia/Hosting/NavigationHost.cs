@@ -159,6 +159,11 @@ public class NavigationHost : ContentControl, IDisposable
     /// while the host is detached from the visual tree, where the change is
     /// deferred and takes effect when the host is attached again.
     /// </summary>
+    /// <remarks>
+    /// Setting the value to <see langword="null"/> keeps the last presented
+    /// content — the host is not cleared. Attaching a service whose region
+    /// currently has no page clears the host.
+    /// </remarks>
     /// <exception cref="ObjectDisposedException">The host has been disposed.</exception>
     public INavigationService? NavigationService
     {
