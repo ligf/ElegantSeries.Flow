@@ -142,6 +142,11 @@ public class NavigationHost : ContentControl, IDisposable
     /// unsubscribes from the previous one; setting <see langword="null"/> detaches.
     /// This is a dependency property, so it can be data-bound.
     /// </summary>
+    /// <remarks>
+    /// Detaching (setting <see langword="null"/>) keeps the last presented
+    /// content — the host is not cleared. Attaching a service whose region
+    /// currently has no page clears the host.
+    /// </remarks>
     /// <exception cref="ObjectDisposedException">The host has been disposed.</exception>
     public INavigationService? NavigationService
     {

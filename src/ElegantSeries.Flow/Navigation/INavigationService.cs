@@ -59,6 +59,14 @@ namespace ElegantSeries.Flow.Navigation;
 /// <see cref="NavigationOperation.Replace"/> and
 /// <see cref="NavigationOperation.Reset"/>: an unrecognized cached instance
 /// is bypassed rather than adopted and refreshed.
+/// Two type notions are at work in all of this: recognition on the stack
+/// compares the candidates' ViewModel <i>runtime</i> types — the target is
+/// the instance that was actually resolved — while the cache lookup, the
+/// self-target shortcut, <c>GoBackTo</c> and <c>Remove</c> address pages by
+/// the <i>static</i> type
+/// each page was navigated to. When DI resolves a derived implementation
+/// for a base registration, the page is therefore keyed under the base type
+/// in the cache, yet recognized on the stack as the derived instance it is.
 /// </para>
 /// <para>
 /// <b>Parameters are stored by reference:</b> a navigation parameter is kept on
@@ -800,10 +808,19 @@ public interface INavigationService
     /// directing the caller to the asynchronous APIs.
     /// </para>
     /// <para>
+    /// Serialization: the removal is serialized with navigation state
+    /// transitions, but a navigation still in its departure phase (leave
+    /// guard consultation, <c>OnNavigatedFrom</c>) does not hold the
+    /// navigation lock, so covered pages can be removed while a departure
+    /// is in flight; the in-flight navigation then commits against the
+    /// stack as it stands at that moment.
+    /// </para>
+    /// <para>
     /// Reentrancy: throws <see cref="InvalidOperationException"/> if called
     /// from within a page lifecycle callback. Call it outside the callback
     /// instead. After the service is disposed, returns 0 without doing
-    /// anything.
+    /// anything; the disposed check runs first, so a call from within a
+    /// callback after disposal has begun returns 0 instead of throwing.
     /// </para>
     /// </remarks>
     int Remove<TViewModel>(string regionName = DefaultRegionName)
@@ -877,7 +894,9 @@ public interface INavigationService
     /// <c>OnNavigatedFromAsync</c>). Call it outside the callback instead.
     /// </para>
     /// <para>
-    /// After the service is disposed, this is a silent no-op.
+    /// After the service is disposed, this is a silent no-op; the disposed
+    /// check runs first, so a call from within a page lifecycle callback
+    /// after disposal has begun is a silent no-op instead of throwing.
     /// </para>
     /// </remarks>
     void ClearCache(string regionName);
@@ -919,7 +938,9 @@ public interface INavigationService
     /// within a page lifecycle callback. Call it outside the callback instead.
     /// </para>
     /// <para>
-    /// After the service is disposed, this is a silent no-op.
+    /// After the service is disposed, this is a silent no-op; the disposed
+    /// check runs first, so a call from within a page lifecycle callback
+    /// after disposal has begun is a silent no-op instead of throwing.
     /// </para>
     /// </remarks>
     void ClearAllCache();
@@ -952,7 +973,9 @@ public interface INavigationService
     /// Call it outside the callback instead.
     /// </para>
     /// <para>
-    /// After the service is disposed, this is a silent no-op.
+    /// After the service is disposed, this is a silent no-op; the disposed
+    /// check runs first, so a call from within a page lifecycle callback
+    /// after disposal has begun is a silent no-op instead of throwing.
     /// </para>
     /// </remarks>
     ValueTask ClearCacheAsync(string regionName);
@@ -978,7 +1001,9 @@ public interface INavigationService
     /// within a page lifecycle callback. Call it outside the callback instead.
     /// </para>
     /// <para>
-    /// After the service is disposed, this is a silent no-op.
+    /// After the service is disposed, this is a silent no-op; the disposed
+    /// check runs first, so a call from within a page lifecycle callback
+    /// after disposal has begun is a silent no-op instead of throwing.
     /// </para>
     /// </remarks>
     ValueTask ClearAllCacheAsync();
