@@ -91,6 +91,49 @@ public sealed class InjectedCallbackViewModel : NavigationViewModelBase, INaviga
     }
 }
 
+/// <summary>Attempts to dispose the constructor-injected navigation
+/// service (which resolves to the journal decorator) from inside its
+/// own OnNavigatedTo callback — synchronously and asynchronously —
+/// capturing how each attempt ended instead of letting it fault the
+/// navigation. Also reports its own disposal, so a test can tell when
+/// the wrapped service's disposal actually reached this page's
+/// scope.</summary>
+public sealed class DisposeAttemptingViewModel : NavigationViewModelBase, INavigationAware, IDisposable
+{
+    private readonly INavigationService _injected;
+
+    public DisposeAttemptingViewModel(INavigationService navigation)
+    {
+        _injected = navigation;
+    }
+
+    public Exception? DisposeError { get; private set; }
+
+    public Task? DisposeAsyncAttempt { get; private set; }
+
+    public bool Disposed { get; private set; }
+
+    public void OnNavigatedTo(object? parameter)
+    {
+        try
+        {
+            ((IDisposable)_injected).Dispose();
+        }
+        catch (Exception ex)
+        {
+            DisposeError = ex;
+        }
+
+        DisposeAsyncAttempt = ((IAsyncDisposable)_injected).DisposeAsync().AsTask();
+    }
+
+    public void OnNavigatedFrom()
+    {
+    }
+
+    public void Dispose() => Disposed = true;
+}
+
 /// <summary>A Detail page that claims any DetailParam through the
 /// target vote, so GoBackTo with a NEW parameter reactivates it and
 /// overwrites its stored parameter.</summary>
@@ -416,6 +459,11 @@ public sealed class FakeNavigationService : INavigationService, IDisposable, IAs
         _errorHandlers.Add(handler);
         return new Token(() => _errorHandlers.Remove(handler));
     }
+
+    /// <summary>The value <see cref="IsInLifecycleCallback"/> reports;
+    /// settable so decorator tests can simulate a caller inside one of
+    /// the wrapped service's page lifecycle callbacks.</summary>
+    public bool IsInLifecycleCallback { get; set; }
 
     public bool CanGoBack(string regionName = "MainRegion") => CanGoBackValue;
 

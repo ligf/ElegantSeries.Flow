@@ -134,6 +134,8 @@ internal class FakeNavigationService : INavigationService
 
     public bool CanGoBack(string regionName = "MainRegion") => false;
 
+    public bool IsInLifecycleCallback => false;
+
     public Dictionary<string, INavigationViewModel> CurrentByRegion { get; } = new();
 
     public INavigationViewModel? GetCurrentViewModel(string regionName = "MainRegion")

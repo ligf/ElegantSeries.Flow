@@ -136,6 +136,8 @@ internal class FakeNavigationService : INavigationService
         => RegionCacheCleared?.Invoke(regionName);
 
     public bool CanGoBack(string regionName = "MainRegion") => throw new NotImplementedException();
+
+    public bool IsInLifecycleCallback => throw new NotImplementedException();
     public Dictionary<string, INavigationViewModel> CurrentByRegion { get; } = new();
     public INavigationViewModel? GetCurrentViewModel(string regionName = "MainRegion")
         => CurrentByRegion.TryGetValue(regionName, out var vm) ? vm : null;
