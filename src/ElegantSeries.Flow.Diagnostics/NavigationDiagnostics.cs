@@ -105,12 +105,14 @@ public sealed class NavigationDiagnostics : IDisposable
             // constructor throws is never disposed, so a subscription
             // already taken would leak (its handlers would keep counting
             // into a meter nobody owns) and an undisposed meter would
-            // stay in the process-wide meter registry.
-            _regionNavigatedSubscription?.Dispose();
-            _viewModelReleasedSubscription?.Dispose();
-            _regionCacheClearedSubscription?.Dispose();
-            _subscriberErrorSubscription?.Dispose();
-            meter?.Dispose();
+            // stay in the process-wide meter registry. Each item is
+            // disposed in isolation: one throwing token must neither
+            // leak the rest nor mask the original construction failure.
+            DisposeQuietly(_regionNavigatedSubscription);
+            DisposeQuietly(_viewModelReleasedSubscription);
+            DisposeQuietly(_regionCacheClearedSubscription);
+            DisposeQuietly(_subscriberErrorSubscription);
+            DisposeQuietly(meter);
             throw;
         }
     }
@@ -124,11 +126,29 @@ public sealed class NavigationDiagnostics : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 
-        _regionNavigatedSubscription?.Dispose();
-        _viewModelReleasedSubscription?.Dispose();
-        _regionCacheClearedSubscription?.Dispose();
-        _subscriberErrorSubscription?.Dispose();
-        _meter.Dispose();
+        // Each item is disposed in isolation: a subscription token from
+        // a third-party INavigationService implementation may throw,
+        // and one throwing token must not leak the remaining
+        // subscriptions or the meter (a retry would be a no-op — the
+        // disposed flag is already set).
+        DisposeQuietly(_regionNavigatedSubscription);
+        DisposeQuietly(_viewModelReleasedSubscription);
+        DisposeQuietly(_regionCacheClearedSubscription);
+        DisposeQuietly(_subscriberErrorSubscription);
+        DisposeQuietly(_meter);
+    }
+
+    private static void DisposeQuietly(IDisposable? disposable)
+    {
+        try
+        {
+            disposable?.Dispose();
+        }
+        catch
+        {
+            // Isolation only: disposal failures of individual items are
+            // swallowed so every item is attempted exactly once.
+        }
     }
 
     private void OnRegionNavigated(string region, INavigationViewModel viewModel) =>

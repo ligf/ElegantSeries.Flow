@@ -8,3 +8,4 @@ FLOWGEN013 | ElegantSeries.Flow.Generator | Error | View carries more than one [
 FLOWGEN014 | ElegantSeries.Flow.Generator | Error | No view locator platform referenced
 FLOWGEN015 | ElegantSeries.Flow.Generator | Error | Generated view registration namespace collision
 FLOWGEN016 | ElegantSeries.Flow.Generator | Error | Invalid [ViewForGeneratedNamespace] namespace
+FLOWGEN017 | ElegantSeries.Flow.Generator | Error | ViewModel type cannot be registered

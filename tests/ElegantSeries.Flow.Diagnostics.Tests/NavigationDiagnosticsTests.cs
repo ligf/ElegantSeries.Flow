@@ -506,6 +506,56 @@ public class NavigationDiagnosticsTests
         public Task<bool> CanNavigateFromAsync(CancellationToken cancellationToken) => Task.FromResult(false);
     }
 
+    [Fact]
+    public void Dispose_WhenFirstTokenThrows_RemainingSubscriptionsStillDisposed()
+    {
+        // A third-party INavigationService may hand out tokens whose
+        // Dispose throws. Disposal is failure-isolated per item: the
+        // throw must not escape, and must not leak the remaining
+        // subscriptions (a retry is a no-op — the flag is set).
+        var nav = new StubNavigationService { ThrowOnDisposeOf = "Navigated" };
+        var diagnostics = new NavigationDiagnostics(nav);
+
+        diagnostics.Dispose();
+
+        Assert.Equal(1, nav.NavigatedSubscriptionDisposals);
+        Assert.Equal(1, nav.ReleasedSubscriptionDisposals);
+        Assert.Equal(1, nav.CacheClearedSubscriptionDisposals);
+        Assert.Equal(1, nav.SubscriberErrorSubscriptionDisposals);
+        Assert.Null(nav.ReleasedHandler);
+        Assert.Null(nav.CacheClearedHandler);
+        Assert.Null(nav.SubscriberErrorHandler);
+
+        diagnostics.Dispose();
+    }
+
+    [Fact]
+    public void Constructor_WhenLastSubscriptionThrows_RollsBackAndSurfacesTheOriginalError()
+    {
+        // The fourth subscription fails during construction, and the
+        // first token additionally throws while being rolled back:
+        // the rollback must still dispose every earlier subscription,
+        // and the exception that surfaces must be the subscription
+        // failure, not the rollback's own disposal failure.
+        var nav = new StubNavigationService
+        {
+            ThrowOnDisposeOf = "Navigated",
+            ThrowOnSubscribeSubscriberError = true,
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => new NavigationDiagnostics(nav));
+
+        Assert.Equal("Subscribe failed.", ex.Message);
+        Assert.Equal(1, nav.NavigatedSubscriptionDisposals);
+        Assert.Equal(1, nav.ReleasedSubscriptionDisposals);
+        Assert.Equal(1, nav.CacheClearedSubscriptionDisposals);
+        // The non-throwing tokens' handlers are gone; the throwing
+        // token's own unsubscribe never ran (it threw first) — what
+        // the observer owes is the attempt, which the counts above pin.
+        Assert.Null(nav.ReleasedHandler);
+        Assert.Null(nav.CacheClearedHandler);
+    }
+
     /// <summary>
     /// <see cref="INavigationService"/> double that captures the
     /// handlers the observer subscribes and lets the test invoke them
@@ -538,6 +588,16 @@ public class NavigationDiagnosticsTests
         public int CacheClearedSubscriptionDisposals { get; private set; }
         public int SubscriberErrorSubscriptionDisposals { get; private set; }
 
+        /// <summary>Names the channel ("Navigated", "Released",
+        /// "CacheCleared", "SubscriberError") whose subscription token
+        /// throws when disposed, simulating a third-party
+        /// INavigationService whose tokens are not disposal-safe.</summary>
+        public string? ThrowOnDisposeOf { get; set; }
+
+        /// <summary>When true, subscribing to SubscriberError throws,
+        /// simulating a construction-time subscription failure.</summary>
+        public bool ThrowOnSubscribeSubscriberError { get; set; }
+
         public void RaiseRegionNavigated(string regionName, INavigationViewModel viewModel)
         {
             if (NavigatedHandler is { } handler)
@@ -561,7 +621,8 @@ public class NavigationDiagnosticsTests
                     }
 
                     NavigatedHandler = null;
-                });
+                },
+                throwOnDispose: ThrowOnDisposeOf is "Navigated");
         }
 
         public IDisposable SubscribeViewModelReleased(Action<string, INavigationViewModel> handler)
@@ -578,7 +639,8 @@ public class NavigationDiagnosticsTests
                     }
 
                     ReleasedHandler = null;
-                });
+                },
+                throwOnDispose: ThrowOnDisposeOf is "Released");
         }
 
         public IDisposable SubscribeRegionCacheCleared(Action<string> handler)
@@ -595,11 +657,14 @@ public class NavigationDiagnosticsTests
                     }
 
                     CacheClearedHandler = null;
-                });
+                },
+                throwOnDispose: ThrowOnDisposeOf is "CacheCleared");
         }
 
         public IDisposable SubscribeSubscriberError(Action<Exception> handler)
         {
+            if (ThrowOnSubscribeSubscriberError)
+                throw new InvalidOperationException("Subscribe failed.");
             SubscriberErrorHandler = handler;
             return new StubSubscription(
                 onDisposeAttempt: () => SubscriberErrorSubscriptionDisposals++,
@@ -612,7 +677,8 @@ public class NavigationDiagnosticsTests
                     }
 
                     SubscriberErrorHandler = null;
-                });
+                },
+                throwOnDispose: ThrowOnDisposeOf is "SubscriberError");
         }
 
         /// <summary>
@@ -620,13 +686,15 @@ public class NavigationDiagnosticsTests
         /// (so a caller disposing a token twice is observable), while
         /// the unsubscribe action itself runs exactly once.
         /// </summary>
-        private sealed class StubSubscription(Action onDisposeAttempt, Action unsubscribe) : IDisposable
+        private sealed class StubSubscription(Action onDisposeAttempt, Action unsubscribe, bool throwOnDispose = false) : IDisposable
         {
             private Action? _unsubscribe = unsubscribe;
 
             public void Dispose()
             {
                 onDisposeAttempt();
+                if (throwOnDispose)
+                    throw new InvalidOperationException("Token disposal failed.");
                 Interlocked.Exchange(ref _unsubscribe, null)?.Invoke();
             }
         }
