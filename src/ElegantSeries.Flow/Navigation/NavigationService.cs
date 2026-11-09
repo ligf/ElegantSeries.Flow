@@ -220,14 +220,20 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 {
                     try
                     {
-                        if (scope is IAsyncDisposable asyncScope)
+                        // Same scope-teardown flow as the funnels in
+                        // NavigationService.Scopes: a DisposeAsync call from
+                        // inside this teardown must classify as such.
+                        await RunInScopeDisposalFlowAsync(async () =>
                         {
-                            await asyncScope.DisposeAsync().ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            scope.Dispose();
-                        }
+                            if (scope is IAsyncDisposable asyncScope)
+                            {
+                                await asyncScope.DisposeAsync().ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                scope.Dispose();
+                            }
+                        }).ConfigureAwait(false);
                     }
                     finally
                     {
@@ -642,6 +648,9 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
 
     /// <inheritdoc />
     public bool IsInLifecycleCallback => CurrentOwnLifecycleEntry is not null;
+
+    /// <inheritdoc />
+    public bool IsInScopeDisposal => IsInOwnScopeDisposal;
 
     /// <inheritdoc />
     public INavigationViewModel? GetCurrentViewModel(string regionName = DefaultRegionName)
@@ -1213,10 +1222,33 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// returns silently instead of throwing — the disposal is already
     /// waiting on that callback's gate, so throwing into the callback, or
     /// awaiting the operation that waits on it, would stall the cleanup.
+    /// A call made while a page scope's teardown is running on the same
+    /// flow — from a service's <see cref="IDisposable.Dispose"/> or
+    /// <see cref="IAsyncDisposable.DisposeAsync"/> inside a page scope —
+    /// likewise returns silently, whether or not a disposal is in flight:
+    /// during cleanup the operation is inline-waiting for that teardown
+    /// to return, and outside cleanup a whole-service disposal started
+    /// from inside one page's teardown has nowhere sensible to land. The
+    /// call neither joins nor starts a disposal.
     /// </para>
     /// </remarks>
     public ValueTask DisposeAsync()
     {
+        if (IsInOwnScopeDisposal)
+        {
+            // A page scope teardown is running on this flow — the container
+            // is disposing the services of one of this service's own page
+            // scopes. The teardown is part of the disposal machinery
+            // itself: during this service's cleanup, the disposal operation
+            // is inline-waiting for that teardown to return, so joining it
+            // here would deadlock; outside a cleanup (a deferred or cache
+            // teardown), starting a whole-service disposal from inside one
+            // page's teardown has nowhere sensible to land. Return
+            // silently, exactly as a call from a lifecycle callback does
+            // once cleanup has begun.
+            return default;
+        }
+
         TaskCompletionSource? starter = null;
         Task shared;
         lock (_disposeTaskLock)

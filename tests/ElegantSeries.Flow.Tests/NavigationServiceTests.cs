@@ -7325,6 +7325,59 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task DisposeAsync_FromTrackedDeferredTeardown_CompletesInsteadOfDeadlocking()
+    {
+        // The tracked deferred teardown (TrackDeferredDisposal) disposes
+        // its scope on its own task, outside the DisposeScopeAsync
+        // funnel — staged here by invoking the tracker directly, as in
+        // the drain test above. A service inside the deferred scope
+        // awaits the service's DisposeAsync from its own teardown, while
+        // the service disposal's drain is awaiting the deferred task:
+        // the call must classify as a scope-teardown call and return
+        // silently, or the two wait on each other forever.
+        DeferredTeardownProbe.Navigation = null;
+        DeferredTeardownProbe.InnerCallReturned = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddScoped<DeferredTeardownProbe>();
+        var provider = services.BuildServiceProvider();
+        var nav = (NavigationService)provider.GetRequiredService<INavigationService>();
+        DeferredTeardownProbe.Navigation = nav;
+
+        var trackMethod = typeof(NavigationService).GetMethod("TrackDeferredDisposal",
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var scope = scopeFactory.CreateScope();
+        _ = scope.ServiceProvider.GetRequiredService<DeferredTeardownProbe>();
+        trackMethod.Invoke(nav, [gate.Task, scope, new TestHomeViewModel(), "MainRegion", null]);
+
+        var disposal = Task.Run(() => ((IAsyncDisposable)nav).DisposeAsync().AsTask());
+        // Let the disposal reach its drain, which parks on the deferred
+        // task while the gate holds that task open.
+        await Task.Delay(300);
+        gate.TrySetResult();
+
+        // The bounded wait turns the pre-fix wait cycle into a failure
+        // instead of a hung suite.
+        await disposal.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(DeferredTeardownProbe.InnerCallReturned.Task.IsCompleted);
+    }
+
+    private sealed class DeferredTeardownProbe : IAsyncDisposable
+    {
+        public static INavigationService? Navigation;
+        public static TaskCompletionSource? InnerCallReturned;
+
+        public async ValueTask DisposeAsync()
+        {
+            await ((IAsyncDisposable)Navigation!).DisposeAsync().ConfigureAwait(false);
+            InnerCallReturned?.TrySetResult();
+        }
+    }
+
+    [Fact]
     public async Task DisposeAsync_ConcurrentCall_JoinsInFlightDisposal()
     {
         // Concurrent DisposeAsync calls share one disposal: the first call

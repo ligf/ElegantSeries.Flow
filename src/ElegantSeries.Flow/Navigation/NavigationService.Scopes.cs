@@ -230,6 +230,67 @@ public sealed partial class NavigationService
     // ───────────────────── Disposal internals ─────────────────────
 
     /// <summary>
+    /// Marks the dynamic extent of one page scope's container disposal on
+    /// this flow. While it runs, a <see cref="DisposeAsync"/> call for the
+    /// owning service returns silently instead of joining or starting a
+    /// disposal: the teardown is itself disposal machinery, and during the
+    /// service's own cleanup the disposal operation is inline-waiting for
+    /// this very teardown to return, so joining it would deadlock.
+    /// Mirrors the lifecycle marker's shape: per-invocation, owner-checked,
+    /// expired the moment the teardown returns, so flows forked from inside
+    /// a teardown do not stay classified for the rest of their life.
+    /// </summary>
+    private static readonly AsyncLocal<ScopeDisposalMarker?> _currentScopeDisposalMarker = new();
+
+    private sealed class ScopeDisposalMarker(NavigationService owner)
+    {
+        public NavigationService Owner { get; } = owner;
+
+        /// <summary>True while the teardown that created this marker is still running.</summary>
+        public volatile bool Active = true;
+    }
+
+    /// <summary>
+    /// True while a page scope teardown belonging to THIS service instance
+    /// is running on this flow.
+    /// </summary>
+    private bool IsInOwnScopeDisposal =>
+        _currentScopeDisposalMarker.Value is { Active: true } marker
+            && ReferenceEquals(marker.Owner, this);
+
+    private void RunInScopeDisposalFlow(Action teardown)
+    {
+        var marker = new ScopeDisposalMarker(this);
+        var previous = _currentScopeDisposalMarker.Value;
+        _currentScopeDisposalMarker.Value = marker;
+        try
+        {
+            teardown();
+        }
+        finally
+        {
+            marker.Active = false;
+            _currentScopeDisposalMarker.Value = previous;
+        }
+    }
+
+    private async ValueTask RunInScopeDisposalFlowAsync(Func<ValueTask> teardown)
+    {
+        var marker = new ScopeDisposalMarker(this);
+        var previous = _currentScopeDisposalMarker.Value;
+        _currentScopeDisposalMarker.Value = marker;
+        try
+        {
+            await teardown().ConfigureAwait(false);
+        }
+        finally
+        {
+            marker.Active = false;
+            _currentScopeDisposalMarker.Value = previous;
+        }
+    }
+
+    /// <summary>
     /// Disposes removed cache entries on the synchronous path. Every page scope is
     /// attempted even if one throws; exceptions are collected into <paramref name="errors"/>.
     /// </summary>
@@ -406,14 +467,17 @@ public sealed partial class NavigationService
 
         try
         {
-            if (scope is IAsyncDisposable asyncScope)
+            await RunInScopeDisposalFlowAsync(async () =>
             {
-                await asyncScope.DisposeAsync().ConfigureAwait(false);
-            }
-            else
-            {
-                scope.Dispose();
-            }
+                if (scope is IAsyncDisposable asyncScope)
+                {
+                    await asyncScope.DisposeAsync().ConfigureAwait(false);
+                }
+                else
+                {
+                    scope.Dispose();
+                }
+            }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -452,7 +516,7 @@ public sealed partial class NavigationService
 
         try
         {
-            scope.Dispose();
+            RunInScopeDisposalFlow(() => scope.Dispose());
         }
         catch (Exception ex)
         {
@@ -487,14 +551,17 @@ public sealed partial class NavigationService
 
         try
         {
-            if (scope is IAsyncDisposable asyncScope)
+            await RunInScopeDisposalFlowAsync(async () =>
             {
-                await asyncScope.DisposeAsync().ConfigureAwait(false);
-            }
-            else
-            {
-                scope.Dispose();
-            }
+                if (scope is IAsyncDisposable asyncScope)
+                {
+                    await asyncScope.DisposeAsync().ConfigureAwait(false);
+                }
+                else
+                {
+                    scope.Dispose();
+                }
+            }).ConfigureAwait(false);
         }
         catch
         {

@@ -139,6 +139,8 @@ internal class FakeNavigationService : INavigationService
 
     public bool IsInLifecycleCallback => throw new NotImplementedException();
 
+    public bool IsInScopeDisposal => throw new NotImplementedException();
+
     public IReadOnlyDictionary<string, IReadOnlyList<INavigationViewModel>> GetAllNavigationStacks() => throw new NotImplementedException();
     public Dictionary<string, INavigationViewModel> CurrentByRegion { get; } = new();
     public INavigationViewModel? GetCurrentViewModel(string regionName = "MainRegion")
