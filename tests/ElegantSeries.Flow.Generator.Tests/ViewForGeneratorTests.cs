@@ -1241,6 +1241,127 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void PrivateNestedViewModel_ReportsFlowGen017()
+    {
+        // The ViewModel is a private nested class: the attribute site
+        // compiles (it sits inside the containing class), but the
+        // generated registration code cannot name the type.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.Views
+            {
+                public class Container
+                {
+                    private class SecretViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                    {
+                        public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                    }
+
+                    [ElegantSeries.Flow.Routing.ViewFor<SecretViewModel>]
+                    public class NestedView : Avalonia.Controls.Control { }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("not accessible", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void FileLocalViewModel_ReportsFlowGen017()
+    {
+        // A file-local ViewModel cannot be referenced from the
+        // generated file.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                file class LocalViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.LocalViewModel>]
+                public class LocalView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("file-local", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void GenericNestedViewModel_ReportsFlowGen017()
+    {
+        // A ViewModel nested in a generic type cannot be named by the
+        // generated registration code.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class Container<T>
+                {
+                    public class NestedViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                    {
+                        public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                    }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.Container<int>.NestedViewModel>]
+                public class NestedView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("nested in a generic type", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void InferredPrivateNestedViewModel_ReportsFlowGen017()
+    {
+        // The inferred path is checked too: the view infers its
+        // ViewModel from BaseView<TViewModel>, and that ViewModel is a
+        // private nested class of the shared container.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.Views
+            {
+                public class Container
+                {
+                    private class SecretViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                    {
+                        public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                    }
+
+                    [ElegantSeries.Flow.Routing.ViewFor]
+                    public class NestedView : ElegantSeries.Flow.Avalonia.Views.BaseView<SecretViewModel> { }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("not accessible", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
     public void ViewNestedInFileLocalType_ReportsFlowGen011()
     {
         // The view itself is not file-local, but its containing type is:

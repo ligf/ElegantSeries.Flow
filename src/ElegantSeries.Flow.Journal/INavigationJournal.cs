@@ -46,6 +46,9 @@ public interface INavigationJournal
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="snapshot"/>
     /// or <paramref name="navigatePage"/> is null.</exception>
+    /// <exception cref="ArgumentException">The snapshot is structurally
+    /// malformed: its regions list, a region, a region's pages list,
+    /// or a page is null.</exception>
     /// <exception cref="NotSupportedException">The snapshot's
     /// <see cref="JournalSnapshot.FormatVersion"/> is higher than this
     /// build supports.</exception>
@@ -70,6 +73,10 @@ public sealed class NavigationJournal : INavigationJournal
     private readonly JournalNavigationService _navigation;
     private readonly INavigationJournalStore _store;
 
+    // Serializes one capture together with its save (see
+    // CaptureSnapshotAsync).
+    private readonly SemaphoreSlim _captureGate = new(1, 1);
+
     /// <summary>Creates the facade over one decorated navigation service
     /// and its store. Normally resolved from the container after
     /// <c>AddElegantSeriesFlowJournal</c>.</summary>
@@ -88,9 +95,22 @@ public sealed class NavigationJournal : INavigationJournal
     /// <inheritdoc/>
     public async Task<JournalSnapshot> CaptureSnapshotAsync(CancellationToken cancellationToken = default)
     {
-        var snapshot = await _navigation.CaptureSnapshotCoreAsync(cancellationToken).ConfigureAwait(false);
-        await _store.SaveSnapshotAsync(snapshot, cancellationToken).ConfigureAwait(false);
-        return snapshot;
+        // Capture and save are one serialized unit: the core capture is
+        // serialized inside the decorator, but the save is not, so two
+        // overlapping captures could save out of order and leave the
+        // older picture as the stored snapshot. Holding this gate across
+        // both makes the stored snapshot always the latest capture's.
+        await _captureGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var snapshot = await _navigation.CaptureSnapshotCoreAsync(cancellationToken).ConfigureAwait(false);
+            await _store.SaveSnapshotAsync(snapshot, cancellationToken).ConfigureAwait(false);
+            return snapshot;
+        }
+        finally
+        {
+            _captureGate.Release();
+        }
     }
 
     /// <inheritdoc/>
@@ -109,6 +129,24 @@ public sealed class NavigationJournal : INavigationJournal
             throw new NotSupportedException(
                 $"Journal snapshot format version {snapshot.FormatVersion} is not supported by this build " +
                 $"(maximum supported: {SupportedFormatVersion}).");
+
+        // A structurally incomplete snapshot — a hand-built instance
+        // with null Regions/Pages, or a persisted file that deserialized
+        // into one — is malformed input, not a per-page restore
+        // failure: reject it here instead of escaping with a
+        // NullReferenceException from the loops below.
+        if (snapshot.Regions is null)
+            throw new ArgumentException("The snapshot is malformed: Regions is null.", nameof(snapshot));
+        foreach (var region in snapshot.Regions)
+        {
+            if (region is null || region.Pages is null)
+                throw new ArgumentException("The snapshot is malformed: a region or its Pages is null.", nameof(snapshot));
+            foreach (var page in region.Pages)
+            {
+                if (page is null)
+                    throw new ArgumentException("The snapshot is malformed: a page is null.", nameof(snapshot));
+            }
+        }
 
         var serializers = _navigation.Serializers;
         var regionResults = new List<JournalRegionRestoreResult>();

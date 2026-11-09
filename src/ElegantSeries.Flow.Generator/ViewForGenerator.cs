@@ -100,7 +100,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
     private sealed class ViewMapping : IEquatable<ViewMapping>
     {
-        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType, bool isOpenGenericView, bool isOpenGenericViewModel, string? viewModelNotImplementingInterface, ImmutableArray<string> viewConstraintViolations, string? viewModelNotReferenceType)
+        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType, bool isOpenGenericView, bool isOpenGenericViewModel, string? viewModelNotImplementingInterface, ImmutableArray<string> viewConstraintViolations, string? viewModelNotReferenceType, ImmutableArray<string> viewModelConstraintViolations)
         {
             ViewName = viewName;
             ViewModelName = viewModelName;
@@ -115,6 +115,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             ViewModelNotImplementingInterface = viewModelNotImplementingInterface;
             ViewConstraintViolations = viewConstraintViolations;
             ViewModelNotReferenceType = viewModelNotReferenceType;
+            ViewModelConstraintViolations = viewModelConstraintViolations;
         }
 
         public string ViewName { get; }
@@ -175,6 +176,8 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         /// </summary>
         public ImmutableArray<string> ViewConstraintViolations { get; }
 
+        public ImmutableArray<string> ViewModelConstraintViolations { get; }
+
         /// <summary>
         /// The ViewModel type name when it is a value type registered via
         /// RegisterTransient/RegisterSingleton, whose ViewModel type parameter
@@ -209,7 +212,8 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             IsOpenGenericViewModel == other.IsOpenGenericViewModel &&
             string.Equals(ViewModelNotImplementingInterface, other.ViewModelNotImplementingInterface, StringComparison.Ordinal) &&
             ViewConstraintViolations.SequenceEqual(other.ViewConstraintViolations) &&
-            string.Equals(ViewModelNotReferenceType, other.ViewModelNotReferenceType, StringComparison.Ordinal);
+            string.Equals(ViewModelNotReferenceType, other.ViewModelNotReferenceType, StringComparison.Ordinal) &&
+            ViewModelConstraintViolations.SequenceEqual(other.ViewModelConstraintViolations);
 
         public override bool Equals(object? obj) => Equals(obj as ViewMapping);
 
@@ -236,6 +240,11 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                 }
 
                 hash = (hash * 31) + (ViewModelNotReferenceType is null ? 0 : StringComparer.Ordinal.GetHashCode(ViewModelNotReferenceType));
+                foreach (var violation in ViewModelConstraintViolations)
+                {
+                    hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(violation);
+                }
+
                 return hash;
             }
         }
@@ -756,6 +765,41 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             viewModelNotReferenceType = viewModelName;
         }
 
+        // ViewModel-side nameability requirements of the generated
+        // Register* call (FLOWGEN017): the generated code names the
+        // ViewModel type exactly as it names the view, so the same three
+        // requirements the view is checked against above apply to the
+        // ViewModel too — accessible from the generated file, not
+        // file-local, not nested in a generic type. Without these checks
+        // the failure surfaces as a raw compiler error (CS0122) inside
+        // the generated file. Applies to the explicit and the inferred
+        // ViewModel alike. Skipped for error types (the compiler already
+        // reports them) and for open generic ViewModels (FLOWGEN009
+        // already rejects them, and nameability questions about an
+        // unbound type have no meaningful answer).
+        var viewModelConstraintViolations = ImmutableArray.CreateBuilder<string>();
+        var effectiveViewModel = explicitViewModelSymbol ?? baseViewModel;
+        if (effectiveViewModel is { TypeKind: not TypeKind.Error } &&
+            !(effectiveViewModel.IsGenericType &&
+              (effectiveViewModel.IsUnboundGenericType ||
+               effectiveViewModel.TypeArguments.Any(a => a is ITypeParameterSymbol))))
+        {
+            if (!IsAccessibleFromGeneratedCode(effectiveViewModel))
+            {
+                viewModelConstraintViolations.Add("it is not accessible from the generated registration code (the view model and any containing types must be public or internal)");
+            }
+
+            if (IsFileLocal(effectiveViewModel))
+            {
+                viewModelConstraintViolations.Add("it is file-local (or nested in a file-local type) and cannot be referenced from the generated registration code");
+            }
+
+            if (HasGenericContainingType(effectiveViewModel))
+            {
+                viewModelConstraintViolations.Add("it is nested in a generic type and cannot be named by the generated registration code");
+            }
+        }
+
         return new ViewMapping(
             viewName,
             viewModelName ?? string.Empty,
@@ -769,7 +813,8 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             isOpenGenericViewModel,
             viewModelNotImplementingInterface,
             viewConstraintViolations.ToImmutable(),
-            viewModelNotReferenceType);
+            viewModelNotReferenceType,
+            viewModelConstraintViolations.ToImmutable());
     }
 
     /// <summary>
@@ -933,7 +978,8 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         mapping.IsOpenGenericViewModel ||
         mapping.ViewModelNotImplementingInterface is not null ||
         !mapping.ViewConstraintViolations.IsEmpty ||
-        mapping.ViewModelNotReferenceType is not null;
+        mapping.ViewModelNotReferenceType is not null ||
+        !mapping.ViewModelConstraintViolations.IsEmpty;
 
     /// <summary>
     /// Computes the default namespace the registrations are generated into
@@ -1202,6 +1248,13 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             {
                 spc.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticDescriptors.ViewModelNotReferenceType, mapping.Location, mapping.ViewName, mapping.ViewModelNotReferenceType, mapping.RegisterMethod));
+                hasMappingErrors = true;
+            }
+
+            foreach (var violation in mapping.ViewModelConstraintViolations)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.ViewModelConstraintViolation, mapping.Location, mapping.ViewName, mapping.ViewModelName, violation));
                 hasMappingErrors = true;
             }
         }
@@ -1777,6 +1830,14 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             id: "FLOWGEN016",
             title: "Invalid [ViewForGeneratedNamespace] namespace",
             messageFormat: "'{0}' is not a valid namespace for [assembly: ViewForGeneratedNamespace]. Use one or more dot-separated identifiers, each starting with a letter or '_' and containing only letters, digits and '_', and none equal to a C# keyword.",
+            category: "ElegantSeries.Flow.Generator",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor ViewModelConstraintViolation = new DiagnosticDescriptor(
+            id: "FLOWGEN017",
+            title: "ViewModel type cannot be registered",
+            messageFormat: "[ViewFor] on view '{0}' cannot register ViewModel type '{1}': {2}",
             category: "ElegantSeries.Flow.Generator",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
