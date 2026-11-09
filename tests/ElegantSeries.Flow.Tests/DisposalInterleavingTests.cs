@@ -178,6 +178,82 @@ public class DisposalInterleavingTests
         }
     }
 
+    /// <summary>Observation points for the scope-teardown reentrancy
+    /// fixtures: the teardown bodies signal what they saw from inside a
+    /// page scope's container disposal.</summary>
+    public sealed class ScopeTeardownProbe
+    {
+        public TaskCompletionSource InnerCallReturned { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public volatile bool SyncInnerCallCompleted;
+    }
+
+    /// <summary>Scoped service whose own async teardown calls back into
+    /// the service's DisposeAsync and awaits it — the deadlock shape when
+    /// the teardown runs under an in-flight service disposal, whose core
+    /// is inline-waiting for this teardown to return.</summary>
+    public sealed class AsyncTeardownService : IAsyncDisposable
+    {
+        private readonly INavigationService _navigation;
+        private readonly ScopeTeardownProbe _probe;
+
+        public AsyncTeardownService(INavigationService navigation, ScopeTeardownProbe probe)
+        {
+            _navigation = navigation;
+            _probe = probe;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await ((IAsyncDisposable)_navigation).DisposeAsync().ConfigureAwait(false);
+            _probe.InnerCallReturned.TrySetResult();
+        }
+    }
+
+    /// <summary>Scoped service whose synchronous teardown calls the
+    /// service's DisposeAsync without awaiting it and records whether the
+    /// returned task was already complete.</summary>
+    public sealed class SyncTeardownService : IDisposable
+    {
+        private readonly INavigationService _navigation;
+        private readonly ScopeTeardownProbe _probe;
+
+        public SyncTeardownService(INavigationService navigation, ScopeTeardownProbe probe)
+        {
+            _navigation = navigation;
+            _probe = probe;
+        }
+
+        public void Dispose()
+        {
+            var call = ((IAsyncDisposable)_navigation).DisposeAsync();
+            _probe.SyncInnerCallCompleted = call.IsCompleted;
+        }
+    }
+
+    /// <summary>Page whose scope contains the async teardown service.</summary>
+    public sealed class AsyncTeardownPage : NavigationViewModelBase
+    {
+        public AsyncTeardownPage(PageScopeMarker marker, AsyncTeardownService teardown)
+        {
+            _ = marker;
+            _ = teardown;
+        }
+    }
+
+    /// <summary>Page whose scope contains the sync teardown service.</summary>
+    public sealed class SyncTeardownPage : NavigationViewModelBase
+    {
+        public SyncTeardownPage(PageScopeMarker marker, SyncTeardownService teardown)
+        {
+            _ = marker;
+            _ = teardown;
+        }
+    }
+
+
+
     private static ServiceProvider BuildProvider(Action<NavigationOptions>? configure = null)
     {
         var services = new ServiceCollection();
@@ -205,6 +281,11 @@ public class DisposalInterleavingTests
         services.AddTransient<SelfDisposePage>();
         services.AddTransient<ThrowingScopePage>();
         services.AddTransient<BlockingDisposePage>();
+        services.AddSingleton<ScopeTeardownProbe>();
+        services.AddScoped<AsyncTeardownService>();
+        services.AddScoped<SyncTeardownService>();
+        services.AddTransient<AsyncTeardownPage>();
+        services.AddTransient<SyncTeardownPage>();
         return services.BuildServiceProvider();
     }
 
@@ -740,5 +821,82 @@ public class DisposalInterleavingTests
         Assert.Contains(pageA!, released);
         Assert.DoesNotContain(typeof(StressPageB), surfaced.Select(vm => vm.GetType()));
         await WaitForScopeBalanceAsync(ledger, "after disposal at entering-stored");
+    }
+
+    // ── I5: scope-teardown reentrancy (audit P1-2) ────────────
+
+    /// <summary>
+    /// The audit's deadlock: the service disposal core inline-awaits each
+    /// page scope's teardown, and a service inside the scope awaits the
+    /// service's DisposeAsync from its own DisposeAsync. The call must
+    /// return silently (the disposal is already waiting on the teardown),
+    /// so the outer disposal completes in bounded time; without the
+    /// scope-teardown rule the inner call joins the very operation that
+    /// is waiting for it.
+    /// </summary>
+    [Fact]
+    public async Task DisposeAsync_FromWithinPageScopeTeardown_CompletesInsteadOfDeadlocking()
+    {
+        var provider = BuildProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+        var probe = provider.GetRequiredService<ScopeTeardownProbe>();
+
+        Assert.True(await nav.NavigateToAsync<AsyncTeardownPage>("D1Main"));
+
+        var disposal = ((IAsyncDisposable)nav).DisposeAsync().AsTask();
+        // The bounded wait turns the pre-fix deadlock into a failure
+        // instead of a hung suite.
+        await disposal.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.True(probe.InnerCallReturned.Task.IsCompleted);
+    }
+
+    /// <summary>
+    /// The same call when a retired Destroy page's scope is torn down
+    /// inline in the background with no disposal in flight. The
+    /// teardown's DisposeAsync call must return silently there too — it
+    /// must not start a whole-service disposal from inside one page's
+    /// teardown — and the service stays usable.
+    /// </summary>
+    [Fact]
+    public async Task DisposeAsync_FromInlineRetiredScopeTeardown_ReturnsSilentlyAndServiceSurvives()
+    {
+        var provider = BuildProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+        var probe = provider.GetRequiredService<ScopeTeardownProbe>();
+
+        Assert.True(await nav.NavigateToAsync<AsyncTeardownPage>("D1Main"));
+        // Replace retires the page (a Push would only cover it), which is
+        // what sends its scope to the deferred teardown.
+        Assert.True(await nav.NavigateToAsync<StressPageA>("D1Main", operation: NavigationOperation.Replace));
+
+        await probe.InnerCallReturned.Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.True(await nav.NavigateToAsync<StressPageB>("D1Main"));
+        await ((IAsyncDisposable)nav).DisposeAsync();
+    }
+
+    /// <summary>
+    /// The synchronous teardown path: clearing the cache disposes a
+    /// KeepAlive page's scope synchronously, and a service inside it
+    /// calls DisposeAsync. The call returns an already-completed task
+    /// and starts nothing; the service stays usable.
+    /// </summary>
+    [Fact]
+    public async Task DisposeAsync_FromSyncCacheTeardown_ReturnsSilentlyAndServiceSurvives()
+    {
+        var provider = BuildProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+        var probe = provider.GetRequiredService<ScopeTeardownProbe>();
+
+        Assert.True(await nav.NavigateToAsync<SyncTeardownPage>("D1Main", retention: NavigationRetention.KeepAlive));
+        // Only a page that leaves the stack enters the cache, so replace
+        // it rather than covering it.
+        Assert.True(await nav.NavigateToAsync<StressPageA>("D1Main", operation: NavigationOperation.Replace));
+
+        nav.ClearCache("D1Main");
+
+        Assert.True(probe.SyncInnerCallCompleted);
+        Assert.True(await nav.NavigateToAsync<StressPageB>("D1Main"));
+        await ((IAsyncDisposable)nav).DisposeAsync();
     }
 }

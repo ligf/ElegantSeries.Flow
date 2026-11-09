@@ -136,6 +136,8 @@ internal class FakeNavigationService : INavigationService
 
     public bool IsInLifecycleCallback => false;
 
+    public bool IsInScopeDisposal => false;
+
     public Dictionary<string, INavigationViewModel> CurrentByRegion { get; } = new();
 
     public INavigationViewModel? GetCurrentViewModel(string regionName = "MainRegion")

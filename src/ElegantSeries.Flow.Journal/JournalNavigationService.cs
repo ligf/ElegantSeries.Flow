@@ -111,7 +111,12 @@ namespace ElegantSeries.Flow.Journal;
 /// <see cref="Dispose"/> mirrors the wrapped service's rule the same
 /// way: it throws <see cref="InvalidOperationException"/> from within a
 /// page lifecycle callback before claiming anything, and returns
-/// silently once the decorator has been disposed.
+/// silently once the decorator has been disposed. A
+/// <see cref="DisposeAsync"/> call made while one of the wrapped
+/// service's page scope teardowns is running on the calling flow, read
+/// from <see cref="INavigationService.IsInScopeDisposal"/> at the same
+/// point, returns silently without claiming or joining anything,
+/// mirroring the wrapped service.
 /// </para>
 /// </remarks>
 public sealed class JournalNavigationService : INavigationService, IDisposable, IAsyncDisposable
@@ -349,6 +354,9 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
 
     /// <inheritdoc/>
     public bool IsInLifecycleCallback => _inner.IsInLifecycleCallback;
+
+    /// <inheritdoc/>
+    public bool IsInScopeDisposal => _inner.IsInScopeDisposal;
 
     // ──────────────────────────── Forward navigation ────────────────────────────
 
@@ -688,6 +696,19 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
                 return Volatile.Read(ref _disposed) != 0
                     ? default
                     : CallbackReentrancyFault();
+            }
+
+            if (_inner.IsInScopeDisposal)
+            {
+                // The wrapped service returns silently for a DisposeAsync
+                // issued from within one of its page scopes' teardowns;
+                // mirror that here, before this decorator claims or joins
+                // anything: the wrapped service's cleanup is inline-waiting
+                // for that teardown to return, and this decorator's own
+                // disposal would end by awaiting the wrapped service's —
+                // joining or starting from inside the teardown has the
+                // same shape the wrapped service refuses by silence.
+                return default;
             }
 
             if (_disposeTask is { IsCompleted: false } inFlight)

@@ -709,6 +709,7 @@ public class NavigationDiagnosticsTests
         public bool CanGoBack(string regionName = "MainRegion") => throw new NotImplementedException();
 
         public bool IsInLifecycleCallback => throw new NotImplementedException();
+        public bool IsInScopeDisposal => throw new NotImplementedException();
         public INavigationViewModel? GetCurrentViewModel(string regionName = "MainRegion") => throw new NotImplementedException();
         public bool IsActive<TViewModel>(string regionName = "MainRegion") where TViewModel : INavigationViewModel => throw new NotImplementedException();
         public NavigationRetention? GetCurrentRetention(string regionName = "MainRegion") => throw new NotImplementedException();

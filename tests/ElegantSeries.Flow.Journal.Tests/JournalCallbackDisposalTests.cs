@@ -85,6 +85,35 @@ public sealed class JournalCallbackDisposalTests
     }
 
     [Fact]
+    public async Task DisposeAsync_FromInnerScopeTeardown_ReturnsSilentlyAndDecoratorStaysAlive()
+    {
+        var fake = new FakeNavigationService { IsInScopeDisposal = true };
+        var store = new InMemoryJournalStore();
+        var decorator = new JournalNavigationService(fake, store, new JournalBuilder());
+
+        // The wrapped service returns silently for a DisposeAsync issued
+        // from within one of its page scopes' teardowns; the decorator
+        // mirrors that classification, read from
+        // INavigationService.IsInScopeDisposal before claiming or joining
+        // anything — the wrapped service's cleanup is inline-waiting for
+        // that teardown, and the decorator's disposal would end by
+        // awaiting the wrapped service's.
+        var call = decorator.DisposeAsync();
+        Assert.True(call.IsCompleted);
+        await call;
+        Assert.Equal(0, fake.DisposeAsyncCount);
+
+        // Alive: once the caller is outside a scope teardown, recording
+        // works and a legal disposal disposes the wrapped service once.
+        fake.IsInScopeDisposal = false;
+        fake.RaiseViewModelReleased("MainRegion", new FakeViewModel());
+        Assert.Single(await JournalRecordingTests.WaitForEntriesAsync(store, 1));
+
+        await decorator.DisposeAsync().AsTask().WaitAsync(Timeout);
+        Assert.Equal(1, fake.DisposeAsyncCount);
+    }
+
+    [Fact]
     public async Task DisposeAsync_FromCallback_StarterParkedBeforeClaim_StillFaults()
     {
         var fake = new FakeNavigationService();

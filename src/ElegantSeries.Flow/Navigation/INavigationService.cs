@@ -445,6 +445,35 @@ public interface INavigationService
     /// </remarks>
     bool IsInLifecycleCallback { get; }
 
+    /// <summary>
+    /// Gets whether the calling execution flow is currently inside the
+    /// teardown of one of this service's page scopes.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> while the container disposal of a page scope
+    /// belonging to this service is running on the calling flow — that is,
+    /// while a service resolved from a page scope is being disposed through
+    /// its <see cref="IDisposable.Dispose"/> or
+    /// <see cref="IAsyncDisposable.DisposeAsync"/> by the navigation
+    /// service's disposal machinery (a page leaving, a cache clear, or the
+    /// service's own cleanup) — and that teardown has not yet returned;
+    /// otherwise <see langword="false"/>.
+    /// </returns>
+    /// <remarks>
+    /// This is the same classification the service itself applies: calling
+    /// the service's <c>DisposeAsync</c> while this property is
+    /// <see langword="true"/> returns silently — the call neither joins nor
+    /// starts a disposal, because during the service's own cleanup the
+    /// disposal operation is inline-waiting for that teardown to return,
+    /// and outside a cleanup a whole-service disposal started from inside
+    /// one page's teardown has nowhere sensible to land. Like
+    /// <see cref="IsInLifecycleCallback"/>, the answer is a point-in-time
+    /// fact about the calling flow only, so read it synchronously at the
+    /// point of decision; it never throws, including after the service is
+    /// disposed.
+    /// </remarks>
+    bool IsInScopeDisposal { get; }
+
     // ─────────────────── Navigation Methods (Async) ───────────────────
 
     /// <summary>

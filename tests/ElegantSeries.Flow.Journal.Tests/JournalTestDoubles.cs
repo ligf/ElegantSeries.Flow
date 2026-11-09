@@ -465,6 +465,11 @@ public sealed class FakeNavigationService : INavigationService, IDisposable, IAs
     /// the wrapped service's page lifecycle callbacks.</summary>
     public bool IsInLifecycleCallback { get; set; }
 
+    /// <summary>The value <see cref="IsInScopeDisposal"/> reports;
+    /// settable so decorator tests can simulate a caller inside one of
+    /// the wrapped service's page scope teardowns.</summary>
+    public bool IsInScopeDisposal { get; set; }
+
     public bool CanGoBack(string regionName = "MainRegion") => CanGoBackValue;
 
     public INavigationViewModel? GetCurrentViewModel(string regionName = "MainRegion") => Current;
