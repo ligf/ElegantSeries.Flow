@@ -1561,8 +1561,12 @@ public class NavigationServiceCoverageTests
         Assert.NotNull(method);
 
         var errors = new List<Exception>();
-        method.Invoke(svc, new object[] { scope, errors });
-        method.Invoke(svc, new object[] { scope, errors });
+        // First call disposes
+        var first = (bool)method.Invoke(svc, new object[] { scope, errors })!;
+        Assert.True(first);
+        // Second call should be no-op (already in _disposedScopes)
+        var second = (bool)method.Invoke(svc, new object[] { scope, errors })!;
+        Assert.False(second);
 
         Assert.Empty(errors);
     }

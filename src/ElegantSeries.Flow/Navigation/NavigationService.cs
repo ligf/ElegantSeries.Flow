@@ -1081,6 +1081,15 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
     /// callback returns silently instead of throwing, like any repeated
     /// <see cref="Dispose"/> call — the disposed check runs first.
     /// </para>
+    /// <para>
+    /// Async-only pages: a page scope whose view model (or another scoped
+    /// service) implements only <see cref="IAsyncDisposable"/> cannot be
+    /// released synchronously — the dependency injection container throws
+    /// for such a scope, that failure is collected and rethrown aggregated
+    /// like any other scope failure, and the page's asynchronous disposal
+    /// never runs. Use <see cref="DisposeAsync"/> when pages may be
+    /// async-only.
+    /// </para>
     /// </remarks>
     public void Dispose()
     {
