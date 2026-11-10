@@ -229,12 +229,17 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     // snapshot. The settle handler uses the payload to refresh the
     // landed page's binding at announcement time when the landing is
     // attributable to exactly this one call (see RefreshBindingFromCall).
+    // FallbackRetention is the call's retention argument (forward calls
+    // only); the refresh's retention fallback chain mirrors
+    // BindAfterNavigation's, which reads the current retention back
+    // and falls back to the call's argument.
     private sealed record InFlightCall(
         Type TargetType,
         object? PassedParameter,
         string? ParameterType,
         string? ParameterSnapshot,
-        InFlightCallKind Kind);
+        InFlightCallKind Kind,
+        NavigationRetention FallbackRetention);
 
     // The caller must hold _stateLock: the sequence stamp, the
     // absorption token, and the guard state it interacts with are only
@@ -437,7 +442,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         where TViewModel : INavigationViewModel
     {
         var region = NormalizeRegion(regionName);
-        var inFlight = new InFlightCall(typeof(TViewModel), null, null, null, InFlightCallKind.Forward);
+        var inFlight = new InFlightCall(typeof(TViewModel), null, null, null, InFlightCallKind.Forward, retention);
         var announceSequenceAtStart = BeginInFlightCall(region, inFlight);
         try
         {
@@ -467,7 +472,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     {
         var region = NormalizeRegion(regionName);
         var (parameterType, parameterSnapshot) = FreezeParameter(parameter);
-        var inFlight = new InFlightCall(typeof(TViewModel), parameter, parameterType, parameterSnapshot, InFlightCallKind.Forward);
+        var inFlight = new InFlightCall(typeof(TViewModel), parameter, parameterType, parameterSnapshot, InFlightCallKind.Forward, retention);
         var announceSequenceAtStart = BeginInFlightCall(region, inFlight);
         try
         {
@@ -493,7 +498,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         where TViewModel : INavigationViewModel
     {
         var region = NormalizeRegion(regionName);
-        var inFlight = new InFlightCall(typeof(TViewModel), null, null, null, InFlightCallKind.Forward);
+        var inFlight = new InFlightCall(typeof(TViewModel), null, null, null, InFlightCallKind.Forward, retention);
         var announceSequenceAtStart = BeginInFlightCall(region, inFlight);
         try
         {
@@ -521,7 +526,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     {
         var region = NormalizeRegion(regionName);
         var (parameterType, parameterSnapshot) = FreezeParameter(parameter);
-        var inFlight = new InFlightCall(typeof(TViewModel), parameter, parameterType, parameterSnapshot, InFlightCallKind.Forward);
+        var inFlight = new InFlightCall(typeof(TViewModel), parameter, parameterType, parameterSnapshot, InFlightCallKind.Forward, retention);
         var announceSequenceAtStart = BeginInFlightCall(region, inFlight);
         try
         {
@@ -592,7 +597,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         var region = NormalizeRegion(regionName);
         var (parameterType, parameterSnapshot) = FreezeParameter(parameter);
         var announceSequenceAtStart = BeginInFlight(region);
-        var inFlight = new InFlightCall(typeof(TViewModel), parameter, parameterType, parameterSnapshot, InFlightCallKind.GoBackTo);
+        var inFlight = new InFlightCall(typeof(TViewModel), parameter, parameterType, parameterSnapshot, InFlightCallKind.GoBackTo, NavigationRetention.Destroy);
         RegisterInFlightBackCall(region, inFlight);
         try
         {
@@ -1108,19 +1113,34 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     private void RefreshBindingFromCall(string region, INavigationViewModel settled, InFlightCall call)
     {
         var effective = _inner.GetCurrentParameter(settled, region);
-        var applied = effective is null
-            ? call.PassedParameter is null
-            : call.PassedParameter is not null &&
-              (ReferenceEquals(effective, call.PassedParameter) || effective.Equals(call.PassedParameter));
+        bool applied;
+        try
+        {
+            // The parameter's Equals is user code: it must not abort
+            // this announcement's remaining processing (binding fill,
+            // entry synthesis, republication). A throwing Equals is
+            // reported once and counts as not applied — the post-call
+            // binding makes the same decision on the call flow, where
+            // its own Equals failure reaches the caller instead.
+            // (Mirrors how the wrapped service's classification guards
+            // the vote and Equals of user parameters.)
+            applied = effective is null
+                ? call.PassedParameter is null
+                : call.PassedParameter is not null &&
+                  (ReferenceEquals(effective, call.PassedParameter) || effective.Equals(call.PassedParameter));
+        }
+        catch (Exception ex)
+        {
+            RaiseErrorHandlers(SnapshotErrorHandlers(), ex);
+            return;
+        }
         if (!applied)
             return;
-        var hasExisting = TryGetBinding(settled, out var existing);
         var retention = call.Kind == InFlightCallKind.GoBackTo
-            ? hasExisting
+            ? TryGetBinding(settled, out var existing)
                 ? existing!.Retention
                 : _inner.GetCurrentRetention(region) ?? NavigationRetention.Destroy
-            : _inner.GetCurrentRetention(region) ??
-              (hasExisting ? existing!.Retention : NavigationRetention.Destroy);
+            : _inner.GetCurrentRetention(region) ?? call.FallbackRetention;
         SetBinding(settled, call.ParameterType, call.ParameterSnapshot, retention);
     }
 

@@ -151,6 +151,37 @@ public sealed class VoteDetailViewModel
     public bool IsNavigationTarget(object? parameter) => parameter is DetailParam;
 }
 
+/// <summary>A value-type parameter whose Equals throws: a record struct
+/// boxes on every hand-off, so the decorator's applied test never
+/// short-circuits on reference equality and always reaches Equals.
+/// The wrapped service's classification guards the vote and Equals
+/// (a throwing Equals counts as not recognized); the page below claims
+/// by vote, so the navigation lands and the decorator's own Equals
+/// call is the one under test.</summary>
+public record struct ExplodingParam(int Id)
+{
+    // The record-synthesized Equals(object?) routes to this overload
+    // after its type check, so every virtual Equals call throws.
+    public bool Equals(ExplodingParam other) =>
+        throw new InvalidOperationException("equals exploded (test double)");
+
+    public override int GetHashCode() => Id;
+}
+
+public sealed class ExplodingViewModel
+    : NavigationViewModelBase, INavigationAware<ExplodingParam>, INavigationTargetAware
+{
+    public ExplodingParam? Received { get; private set; }
+
+    public void OnNavigatedTo(ExplodingParam parameter) => Received = parameter;
+
+    public void OnNavigatedFrom()
+    {
+    }
+
+    public bool IsNavigationTarget(object? parameter) => parameter is ExplodingParam;
+}
+
 // ── Stores ──────────────────────────────────────────────────────────
 
 /// <summary>A store whose append always fails, for recording-isolation

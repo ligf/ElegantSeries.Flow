@@ -67,4 +67,64 @@ public class JournalSettleBindingRefreshTests
         Assert.True(await navigation.WaitAsync(TimeSpan.FromSeconds(10)));
         decorator.AfterInnerNavigationHook = null;
     }
+
+    [Fact]
+    public async Task SettleRefresh_ParameterEqualsThrows_AnnouncementStillCompletes()
+    {
+        var provider = JournalRecordingTests.BuildProvider(journal => journal.RegisterParameter<ExplodingParam>(
+            p => $"id={p.Id}",
+            text => new ExplodingParam(int.Parse(text["id=".Length..]))));
+        using var _p = provider;
+        var nav = provider.GetRequiredService<INavigationService>();
+        var journal = provider.GetRequiredService<INavigationJournal>();
+
+        var errors = new List<Exception>();
+        nav.SubscriberError += errors.Add;
+        var landed = 0;
+        nav.RegionNavigated += (region, vm) =>
+        {
+            if (vm is ExplodingViewModel)
+                landed++;
+        };
+
+        // The page lands (claimed by vote) even though its parameter's
+        // Equals throws: the wrapped classification guards it, and the
+        // decorator's settle refresh must guard its own Equals call
+        // the same way. Each call still throws from the post-call
+        // binding on the call flow — that is the pre-existing
+        // call-flow behavior; what must survive is the announcement's
+        // remaining processing.
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            nav.NavigateToAsync<ExplodingViewModel, ExplodingParam>(
+                new ExplodingParam(1), retention: NavigationRetention.KeepAlive));
+        Assert.True(await nav.NavigateToAsync<HomeViewModel>());
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            nav.NavigateToAsync<ExplodingViewModel, ExplodingParam>(new ExplodingParam(2)));
+
+        // Announcements may lag the calls' completions, so poll for
+        // both landings (and both error reports) before asserting.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (landed < 2 || errors.Count < 2)
+        {
+            if (DateTime.UtcNow > deadline)
+                break;
+            await Task.Delay(20);
+        }
+
+        // Both announcements completed: the republication reached the
+        // app handlers, and the throwing Equals was reported exactly
+        // once per landing instead of aborting the tap.
+        Assert.Equal(2, landed);
+        Assert.Equal(2, errors.Count);
+        Assert.All(errors, e => Assert.Equal("equals exploded (test double)", e.Message));
+
+        // The first landing's binding was still filled (by
+        // BindIfUnbound freezing the effective parameter): the guard
+        // skipped only the refresh, not the rest of the settle.
+        var snapshot = await journal.CaptureSnapshotAsync();
+        var region = Assert.Single(snapshot.Regions);
+        var page = Assert.Single(region.Pages);
+        Assert.Equal(typeof(ExplodingViewModel).AssemblyQualifiedName, page.ViewModelType);
+        Assert.Equal("id=1", page.Parameter);
+    }
 }
