@@ -271,7 +271,21 @@ public interface INavigationService
     /// the event is also raised for every region that still held stack, cache
     /// or pending entries at shutdown.
     /// </summary>
-    /// <remarks>Parameter: region name.</remarks>
+    /// <remarks>
+    /// Parameter: region name.
+    /// <para>
+    /// When raised by a cache-clearing call (<see cref="ClearCache(string)"/>,
+    /// <see cref="ClearAllCache"/>, or their asynchronous forms), the event
+    /// follows the <see cref="ViewModelReleased"/> events that the call
+    /// itself raises for the entries it removed: a region is announced
+    /// cleared only once the entries the call disposed have been released.
+    /// This order is the same for the single-region and all-region forms.
+    /// An entry whose release is deferred — its scope is still in use by
+    /// an in-flight lifecycle callback — raises its
+    /// <see cref="ViewModelReleased"/> when the deferred disposal
+    /// completes, which may be after this event.
+    /// </para>
+    /// </remarks>
     event Action<string>? RegionCacheCleared;
 
     /// <summary>

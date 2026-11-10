@@ -26,3 +26,7 @@ using System.Runtime.CompilerServices;
 // Core navigation tests verify internal lifecycle behavior (e.g. that cache
 // clearing does not cancel an active page's token).
 [assembly: InternalsVisibleTo("ElegantSeries.Flow.Tests")]
+
+// The Mvvm package tests pin BaseViewModel's implementation of the
+// internal-set attachment contract above.
+[assembly: InternalsVisibleTo("ElegantSeries.Flow.Mvvm.Tests")]

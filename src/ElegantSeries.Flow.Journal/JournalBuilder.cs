@@ -5,6 +5,14 @@ namespace ElegantSeries.Flow.Journal;
 /// <c>AddElegantSeriesFlowJournal</c>: parameter serializers, the journal
 /// store, and <see cref="JournalOptions"/>.
 /// </summary>
+/// <remarks>
+/// A builder is a registration-time object: it is consumed while
+/// <c>AddElegantSeriesFlowJournal</c> registers. Mutating a builder
+/// after registration — including calling <c>RegisterParameter</c> on a
+/// reference retained from the configure delegate — is not supported:
+/// the journal reads the registered serializers on navigating threads,
+/// and a post-registration change races those reads.
+/// </remarks>
 public sealed class JournalBuilder
 {
     internal JournalParameterSerializers Serializers { get; } = new();

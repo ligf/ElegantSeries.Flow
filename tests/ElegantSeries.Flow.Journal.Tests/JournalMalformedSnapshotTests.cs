@@ -74,6 +74,26 @@ public class JournalMalformedSnapshotTests
         }
     }
 
+    [Fact]
+    public async Task Restore_ZeroFormatVersion_ThrowsArgumentException()
+    {
+        var journal = BuildJournal(new InMemoryJournalStore());
+        var snapshot = new JournalSnapshot { FormatVersion = 0, Regions = [] };
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => journal.RestoreAsync(snapshot, _ => Task.FromResult(true)));
+    }
+
+    [Fact]
+    public async Task Restore_NegativeFormatVersion_ThrowsArgumentException()
+    {
+        var journal = BuildJournal(new InMemoryJournalStore());
+        var snapshot = new JournalSnapshot { FormatVersion = -1, Regions = [] };
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => journal.RestoreAsync(snapshot, _ => Task.FromResult(true)));
+    }
+
     private static NavigationJournal BuildJournal(INavigationJournalStore store) =>
         new(new JournalNavigationService(new FakeNavigationService(), store, new JournalBuilder()), store);
 

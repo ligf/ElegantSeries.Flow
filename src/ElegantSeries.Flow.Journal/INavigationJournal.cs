@@ -48,7 +48,8 @@ public interface INavigationJournal
     /// or <paramref name="navigatePage"/> is null.</exception>
     /// <exception cref="ArgumentException">The snapshot is structurally
     /// malformed: its regions list, a region, a region's pages list,
-    /// or a page is null.</exception>
+    /// or a page is null — or its <see cref="JournalSnapshot.FormatVersion"/>
+    /// is less than 1, a version no snapshot writer produces.</exception>
     /// <exception cref="NotSupportedException">The snapshot's
     /// <see cref="JournalSnapshot.FormatVersion"/> is higher than this
     /// build supports.</exception>
@@ -125,6 +126,11 @@ public sealed class NavigationJournal : INavigationJournal
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(navigatePage);
+        if (snapshot.FormatVersion < 1)
+            throw new ArgumentException(
+                $"The snapshot is malformed: format version {snapshot.FormatVersion} does not exist; " +
+                $"snapshots written by this library carry version {SupportedFormatVersion}.",
+                nameof(snapshot));
         if (snapshot.FormatVersion > SupportedFormatVersion)
             throw new NotSupportedException(
                 $"Journal snapshot format version {snapshot.FormatVersion} is not supported by this build " +
