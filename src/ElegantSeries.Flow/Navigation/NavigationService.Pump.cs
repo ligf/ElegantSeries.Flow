@@ -786,9 +786,13 @@ public sealed partial class NavigationService
     /// commit-time in-flight registration, delivers the hop's queued
     /// notifications and events (the entering step that would have raised
     /// them never runs, but the departed page's release really happened),
-    /// and completes the landed intent as discarded. Called only on the
-    /// owning pump's flow: when a successor pump has already taken
-    /// ownership of the window (its token is in
+    /// reports the hop's collected errors via
+    /// <see cref="SubscriberError"/> (the entering step would have settled
+    /// them into the intent's fate, but the fate here completes as
+    /// discarded, so the subscriber channel is their only remaining
+    /// delivery), and completes the landed intent as discarded. Called
+    /// only on the owning pump's flow: when a successor pump has already
+    /// taken ownership of the window (its token is in
     /// <see cref="RegionWindow.PumpOwner"/>), the entering state belongs to
     /// the successor — its own loop-top disposal check settles it — and this
     /// call leaves it untouched.
@@ -798,6 +802,7 @@ public sealed partial class NavigationService
         NavigationEntry? entry;
         Task? gate;
         NavigationIntent? intent;
+        List<Exception>? enteredErrors;
         TransitionWork? work;
         using (_stateLock.EnterScope())
         {
@@ -809,6 +814,7 @@ public sealed partial class NavigationService
             entry = window.EnteringEntry;
             gate = window.EnteringGate;
             intent = window.EnteredIntent;
+            enteredErrors = window.EnteredErrors;
             work = window.EnteredWork;
             window.EnteringEntry = null;
             window.EnteringGate = null;
@@ -832,6 +838,14 @@ public sealed partial class NavigationService
             }
 
             RaiseEvents(work.Events, ReportSubscriberError);
+        }
+
+        if (enteredErrors is not null)
+        {
+            foreach (var enteredError in enteredErrors)
+            {
+                ReportSubscriberError(enteredError);
+            }
         }
 
         if (intent is not null)

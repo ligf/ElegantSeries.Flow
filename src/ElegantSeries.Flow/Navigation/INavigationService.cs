@@ -287,6 +287,13 @@ public interface INavigationService
     /// those disposals run after the navigation has committed, so their
     /// failures are reported here — exactly once each — and never fault the
     /// navigation task, whose result reports the navigation's own outcome.
+    /// It also reports the errors a completed navigation hop collected
+    /// (such as a departing page's <c>OnNavigatedFrom</c> failure) when its
+    /// entering step never runs — the service is disposed after the hop
+    /// landed, or the navigation pump stops before the step could settle
+    /// those errors into the navigation task: the task completes
+    /// <see langword="false"/> instead of faulting, and the errors are
+    /// reported here, exactly once each.
     /// The exception is swallowed to protect navigation state; subscribe to
     /// this event for diagnostics.
     /// </summary>

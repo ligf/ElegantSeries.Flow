@@ -174,6 +174,23 @@ public class DisposalInterleavingTests
         }
     }
 
+    /// <summary>Page whose <c>OnNavigatedFromAsync</c> always faults
+    /// with a recognizable exception, so the hop that departs it stores
+    /// that exception in the hop's entered-errors list.</summary>
+    public sealed class FromThrowingPage : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public FromThrowingPage(PageScopeMarker marker)
+        {
+            _ = marker;
+        }
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken = default) =>
+            Task.FromException(new InvalidOperationException("FromThrowingPage.OnNavigatedFromAsync failed."));
+    }
+
     /// <summary>Gate through which a page scope's synchronous disposal
     /// can be parked: signals when the disposal has been entered and
     /// blocks it until the test releases it.</summary>
@@ -316,6 +333,7 @@ public class DisposalInterleavingTests
         services.AddTransient<SelfDisposePage>();
         services.AddTransient<EnteringSelfDisposePage>();
         services.AddTransient<ThrowingScopePage>();
+        services.AddTransient<FromThrowingPage>();
         services.AddTransient<BlockingDisposePage>();
         services.AddSingleton<ScopeTeardownProbe>();
         services.AddScoped<AsyncTeardownService>();
@@ -930,6 +948,50 @@ public class DisposalInterleavingTests
         Assert.Contains(pageA!, released);
         Assert.DoesNotContain(typeof(StressPageB), surfaced.Select(vm => vm.GetType()));
         await WaitForScopeBalanceAsync(ledger, "after disposal at entering-stored");
+    }
+
+    /// <summary>
+    /// The same entering-stored disposal staging, with the departing
+    /// page's OnNavigatedFromAsync faulting during the Replace hop: the
+    /// hop stores that exception as its entered errors, which the
+    /// entering step would have settled into the navigation's fate. The
+    /// abandon path completes the fate false instead, so the exception
+    /// must be reported through SubscriberError, exactly once, and the
+    /// queued release of the departed page is still delivered.
+    /// </summary>
+    [Fact]
+    public async Task DisposeAsync_AtEnteringStored_ReportsEnteredErrorsViaSubscriberError()
+    {
+        var provider = BuildProvider();
+        var ledger = provider.GetRequiredService<PageScopeLedger>();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var subscriberErrors = new List<Exception>();
+        var released = new List<INavigationViewModel>();
+        nav.SubscriberError += ex => { lock (subscriberErrors) subscriberErrors.Add(ex); };
+        nav.ViewModelReleased += (_, vm) => { lock (released) released.Add(vm); };
+
+        Assert.True(await nav.NavigateToAsync<FromThrowingPage>());
+        var pageA = nav.GetCurrentViewModel();
+        Assert.NotNull(pageA);
+
+        Task? disposal = null;
+        var service = (NavigationService)nav;
+        service.EnteringStoredHook = () =>
+        {
+            service.EnteringStoredHook = null;
+            disposal = ((IAsyncDisposable)nav).DisposeAsync().AsTask();
+        };
+
+        Assert.False(await nav.NavigateToAsync<StressPageB>(operation: NavigationOperation.Replace));
+        Assert.NotNull(disposal);
+        await disposal!.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var reported = Assert.Single(subscriberErrors);
+        var fromError = Assert.IsType<InvalidOperationException>(reported);
+        Assert.Equal("FromThrowingPage.OnNavigatedFromAsync failed.", fromError.Message);
+        Assert.Contains(pageA!, released);
+        await WaitForScopeBalanceAsync(ledger, "after entered-errors report at entering-stored");
     }
 
     // ── I5: scope-teardown reentrancy (audit P1-2) ────────────
