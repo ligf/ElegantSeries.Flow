@@ -28,7 +28,8 @@ public static class ServiceCollectionExtensions
     /// registration is rejected the same way (a decorator over a
     /// per-resolution service would journal an instance nobody navigates
     /// with). Calling this method twice keeps the first registration:
-    /// the service is never wrapped twice.
+    /// the service is never wrapped twice, and the redundant call's
+    /// <paramref name="configure"/> delegate is not invoked.
     /// </para>
     /// <para>
     /// The store defaults to a singleton <see cref="InMemoryJournalStore"/>
@@ -51,17 +52,20 @@ public static class ServiceCollectionExtensions
         Action<JournalBuilder>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(services);
-        var builder = new JournalBuilder();
-        configure?.Invoke(builder);
 
         // Double registration keeps the first wrap (never wrap twice) —
-        // checked before argument validation, so a redundant second call
-        // is a no-op even when its own options would be invalid.
+        // checked before configuration and argument validation, so a
+        // redundant second call is a pure no-op: it does not even run
+        // the caller's configure delegate into a builder that would be
+        // discarded, and it does not throw for its own invalid options.
         foreach (var descriptor in services)
         {
             if (descriptor.ServiceType == typeof(JournalNavigationService) && !descriptor.IsKeyedService)
                 return services;
         }
+
+        var builder = new JournalBuilder();
+        configure?.Invoke(builder);
 
         if (builder.Options.MaxHistoryEntries <= 0)
             throw new ArgumentOutOfRangeException(

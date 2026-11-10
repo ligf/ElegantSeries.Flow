@@ -853,6 +853,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         List<ScopeDisposalTarget> targets;
         var ctsToCancel = new List<CancellationTokenSource>();
         List<NavigationEntry> unreferencedEntries = [];
+        List<string> affectedRegions = [];
         try
         {
             if (_disposed)
@@ -860,16 +861,11 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 return;
             }
 
-            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries, out unreferencedEntries);
+            targets = TakeAllCacheEntriesLocked(out affectedRegions, out var removedEntries, out unreferencedEntries);
             // Signal in-flight callbacks to stop (sync path cannot wait).
             // Cancelled after lock release (see below).
             // Only unreferenced entries: must not cancel an active page's token.
             CancelAndCollectGates(unreferencedEntries, ctsToCancel);
-            foreach (var region in affectedRegions)
-            {
-                var capturedRegion = region;
-                pendingEvents.Add(() => RaiseRegionCacheCleared(capturedRegion));
-            }
         }
         finally
         {
@@ -884,6 +880,14 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
 
         DisposeScopesSync(targets, pendingEvents, errors);
         DisposeLifecycleSources(unreferencedEntries);
+        // Queued after disposal, so RegionCacheCleared follows the
+        // ViewModelReleased events of the entries this call removed —
+        // the same order ClearCache produces.
+        foreach (var region in affectedRegions)
+        {
+            var capturedRegion = region;
+            pendingEvents.Add(() => RaiseRegionCacheCleared(capturedRegion));
+        }
 
         RaiseEvents(pendingEvents, ReportSubscriberError);
         ThrowCollectedErrors(errors);
@@ -993,6 +997,7 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         List<Task> gates;
         var ctsToCancel = new List<CancellationTokenSource>();
         List<NavigationEntry> unreferencedEntries = [];
+        List<string> affectedRegions = [];
         try
         {
             if (_disposed)
@@ -1000,14 +1005,9 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
                 return;
             }
 
-            targets = TakeAllCacheEntriesLocked(out var affectedRegions, out var removedEntries, out unreferencedEntries);
+            targets = TakeAllCacheEntriesLocked(out affectedRegions, out var removedEntries, out unreferencedEntries);
             // Only unreferenced entries: must not cancel an active page's token.
             gates = CancelAndCollectGates(unreferencedEntries, ctsToCancel);
-            foreach (var region in affectedRegions)
-            {
-                var capturedRegion = region;
-                pendingEvents.Add(() => RaiseRegionCacheCleared(capturedRegion));
-            }
         }
         finally
         {
@@ -1040,6 +1040,14 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
 
         await DisposeScopesAsync(targets, pendingEvents, errors).ConfigureAwait(false);
         DisposeLifecycleSources(unreferencedEntries);
+        // Queued after disposal, so RegionCacheCleared follows the
+        // ViewModelReleased events of the entries this call removed —
+        // the same order ClearCacheAsync produces.
+        foreach (var region in affectedRegions)
+        {
+            var capturedRegion = region;
+            pendingEvents.Add(() => RaiseRegionCacheCleared(capturedRegion));
+        }
 
         RaiseEvents(pendingEvents, ReportSubscriberError);
         ThrowCollectedErrors(errors);

@@ -52,6 +52,20 @@ public class JournalDiTests
     }
 
     [Fact]
+    public void DoubleRegistration_SecondCall_DoesNotInvokeConfigure()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddElegantSeriesFlowJournal();
+        // The keep-first check runs before configuration: a redundant
+        // second call must not execute the caller's configure delegate
+        // into a builder that is then discarded.
+        var invoked = false;
+        services.AddElegantSeriesFlowJournal(_ => invoked = true);
+        Assert.False(invoked);
+    }
+
+    [Fact]
     public async Task DoubleRegistration_WrapsOnce()
     {
         var services = new ServiceCollection();
