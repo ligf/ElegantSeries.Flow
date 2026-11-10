@@ -60,6 +60,15 @@ public interface INavigationJournal
 
     /// <summary>Removes all history entries and the saved snapshot from
     /// the store.</summary>
+    /// <remarks>
+    /// The clear is linearized against recording: every entry whose
+    /// recording was decided before this call — including entries still
+    /// queued for, or in the middle of, their background append — is
+    /// appended and removed as part of this operation, and none of them
+    /// is present, or appears, after the call returns. Entries recorded
+    /// by navigations whose recording is decided after the clear's
+    /// linearization point inside the operation are unaffected.
+    /// </remarks>
     Task ClearAsync(CancellationToken cancellationToken = default);
 }
 
@@ -165,8 +174,21 @@ public sealed class NavigationJournal : INavigationJournal
     }
 
     /// <inheritdoc/>
-    public async Task ClearAsync(CancellationToken cancellationToken = default) =>
-        await _store.ClearAsync(cancellationToken).ConfigureAwait(false);
+    public async Task ClearAsync(CancellationToken cancellationToken = default)
+    {
+        // Serialized with CaptureSnapshotAsync: an in-flight capture
+        // saves its snapshot before the wipe, or starts after it — a
+        // saved snapshot must not land after the clear either.
+        await _captureGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _navigation.ClearHistoryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _captureGate.Release();
+        }
+    }
 
     private static async Task<JournalRegionRestoreResult> RestoreRegionAsync(
         JournalRegionSnapshot region,

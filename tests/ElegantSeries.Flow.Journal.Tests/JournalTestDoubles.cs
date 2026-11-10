@@ -400,6 +400,22 @@ public sealed class FakeNavigationService : INavigationService, IDisposable, IAs
     public int DisposeAsyncCount { get; private set; }
     public List<string> Calls { get; } = [];
 
+    /// <summary>When nonzero, the Nth Subscribe* call (counted across
+    /// all four Subscribe* methods) throws instead of subscribing.</summary>
+    public int ThrowOnSubscribeCall { get; set; }
+
+    /// <summary>When set, subscription tokens throw from Dispose
+    /// instead of unsubscribing.</summary>
+    public bool ThrowOnTokenDispose { get; set; }
+
+    private int _subscribeCalls;
+
+    /// <summary>Handlers currently held through the Subscribe*
+    /// methods and the event accessors combined.</summary>
+    public int LiveSubscriptionCount =>
+        _navigatedHandlers.Count + _releasedHandlers.Count +
+        _cacheClearedHandlers.Count + _errorHandlers.Count;
+
     public void RaiseRegionNavigated(string region, INavigationViewModel viewModel)
     {
         foreach (var handler in _navigatedHandlers.ToList())
@@ -410,6 +426,12 @@ public sealed class FakeNavigationService : INavigationService, IDisposable, IAs
     {
         foreach (var handler in _releasedHandlers.ToList())
             handler(region, viewModel);
+    }
+
+    public void RaiseRegionCacheCleared(string region)
+    {
+        foreach (var handler in _cacheClearedHandlers.ToList())
+            handler(region);
     }
 
     public event Action<string, INavigationViewModel>? RegionNavigated
@@ -438,27 +460,44 @@ public sealed class FakeNavigationService : INavigationService, IDisposable, IAs
 
     public IDisposable SubscribeRegionNavigated(Action<string, INavigationViewModel> handler)
     {
+        ThrowIfSubscribeArmed();
         _navigatedHandlers.Add(handler);
-        return new Token(() => _navigatedHandlers.Remove(handler));
+        return NewToken(() => _navigatedHandlers.Remove(handler));
     }
 
     public IDisposable SubscribeViewModelReleased(Action<string, INavigationViewModel> handler)
     {
+        ThrowIfSubscribeArmed();
         _releasedHandlers.Add(handler);
-        return new Token(() => _releasedHandlers.Remove(handler));
+        return NewToken(() => _releasedHandlers.Remove(handler));
     }
 
     public IDisposable SubscribeRegionCacheCleared(Action<string> handler)
     {
+        ThrowIfSubscribeArmed();
         _cacheClearedHandlers.Add(handler);
-        return new Token(() => _cacheClearedHandlers.Remove(handler));
+        return NewToken(() => _cacheClearedHandlers.Remove(handler));
     }
 
     public IDisposable SubscribeSubscriberError(Action<Exception> handler)
     {
+        ThrowIfSubscribeArmed();
         _errorHandlers.Add(handler);
-        return new Token(() => _errorHandlers.Remove(handler));
+        return NewToken(() => _errorHandlers.Remove(handler));
     }
+
+    private void ThrowIfSubscribeArmed()
+    {
+        if (++_subscribeCalls == ThrowOnSubscribeCall)
+            throw new InvalidOperationException("subscribe failed (test double)");
+    }
+
+    private Token NewToken(Action unsubscribe) => new(() =>
+    {
+        if (ThrowOnTokenDispose)
+            throw new InvalidOperationException("token dispose failed (test double)");
+        unsubscribe();
+    });
 
     /// <summary>The value <see cref="IsInLifecycleCallback"/> reports;
     /// settable so decorator tests can simulate a caller inside one of

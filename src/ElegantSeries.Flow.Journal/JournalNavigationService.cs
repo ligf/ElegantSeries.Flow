@@ -164,6 +164,13 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     // tests can stage a synchronous Dispose winning the claim race.
     internal Action? DisposePrologueHook;
 
+    // Test seam (null in production): awaited by the forward calls
+    // after the wrapped call succeeds and before the post-call binding
+    // runs, so tests can hold a call's continuation open across the
+    // landing's settle announcement. Reachable only through the
+    // InternalsVisibleTo grant to the test project.
+    internal Func<Task>? AfterInnerNavigationHook;
+
     // Set for the duration of AppendSequencedAsync — the decorator's
     // own recording execution, which runs user code (the store append
     // and the subscriber-error raise) on the queue consumer or on a
@@ -183,7 +190,10 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     // to decide whether an announcement can be attributed to a call at
     // all; when it provably cannot, the landing bypassed the decorator
     // and is recorded from the announcement.
-    //  - in-flight calls per region (forward target types / back count);
+    //  - in-flight calls per region (forward calls with their binding
+    //    payloads / back count; parameterized GoBackTo calls register
+    //    their payloads separately, their attribution running through
+    //    the back count);
     //  - deferred landings: target types of successful calls whose page
     //    had not landed yet when the call completed (registered from a
     //    lifecycle callback), one marker per expected landing;
@@ -194,7 +204,8 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     //    not been processed yet — the next announcement for the
     //    instance discharges it, whichever guard then attributes that
     //    announcement. All reads and writes run under _stateLock.
-    private readonly Dictionary<string, List<Type>> _inFlightTargets = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<InFlightCall>> _inFlightTargets = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<InFlightCall>> _inFlightBackCalls = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _inFlightBacks = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<Type>> _deferredLandings = new(StringComparer.Ordinal);
     private readonly ConditionalWeakTable<INavigationViewModel, SettleState> _settleStates = new();
@@ -206,6 +217,24 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         public long LastAnnouncedSequence;
         public bool AbsorptionPending;
     }
+
+    private enum InFlightCallKind
+    {
+        Forward,
+        GoBackTo,
+    }
+
+    // A call in flight, with the binding payload its post-call binding
+    // will apply: the passed parameter object and its call-time frozen
+    // snapshot. The settle handler uses the payload to refresh the
+    // landed page's binding at announcement time when the landing is
+    // attributable to exactly this one call (see RefreshBindingFromCall).
+    private sealed record InFlightCall(
+        Type TargetType,
+        object? PassedParameter,
+        string? ParameterType,
+        string? ParameterSnapshot,
+        InFlightCallKind Kind);
 
     // The caller must hold _stateLock: the sequence stamp, the
     // absorption token, and the guard state it interacts with are only
@@ -260,24 +289,42 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         // before republished user handlers run, so a handler that
         // re-enters the decorator (e.g. awaits ClearCacheAsync) flushes
         // a queue that already contains the triggering entry.
-        _taps =
-        [
-            _inner.SubscribeViewModelReleased((region, vm) =>
-                Enqueue(new PendingEntry(region, JournalEntryKind.Released, vm.GetType().AssemblyQualifiedName, null, null))),
-            _inner.SubscribeRegionCacheCleared(region =>
-                Enqueue(new PendingEntry(region, JournalEntryKind.CacheCleared, null, null, null))),
-            _inner.SubscribeRegionNavigated((region, vm) =>
+        //
+        // If a Subscribe call throws (a wrapped implementation is not
+        // required to be infallible), construction fails with nothing
+        // left behind: the taps acquired so far are released, pending
+        // appends are abandoned and the queue is completed so the
+        // consumer drains and exits — a half-built decorator must not
+        // keep recording into the store alongside a later, successfully
+        // constructed one.
+        var taps = new List<IDisposable>(6);
+        try
+        {
+            taps.Add(_inner.SubscribeViewModelReleased((region, vm) =>
+                Enqueue(new PendingEntry(region, JournalEntryKind.Released, vm.GetType().AssemblyQualifiedName, null, null))));
+            taps.Add(_inner.SubscribeRegionCacheCleared(region =>
+                Enqueue(new PendingEntry(region, JournalEntryKind.CacheCleared, null, null, null))));
+            taps.Add(_inner.SubscribeRegionNavigated((region, vm) =>
             {
                 OnPageSettled(region, vm);
                 RaiseHandlers(Snapshot(ref _regionNavigatedHandlers), region, vm);
-            }),
-            _inner.SubscribeViewModelReleased((region, vm) =>
-                RaiseHandlers(Snapshot(ref _viewModelReleasedHandlers), region, vm)),
-            _inner.SubscribeRegionCacheCleared(region =>
-                RaiseHandlers(Snapshot(ref _regionCacheClearedHandlers), region)),
-            _inner.SubscribeSubscriberError(error =>
-                RaiseErrorHandlers(SnapshotErrorHandlers(), error)),
-        ];
+            }));
+            taps.Add(_inner.SubscribeViewModelReleased((region, vm) =>
+                RaiseHandlers(Snapshot(ref _viewModelReleasedHandlers), region, vm)));
+            taps.Add(_inner.SubscribeRegionCacheCleared(region =>
+                RaiseHandlers(Snapshot(ref _regionCacheClearedHandlers), region)));
+            taps.Add(_inner.SubscribeSubscriberError(error =>
+                RaiseErrorHandlers(SnapshotErrorHandlers(), error)));
+        }
+        catch
+        {
+            foreach (var tap in taps)
+                DisposeQuietly(tap);
+            AbandonAppends();
+            _queue.Writer.TryComplete();
+            throw;
+        }
+        _taps = [.. taps];
     }
 
     // ──────────────────────────── Events ────────────────────────────
@@ -390,18 +437,21 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         where TViewModel : INavigationViewModel
     {
         var region = NormalizeRegion(regionName);
-        var announceSequenceAtStart = BeginInFlight(region, typeof(TViewModel));
+        var inFlight = new InFlightCall(typeof(TViewModel), null, null, null, InFlightCallKind.Forward);
+        var announceSequenceAtStart = BeginInFlightCall(region, inFlight);
         try
         {
             if (!await _inner.NavigateToAsync<TViewModel>(regionName, operation, retention, refreshIfActive, cancellationToken).ConfigureAwait(false))
                 return false;
+            if (AfterInnerNavigationHook is { } hook)
+                await hook().ConfigureAwait(false);
             BindAfterNavigation(region, typeof(TViewModel), passedParameter: null, null, null, retention, announceSequenceAtStart);
             await AppendNowAsync(new PendingEntry(region, JournalEntryKind.Navigated, typeof(TViewModel).AssemblyQualifiedName, null, null)).ConfigureAwait(false);
             return true;
         }
         finally
         {
-            EndInFlight(region, typeof(TViewModel));
+            EndInFlightCall(region, inFlight);
         }
     }
 
@@ -417,18 +467,21 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     {
         var region = NormalizeRegion(regionName);
         var (parameterType, parameterSnapshot) = FreezeParameter(parameter);
-        var announceSequenceAtStart = BeginInFlight(region, typeof(TViewModel));
+        var inFlight = new InFlightCall(typeof(TViewModel), parameter, parameterType, parameterSnapshot, InFlightCallKind.Forward);
+        var announceSequenceAtStart = BeginInFlightCall(region, inFlight);
         try
         {
             if (!await _inner.NavigateToAsync<TViewModel, TParam>(parameter, regionName, operation, retention, refreshIfActive, cancellationToken).ConfigureAwait(false))
                 return false;
+            if (AfterInnerNavigationHook is { } hook)
+                await hook().ConfigureAwait(false);
             BindAfterNavigation(region, typeof(TViewModel), parameter, parameterType, parameterSnapshot, retention, announceSequenceAtStart);
             await AppendNowAsync(new PendingEntry(region, JournalEntryKind.Navigated, typeof(TViewModel).AssemblyQualifiedName, parameterType, parameterSnapshot)).ConfigureAwait(false);
             return true;
         }
         finally
         {
-            EndInFlight(region, typeof(TViewModel));
+            EndInFlightCall(region, inFlight);
         }
     }
 
@@ -440,18 +493,21 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         where TViewModel : INavigationViewModel
     {
         var region = NormalizeRegion(regionName);
-        var announceSequenceAtStart = BeginInFlight(region, typeof(TViewModel));
+        var inFlight = new InFlightCall(typeof(TViewModel), null, null, null, InFlightCallKind.Forward);
+        var announceSequenceAtStart = BeginInFlightCall(region, inFlight);
         try
         {
             if (!await _inner.SetRootAsync<TViewModel>(regionName, retention, cancellationToken).ConfigureAwait(false))
                 return false;
+            if (AfterInnerNavigationHook is { } hook)
+                await hook().ConfigureAwait(false);
             BindAfterNavigation(region, typeof(TViewModel), passedParameter: null, null, null, retention, announceSequenceAtStart);
             await AppendNowAsync(new PendingEntry(region, JournalEntryKind.Navigated, typeof(TViewModel).AssemblyQualifiedName, null, null)).ConfigureAwait(false);
             return true;
         }
         finally
         {
-            EndInFlight(region, typeof(TViewModel));
+            EndInFlightCall(region, inFlight);
         }
     }
 
@@ -465,18 +521,21 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     {
         var region = NormalizeRegion(regionName);
         var (parameterType, parameterSnapshot) = FreezeParameter(parameter);
-        var announceSequenceAtStart = BeginInFlight(region, typeof(TViewModel));
+        var inFlight = new InFlightCall(typeof(TViewModel), parameter, parameterType, parameterSnapshot, InFlightCallKind.Forward);
+        var announceSequenceAtStart = BeginInFlightCall(region, inFlight);
         try
         {
             if (!await _inner.SetRootAsync<TViewModel, TParam>(parameter, regionName, retention, cancellationToken).ConfigureAwait(false))
                 return false;
+            if (AfterInnerNavigationHook is { } hook)
+                await hook().ConfigureAwait(false);
             BindAfterNavigation(region, typeof(TViewModel), parameter, parameterType, parameterSnapshot, retention, announceSequenceAtStart);
             await AppendNowAsync(new PendingEntry(region, JournalEntryKind.Navigated, typeof(TViewModel).AssemblyQualifiedName, parameterType, parameterSnapshot)).ConfigureAwait(false);
             return true;
         }
         finally
         {
-            EndInFlight(region, typeof(TViewModel));
+            EndInFlightCall(region, inFlight);
         }
     }
 
@@ -488,7 +547,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         CancellationToken cancellationToken = default)
     {
         var region = NormalizeRegion(regionName);
-        var announceSequenceAtStart = BeginInFlight(region, forwardTarget: null);
+        var announceSequenceAtStart = BeginInFlight(region);
         try
         {
             if (!await _inner.GoBackAsync(regionName, cancellationToken).ConfigureAwait(false))
@@ -498,7 +557,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         }
         finally
         {
-            EndInFlight(region, forwardTarget: null);
+            EndInFlight(region);
         }
     }
 
@@ -509,7 +568,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         where TViewModel : INavigationViewModel
     {
         var region = NormalizeRegion(regionName);
-        var announceSequenceAtStart = BeginInFlight(region, forwardTarget: null);
+        var announceSequenceAtStart = BeginInFlight(region);
         try
         {
             if (!await _inner.GoBackToAsync<TViewModel>(regionName, cancellationToken).ConfigureAwait(false))
@@ -519,7 +578,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         }
         finally
         {
-            EndInFlight(region, forwardTarget: null);
+            EndInFlight(region);
         }
     }
 
@@ -532,7 +591,9 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     {
         var region = NormalizeRegion(regionName);
         var (parameterType, parameterSnapshot) = FreezeParameter(parameter);
-        var announceSequenceAtStart = BeginInFlight(region, forwardTarget: null);
+        var announceSequenceAtStart = BeginInFlight(region);
+        var inFlight = new InFlightCall(typeof(TViewModel), parameter, parameterType, parameterSnapshot, InFlightCallKind.GoBackTo);
+        RegisterInFlightBackCall(region, inFlight);
         try
         {
             if (!await _inner.GoBackToAsync<TViewModel, TParam>(parameter, regionName, cancellationToken).ConfigureAwait(false))
@@ -543,7 +604,8 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         }
         finally
         {
-            EndInFlight(region, forwardTarget: null);
+            UnregisterInFlightBackCall(region, inFlight);
+            EndInFlight(region);
         }
     }
 
@@ -847,7 +909,12 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
                     // decorator's bindings after the read: a page
                     // reactivated in between is attributed its newest
                     // recorded activation — the rule GetCurrentParameter
-                    // documents for the wrapped service.
+                    // documents for the wrapped service. A landing
+                    // attributed to an in-flight call refreshes its
+                    // binding when its announcement is processed, so
+                    // the lag that remains is a capture that lands
+                    // between the wrapped service's stack commit and
+                    // that announcement.
                     TryGetBinding(viewModel, out var binding);
                     pages.Add(new JournalPageSnapshot
                     {
@@ -923,7 +990,11 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     // any) produced the landing, an unbound settled page would
     // otherwise surface in snapshots with no parameter and Destroy
     // retention. The binding derives from the page's effective state
-    // and never overwrites a call-side binding. An entry, by contrast,
+    // and never overwrites a call-side binding. One exception in
+    // timing, not in source: when the landing is attributable to
+    // exactly one in-flight call, that call's own payload refreshes
+    // the binding here (RefreshBindingFromCall) instead of waiting
+    // for the call's continuation. An entry, by contrast,
     // is synthesized only when the landing provably came from no call:
     // no call is in flight for the page's type or as a go-back in the
     // region, no deferred landing was waiting for the page's type, and
@@ -937,11 +1008,44 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         bool attributedToCall;
         var deferredLanding = false;
         bool absorbed;
+        InFlightCall? refreshCandidate;
         lock (_stateLock)
         {
+            var settledType = settled.GetType();
             attributedToCall = _inFlightBacks.GetValueOrDefault(region) > 0 ||
                 (_inFlightTargets.TryGetValue(region, out var targets) &&
-                 targets.Any(target => target.IsAssignableFrom(settled.GetType())));
+                 targets.Any(call => call.TargetType.IsAssignableFrom(settledType)));
+
+            // The binding-refresh candidate: the one in-flight call
+            // whose payload could belong to this landing. Two or more
+            // matching calls make the landing's owner ambiguous — no
+            // refresh then; the post-call bindings decide, as before.
+            refreshCandidate = null;
+            var refreshMatches = 0;
+            if (_inFlightTargets.TryGetValue(region, out var forwardCalls))
+            {
+                foreach (var call in forwardCalls)
+                {
+                    if (call.TargetType.IsAssignableFrom(settledType))
+                    {
+                        refreshMatches++;
+                        refreshCandidate = call;
+                    }
+                }
+            }
+            if (_inFlightBackCalls.TryGetValue(region, out var backCalls))
+            {
+                foreach (var call in backCalls)
+                {
+                    if (call.TargetType.IsAssignableFrom(settledType))
+                    {
+                        refreshMatches++;
+                        refreshCandidate = call;
+                    }
+                }
+            }
+            if (refreshMatches != 1)
+                refreshCandidate = null;
             if (!attributedToCall && _deferredLandings.TryGetValue(region, out var deferred))
             {
                 var index = deferred.FindIndex(target => target.IsAssignableFrom(settled.GetType()));
@@ -966,6 +1070,9 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
             state.AbsorptionPending = false;
         }
 
+        if (refreshCandidate is not null)
+            RefreshBindingFromCall(region, settled, refreshCandidate);
+
         // The freeze that fills the binding reports a failing
         // serializer only when the landing came from no call: a call's
         // own freeze (at call time) is the one that reports, exactly
@@ -983,6 +1090,38 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         Enqueue(new PendingEntry(
             region, JournalEntryKind.Navigated, settled.GetType().AssemblyQualifiedName,
             parameterType, parameterSnapshot));
+    }
+
+    // Applies an in-flight call's binding payload to its landed page
+    // at announcement time, with the same decision the call's own
+    // post-call binding (BindAfterNavigation /
+    // UpdateCurrentPageParameter) will apply when its continuation
+    // runs: the call-time frozen snapshot binds only when the page's
+    // effective parameter is the object the call passed. Without this,
+    // a snapshot captured between the announcement and the call's
+    // continuation would pair the new stack with the page's previous
+    // binding. The continuation's later application is an idempotent
+    // wholesale replacement with the same values. A landing whose
+    // parameter the call did not supply (a self-target no-op, an
+    // unclaimed go-back) leaves the binding untouched here, exactly
+    // as the post-call paths leave it.
+    private void RefreshBindingFromCall(string region, INavigationViewModel settled, InFlightCall call)
+    {
+        var effective = _inner.GetCurrentParameter(settled, region);
+        var applied = effective is null
+            ? call.PassedParameter is null
+            : call.PassedParameter is not null &&
+              (ReferenceEquals(effective, call.PassedParameter) || effective.Equals(call.PassedParameter));
+        if (!applied)
+            return;
+        var hasExisting = TryGetBinding(settled, out var existing);
+        var retention = call.Kind == InFlightCallKind.GoBackTo
+            ? hasExisting
+                ? existing!.Retention
+                : _inner.GetCurrentRetention(region) ?? NavigationRetention.Destroy
+            : _inner.GetCurrentRetention(region) ??
+              (hasExisting ? existing!.Retention : NavigationRetention.Destroy);
+        SetBinding(settled, call.ParameterType, call.ParameterSnapshot, retention);
     }
 
     // Fills in a snapshot binding for a settled page that has none, from
@@ -1132,49 +1271,91 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
             return _bindings.TryGetValue(viewModel, out binding);
     }
 
-    // Registers the call as in flight and returns the current
+    // Registers a back call as in flight and returns the current
     // announcement sequence: the recording continuation compares the
     // landed instance's announcement stamp against it to tell whether
     // the landing's announcement was already processed while this call
     // was in flight.
-    private long BeginInFlight(string region, Type? forwardTarget)
+    private long BeginInFlight(string region)
     {
         lock (_stateLock)
         {
-            if (forwardTarget is not null)
-            {
-                if (!_inFlightTargets.TryGetValue(region, out var list))
-                    _inFlightTargets[region] = list = [];
-                list.Add(forwardTarget);
-            }
-            else
-            {
-                _inFlightBacks[region] = _inFlightBacks.GetValueOrDefault(region) + 1;
-            }
-
+            _inFlightBacks[region] = _inFlightBacks.GetValueOrDefault(region) + 1;
             return _announceSequence;
         }
     }
 
-    private void EndInFlight(string region, Type? forwardTarget)
+    private void EndInFlight(string region)
     {
         lock (_stateLock)
         {
-            if (forwardTarget is not null)
-            {
-                if (!_inFlightTargets.TryGetValue(region, out var list))
-                    return;
-                list.Remove(forwardTarget);
-                if (list.Count == 0)
-                    _inFlightTargets.Remove(region);
-            }
+            var count = _inFlightBacks.GetValueOrDefault(region);
+            if (count <= 1)
+                _inFlightBacks.Remove(region);
             else
+                _inFlightBacks[region] = count - 1;
+        }
+    }
+
+    // Registers a forward call as in flight, with the binding payload
+    // its post-call binding will apply, and returns the current
+    // announcement sequence (the same stamp BeginInFlight returns).
+    private long BeginInFlightCall(string region, InFlightCall call)
+    {
+        lock (_stateLock)
+        {
+            if (!_inFlightTargets.TryGetValue(region, out var list))
+                _inFlightTargets[region] = list = [];
+            list.Add(call);
+            return _announceSequence;
+        }
+    }
+
+    private void EndInFlightCall(string region, InFlightCall call)
+    {
+        lock (_stateLock)
+        {
+            if (!_inFlightTargets.TryGetValue(region, out var list))
+                return;
+            RemoveByReference(list, call);
+            if (list.Count == 0)
+                _inFlightTargets.Remove(region);
+        }
+    }
+
+    // A parameterized GoBackTo call's attribution runs through the
+    // back count (BeginInFlight); its binding payload is registered
+    // separately so the settle handler can find it.
+    private void RegisterInFlightBackCall(string region, InFlightCall call)
+    {
+        lock (_stateLock)
+        {
+            if (!_inFlightBackCalls.TryGetValue(region, out var list))
+                _inFlightBackCalls[region] = list = [];
+            list.Add(call);
+        }
+    }
+
+    private void UnregisterInFlightBackCall(string region, InFlightCall call)
+    {
+        lock (_stateLock)
+        {
+            if (!_inFlightBackCalls.TryGetValue(region, out var list))
+                return;
+            RemoveByReference(list, call);
+            if (list.Count == 0)
+                _inFlightBackCalls.Remove(region);
+        }
+    }
+
+    private static void RemoveByReference(List<InFlightCall> list, InFlightCall call)
+    {
+        for (var i = 0; i < list.Count; i++)
+        {
+            if (ReferenceEquals(list[i], call))
             {
-                var count = _inFlightBacks.GetValueOrDefault(region);
-                if (count <= 1)
-                    _inFlightBacks.Remove(region);
-                else
-                    _inFlightBacks[region] = count - 1;
+                list.RemoveAt(i);
+                return;
             }
         }
     }
@@ -1350,13 +1531,62 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         }
     }
 
-    private async Task FlushQueueAsync()
+    private async Task FlushQueueAsync(CancellationToken cancellationToken = default)
     {
         if (Volatile.Read(ref _disposed) != 0)
             return;
         var flushed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (_queue.Writer.TryWrite(new FlushItem(flushed)))
-            await flushed.Task.ConfigureAwait(false);
+            await flushed.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // The journal facade's clear, with its linearization against
+    // recording (see INavigationJournal.ClearAsync): entries recorded
+    // before the call are appended and then wiped by the operation;
+    // entries recorded after the wipe inside step 3 survive.
+    internal async Task ClearHistoryAsync(CancellationToken cancellationToken)
+    {
+        // (1) Drain the queue: the flush item is processed after every
+        // entry enqueued before this call, so when it completes, no
+        // pre-clear queued entry is still waiting to be appended. The
+        // append gate is NOT held here — the consumer takes it for
+        // every append, so holding it would deadlock the flush.
+        await FlushQueueAsync(cancellationToken).ConfigureAwait(false);
+
+        // (2) Wait for the appends of every sequence assigned before
+        // this call: a direct append whose turn has not come yet is
+        // still a pre-clear recording and must land (and be wiped)
+        // rather than append after the wipe. The gate stays free so
+        // the appends can proceed; disposal abandonment ends the wait
+        // (abandoned appends are dropped, never appended).
+        long boundary;
+        lock (_sequenceLock)
+            boundary = _lastAssignedSequence;
+        while (true)
+        {
+            Task wait;
+            lock (_sequenceLock)
+            {
+                if (_appendAbandoned || _lastAppendedSequence >= boundary)
+                    break;
+                wait = _appendPulse.Task;
+            }
+            await wait.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        // (3) The wipe itself is the linearization point, serialized
+        // against appends by the append gate: an append in flight
+        // finishes first (and is wiped); an append that starts after
+        // the wipe is a post-clear recording and survives.
+        await _appendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _store.ClearAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _appendGate.Release();
+        }
     }
 
     private async Task ConsumeQueueAsync()
@@ -1377,8 +1607,26 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
 
     private void UnsubscribeTaps()
     {
+        // Each token is isolated: one token's failure must not skip
+        // the remaining unsubscriptions or the wrapped service's own
+        // disposal that follows (the decorator is already claimed by
+        // then, so a skipped step would never be retried).
         foreach (var tap in _taps)
-            tap.Dispose();
+            DisposeQuietly(tap);
+    }
+
+    private static void DisposeQuietly(IDisposable? disposable)
+    {
+        try
+        {
+            disposable?.Dispose();
+        }
+        catch
+        {
+            // A subscription token is infrastructure; its failure is
+            // swallowed so disposal always runs to completion (the
+            // same rule the Diagnostics package applies).
+        }
     }
 
     // ──────────────────────────── Event raising (per-subscriber isolation) ────────────────────────────
