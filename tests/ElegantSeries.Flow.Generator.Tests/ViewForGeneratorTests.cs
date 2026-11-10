@@ -1362,6 +1362,360 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void AbstractViewModel_ReportsFlowGen017()
+    {
+        // RegisterTransient registers the ViewModel type itself with the
+        // service collection; an abstract ViewModel can never be
+        // instantiated by the container, so the mapping is rejected at
+        // compile time instead of failing when navigation resolves it.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public abstract class AbstractViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.AbstractViewModel>]
+                public class AbstractView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("abstract", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void InterfaceViewModel_Singleton_ReportsFlowGen017()
+    {
+        // Same instantiability requirement under RegisterSingleton, and
+        // the message names the interface itself (an interface symbol
+        // also reports IsAbstract, so a generic "abstract" message here
+        // would misdescribe the problem).
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public interface IDetailViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.IDetailViewModel>(
+                    Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.Singleton)]
+                public class DetailView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("interface", error.GetMessage());
+        Assert.DoesNotContain("abstract", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void InferredAbstractViewModel_ReportsFlowGen017()
+    {
+        // The inferred path is checked too: BaseView<TViewModel>'s class
+        // constraint admits an abstract ViewModel, so the generator is
+        // the only compile-time line of defense for this form.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public abstract class AbstractViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class AbstractView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.AbstractViewModel> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("abstract", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void InterfaceViewModel_ViewOnly_EmitsRegistration()
+    {
+        // Register (ViewOnly) registers no ViewModel: the user registers
+        // the interface with an implementation themselves, so an
+        // interface ViewModel is legitimate and must not be reported.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public interface IDetailViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.IDetailViewModel>(
+                    Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.ViewOnly)]
+                public class DetailView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "views.Register<global::TestApp.Views.DetailView, global::TestApp.ViewModels.IDetailViewModel>();",
+            generated.SourceText.ToString());
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
+    public void AbstractViewModel_ViewOnly_EmitsRegistration()
+    {
+        // The ViewOnly exemption also covers an abstract ViewModel: the
+        // user may register it with a concrete implementation themselves.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public abstract class AbstractViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.AbstractViewModel>(
+                    Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.ViewOnly)]
+                public class AbstractView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "views.Register<global::TestApp.Views.AbstractView, global::TestApp.ViewModels.AbstractViewModel>();",
+            generated.SourceText.ToString());
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
+    public void InterfaceViewModel_ReportsFlowGen017()
+    {
+        // The interface arm under the default (Transient) lifetime; the
+        // Singleton permutation is pinned by
+        // InterfaceViewModel_Singleton_ReportsFlowGen017.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public interface IDetailViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.IDetailViewModel>]
+                public class DetailView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("interface", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void AbstractViewModel_Singleton_ReportsFlowGen017()
+    {
+        // The abstract arm under RegisterSingleton; the Transient
+        // permutation is pinned by AbstractViewModel_ReportsFlowGen017.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public abstract class AbstractViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.AbstractViewModel>(
+                    Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.Singleton)]
+                public class AbstractView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("abstract", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void InferredInterfaceViewModel_ReportsFlowGen017()
+    {
+        // The interface arm on the inferred path: BaseView<TViewModel>'s
+        // class constraint admits an interface ViewModel.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public interface IDetailViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class DetailView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.IDetailViewModel> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("interface", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void NoPublicConstructorViewModel_ReportsFlowGen017()
+    {
+        // The container activates a Transient/Singleton ViewModel through
+        // a public constructor; a concrete ViewModel whose only
+        // constructor is private compiles into the registration and fails
+        // when navigation first resolves it, so it is rejected here.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class NoCtorViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    private NoCtorViewModel() { }
+
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.NoCtorViewModel>]
+                public class NoCtorView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("public constructor", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void NoPublicConstructorViewModel_ViewOnly_EmitsRegistration()
+    {
+        // Under ViewOnly the user controls how the ViewModel is created
+        // (for example a factory registration), so a ViewModel with no
+        // public constructor is legitimate and must not be reported.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class NoCtorViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    private NoCtorViewModel() { }
+
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.NoCtorViewModel>(
+                    Lifetime = ElegantSeries.Flow.Routing.ViewModelLifetime.ViewOnly)]
+                public class NoCtorView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "views.Register<global::TestApp.Views.NoCtorView, global::TestApp.ViewModels.NoCtorViewModel>();",
+            generated.SourceText.ToString());
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
+    public void ParameterizedConstructorViewModel_EmitsRegistration()
+    {
+        // Unlike the view side (new() constraint), a Transient ViewModel
+        // needs no parameterless constructor: any public constructor
+        // qualifies, because the container resolves its parameters.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class InjectedViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public InjectedViewModel(string name) { }
+
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.InjectedViewModel>]
+                public class InjectedView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, updatedCompilation) = RunGenerator(sources);
+
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        var generated = Assert.Single(
+            runResult.GeneratedSources,
+            s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Contains(
+            "views.RegisterTransient<global::TestApp.Views.InjectedView, global::TestApp.ViewModels.InjectedViewModel>();",
+            generated.SourceText.ToString());
+        Assert.Empty(updatedCompilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+    }
+
+    [Fact]
     public void ViewNestedInFileLocalType_ReportsFlowGen011()
     {
         // The view itself is not file-local, but its containing type is:

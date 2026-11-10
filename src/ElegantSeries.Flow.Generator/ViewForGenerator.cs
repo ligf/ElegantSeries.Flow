@@ -765,14 +765,25 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             viewModelNotReferenceType = viewModelName;
         }
 
-        // ViewModel-side nameability requirements of the generated
-        // Register* call (FLOWGEN017): the generated code names the
-        // ViewModel type exactly as it names the view, so the same three
-        // requirements the view is checked against above apply to the
-        // ViewModel too — accessible from the generated file, not
-        // file-local, not nested in a generic type. Without these checks
-        // the failure surfaces as a raw compiler error (CS0122) inside
-        // the generated file. Applies to the explicit and the inferred
+        // ViewModel-side requirements of the generated Register* call
+        // (FLOWGEN017): the generated code names the ViewModel type exactly
+        // as it names the view, so the same three nameability requirements
+        // the view is checked against above apply to the ViewModel too —
+        // accessible from the generated file, not file-local, not nested
+        // in a generic type. Without these checks the failure surfaces as
+        // a raw compiler error (CS0122) inside the generated file.
+        // RegisterTransient/RegisterSingleton additionally register the
+        // ViewModel type itself with the service collection, so for those
+        // two lifetimes the ViewModel must also be instantiable: an
+        // abstract (or static) class, an interface, or a concrete class
+        // with no public constructor compiles into the generated
+        // registration but can never be created by the container,
+        // and the failure would only surface when navigation first resolves
+        // it. Register (ViewOnly) registers no ViewModel — the user
+        // registers it themselves, and an interface ViewModel backed by a
+        // user-registered implementation mapping is legitimate there — so
+        // the instantiability check is gated on the register method exactly
+        // like FLOWGEN012 above. Applies to the explicit and the inferred
         // ViewModel alike. Skipped for error types (the compiler already
         // reports them) and for open generic ViewModels (FLOWGEN009
         // already rejects them, and nameability questions about an
@@ -784,6 +795,34 @@ public sealed class ViewForGenerator : IIncrementalGenerator
               (effectiveViewModel.IsUnboundGenericType ||
                effectiveViewModel.TypeArguments.Any(a => a is ITypeParameterSymbol))))
         {
+            // An interface symbol also reports IsAbstract, so the interface
+            // check comes first and names the actual problem.
+            if (registerMethod is "RegisterTransient" or "RegisterSingleton")
+            {
+                if (effectiveViewModel.TypeKind == TypeKind.Interface)
+                {
+                    viewModelConstraintViolations.Add("it is an interface and cannot be instantiated by the service provider; register a concrete ViewModel type, or use Lifetime ViewOnly and register the interface with an implementation yourself");
+                }
+                else if (effectiveViewModel.IsAbstract || effectiveViewModel.IsStatic)
+                {
+                    viewModelConstraintViolations.Add("it is abstract or static and cannot be instantiated by the service provider; register a concrete ViewModel type");
+                }
+                else if (!effectiveViewModel.InstanceConstructors.Any(c =>
+                             c.DeclaredAccessibility == Accessibility.Public))
+                {
+                    // The container activates the ViewModel through a public
+                    // constructor (any public constructor — its parameters
+                    // are resolved from the provider, so unlike the view
+                    // side no parameterless constructor is required). A
+                    // concrete ViewModel with no public constructor at all
+                    // compiles into the registration and fails the same way
+                    // at resolution time. Skipped for abstract/static types
+                    // above: their constructor accessibility is derivative
+                    // of the abstract report.
+                    viewModelConstraintViolations.Add("it does not declare a public constructor and cannot be instantiated by the service provider; register a concrete ViewModel type with a public constructor");
+                }
+            }
+
             if (!IsAccessibleFromGeneratedCode(effectiveViewModel))
             {
                 viewModelConstraintViolations.Add("it is not accessible from the generated registration code (the view model and any containing types must be public or internal)");
