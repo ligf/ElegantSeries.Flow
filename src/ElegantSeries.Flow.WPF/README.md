@@ -76,7 +76,7 @@ automatically.
                x:TypeArguments="vm:OrderViewModel"
                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-               xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Hosting;assembly=ElegantSeries.Flow.WPF"
+               xmlns:flow="clr-namespace:ElegantSeries.Flow.WPF.Views;assembly=ElegantSeries.Flow.WPF"
                xmlns:vm="clr-namespace:MyApp.ViewModels">
     <!-- ... -->
 </flow:BaseView>

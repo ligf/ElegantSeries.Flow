@@ -95,6 +95,32 @@ public class RouterTests
     }
 
     [Fact]
+    public async Task EmptySegments_AreSkipped_MultiSegmentRoute()
+    {
+        var provider = BuildProvider();
+        using var _p = provider;
+        var nav = provider.GetRequiredService<INavigationService>();
+        RouteMatch? seen = null;
+        var router = new Router(nav, new RouteTableBuilder()
+            .Map<DetailViewModel, DetailParam>("orders/{id}/items/{itemId}", match =>
+            {
+                seen = match;
+                return new DetailParam(int.Parse(match.Values["id"]), match.Values["itemId"]);
+            })
+            .Build());
+
+        // Empty segments (doubled, leading and trailing slashes) carry
+        // no routing meaning at any depth: this URI is the same route
+        // as "orders/42/items/7".
+        Assert.True(await router.NavigateAsync("//orders//42/items//7/"));
+        var detail = Assert.IsType<DetailViewModel>(nav.GetCurrentViewModel());
+        Assert.Equal(new DetailParam(42, "7"), detail.Received);
+
+        Assert.NotNull(seen);
+        Assert.Equal(["orders", "42", "items", "7"], seen.Segments);
+    }
+
+    [Fact]
     public async Task FullUri_SchemePrefixStripped_FragmentIgnored()
     {
         var provider = BuildProvider();

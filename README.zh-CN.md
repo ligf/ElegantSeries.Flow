@@ -169,7 +169,7 @@ View 也可以分布在多个程序集里——例如功能模块各自包含 Vi
 | `ElegantSeries.Flow.Mvvm` | 可选的 CommunityToolkit.Mvvm 集成：`BaseViewModel`（`ElegantSeries.Flow.Mvvm`） |
 | `ElegantSeries.Flow.WPF` | WPF host：`NavigationHost`、`BaseView<TViewModel>`、`ViewLocator` |
 | `ElegantSeries.Flow.Avalonia` | Avalonia host：`NavigationHost`、`BaseView<TViewModel>`、`ViewLocator` |
-| `ElegantSeries.Flow.Generator` | Roslyn source generator：从 `[ViewFor]` attribute 生成 `IViewLocator` 注册代码（纯 Analyzer，无运行时依赖） |
+| `ElegantSeries.Flow.Generator` | Roslyn source generator：从 `[ViewFor]` attribute 生成 `IViewLocator` 注册代码（纯 Analyzer，无运行时依赖——非独立包，随 `ElegantSeries.Flow` 包一起发布） |
 | `ElegantSeries.Flow.Diagnostics` | 可选的指标观察器：把导航事件变成 `ElegantSeries.Flow.Diagnostics` meter 上的计数器（`navigation.completed`、`viewmodel.released`、`cache.cleared`、`subscriber.errors`），供 MeterListener / OpenTelemetry 读取 |
 | `ElegantSeries.Flow.Routing` | 可选的 URI 路由：显式 `RouteTableBuilder` 把 URI 模式（`orders/{id}`）映射到类型化导航——注册顺序即匹配优先级，零反射、AOT 安全 |
 | `ElegantSeries.Flow.Journal` | 可选的导航日志：`INavigationService` 装饰器，记录带参数快照的导航历史（按类型注册委托序列化器、零反射），条目与栈快照经可插拔存储持久化（内存或 JSON 文件），可从快照恢复各 region 的栈——记录失败永不影响导航本身 |

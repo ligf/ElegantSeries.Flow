@@ -92,6 +92,41 @@ public class DisposalInterleavingTests
             await _gate.WaitAsync();
     }
 
+    /// <summary>Page whose entering callback parks asynchronously on
+    /// the shared gate and only then calls back into the test hook —
+    /// the disposal call must be issued from inside the callback while
+    /// the marker is active. The park must yield (await), never block
+    /// the pump's flow synchronously: the pump starts on the calling
+    /// thread up to its first incomplete await, so a synchronous block
+    /// inside the callback would deadlock the test against its own
+    /// release signal (probed 2026-11-10: a ManualResetEventSlim park
+    /// hung the test host until killed).</summary>
+    public sealed class EnteringSelfDisposePage : NavigationViewModelBase, INavigationAwareAsync
+    {
+        private readonly SelfDisposeHook _hook;
+        private readonly CallbackGate _gate;
+        private int _called;
+
+        public EnteringSelfDisposePage(PageScopeMarker marker, SelfDisposeHook hook, CallbackGate gate)
+        {
+            _ = marker;
+            _hook = hook;
+            _gate = gate;
+        }
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Exchange(ref _called, 1) == 0 && _hook.Callback is { } callback)
+            {
+                await _gate.WaitAsync();
+                _hook.Captured = callback().AsTask();
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+    }
+
     /// <summary>Page that calls back into the test hook (installed as a
     /// service DisposeAsync attempt) from within its first
     /// OnNavigatedToAsync — the reentrancy shape the disposal contract
@@ -279,6 +314,7 @@ public class DisposalInterleavingTests
         services.AddTransient<GatedPage>();
         services.AddTransient<DepartureGatedPage>();
         services.AddTransient<SelfDisposePage>();
+        services.AddTransient<EnteringSelfDisposePage>();
         services.AddTransient<ThrowingScopePage>();
         services.AddTransient<BlockingDisposePage>();
         services.AddSingleton<ScopeTeardownProbe>();
@@ -776,6 +812,79 @@ public class DisposalInterleavingTests
         Assert.True(await nav.NavigateToAsync<StressPageA>());
         await ((IAsyncDisposable)nav).DisposeAsync();
         await WaitForScopeBalanceAsync(ledger, "after callback self-dispose attempt");
+    }
+
+    // ── DisposeAsync decision table: in-flight, not begun, in-callback ──
+
+    /// <summary>
+    /// Decision-table row: a disposal is in flight but cleanup has NOT
+    /// begun — the starter is registered while the core still waits for
+    /// the navigation lock (held here by the test, the same reflection
+    /// hold as the sync-timeout test). A DisposeAsync issued from
+    /// within a lifecycle callback in that window faults with the
+    /// reentrancy error, exactly as if no disposal had been requested:
+    /// the callback could still be the one the cleanup ends up waiting
+    /// for, but at this point nothing is waiting on it yet, so the
+    /// plain callback rule applies.
+    /// </summary>
+    [Fact]
+    public async Task DisposeAsync_InFlightNotBegun_FromCallback_FaultsWithReentrancyError()
+    {
+        var provider = BuildProvider(options =>
+        {
+            options.DisposalGateTimeout = TimeSpan.FromSeconds(30);
+        });
+        var ledger = provider.GetRequiredService<PageScopeLedger>();
+        var nav = provider.GetRequiredService<INavigationService>();
+        var hook = provider.GetRequiredService<SelfDisposeHook>();
+        var gate = provider.GetRequiredService<CallbackGate>();
+        hook.Callback = () => ((IAsyncDisposable)nav).DisposeAsync();
+
+        // The page's first activation parks its entering callback on
+        // the gate and the pump yields, so the test thread stays free
+        // to stage the race; the marker stays active until the gate
+        // opens.
+        var navigation = nav.NavigateToAsync<EnteringSelfDisposePage>();
+        await gate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Hold the navigation lock so the disposal core cannot claim
+        // the service: the starter registers, cleanup does not begin.
+        var lockField = nav.GetType().GetField("_navigationLock",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.NotNull(lockField);
+        var semaphore = (SemaphoreSlim)lockField.GetValue(nav)!;
+        semaphore.Wait();
+        Task disposal;
+        try
+        {
+            disposal = ((IAsyncDisposable)nav).DisposeAsync().AsTask();
+
+            // Let the callback make its call now: it must fault.
+            gate.Release();
+            var captureDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            while (hook.Captured is null && DateTime.UtcNow < captureDeadline)
+            {
+                await Task.Delay(10);
+            }
+
+            Assert.NotNull(hook.Captured);
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await hook.Captured!.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal(
+                "DisposeAsync cannot be called from within a page lifecycle callback. " +
+                "Call it outside the callback instead.",
+                ex.Message);
+        }
+        finally
+        {
+            semaphore.Release();
+        }
+
+        // The first disposal now proceeds and completes, and the
+        // navigation whose callback raced it settles either way.
+        await disposal.WaitAsync(TimeSpan.FromSeconds(10));
+        await navigation.WaitAsync(TimeSpan.FromSeconds(10));
+        await WaitForScopeBalanceAsync(ledger, "after in-flight-not-begun callback DisposeAsync");
     }
 
     // ── Abandoned entering state: queued release events ──────
