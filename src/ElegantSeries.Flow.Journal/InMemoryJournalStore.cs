@@ -61,6 +61,22 @@ public sealed class InMemoryJournalStore : INavigationJournalStore
     public ValueTask SaveSnapshotAsync(JournalSnapshot snapshot, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        // The same structural validation (and wording) as
+        // NavigationJournal.RestoreAsync: a hand-built snapshot with
+        // null Regions/Pages is malformed input, rejected here instead
+        // of escaping from the clone below as a NullReferenceException.
+        if (snapshot.Regions is null)
+            throw new ArgumentException("The snapshot is malformed: Regions is null.", nameof(snapshot));
+        foreach (var region in snapshot.Regions)
+        {
+            if (region is null || region.Pages is null)
+                throw new ArgumentException("The snapshot is malformed: a region or its Pages is null.", nameof(snapshot));
+            foreach (var page in region.Pages)
+            {
+                if (page is null)
+                    throw new ArgumentException("The snapshot is malformed: a page is null.", nameof(snapshot));
+            }
+        }
         cancellationToken.ThrowIfCancellationRequested();
         lock (_lock)
         {

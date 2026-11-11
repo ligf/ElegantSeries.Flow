@@ -341,6 +341,51 @@ public class JournalRecordingTests
     }
 
     [Fact]
+    public async Task BypassGoBackToWithNewParameter_ResynthesizesEntryAndBinding()
+    {
+        var provider = BuildProvider(journal => journal.RegisterParameter<DetailParam>(
+            p => "id=" + p.Id,
+            text => new DetailParam(int.Parse(text["id=".Length..]))));
+        using var _p = provider;
+        var nav = provider.GetRequiredService<INavigationService>();
+        var journal = provider.GetRequiredService<INavigationJournal>();
+        var store = provider.GetRequiredService<INavigationJournalStore>();
+
+        Assert.True(await nav.NavigateToAsync<VoteDetailViewModel, DetailParam>(new DetailParam(1)));
+        Assert.True(await nav.NavigateToAsync<SettingsViewModel>());
+        var settings = Assert.IsType<SettingsViewModel>(nav.GetCurrentViewModel());
+        var inner = settings.Navigation;
+        Assert.NotNull(inner);
+
+        // The attached Navigation property is the wrapped service
+        // itself: this go-back bypasses the decorator entirely, and
+        // the vote-claimed reactivation delivers a NEW parameter to
+        // the already-bound Detail instance. The landing is recorded
+        // from its settle announcement alone.
+        Assert.True(await inner.GoBackToAsync<VoteDetailViewModel, DetailParam>(new DetailParam(2)));
+        var detail = Assert.IsType<VoteDetailViewModel>(nav.GetCurrentViewModel());
+        Assert.Equal(2, detail.Received?.Id);
+
+        // Entries: Navigated(id=1), Navigated(Settings), Released
+        // (Settings), then the synthesized Navigated — which must
+        // carry the parameter the page effectively holds now, not
+        // the earlier activation's binding.
+        var entries = await WaitForEntriesAsync(store, 4);
+        var detailSnapshots = entries
+            .Where(e => e.Kind == JournalEntryKind.Navigated &&
+                        e.ViewModelType == typeof(VoteDetailViewModel).AssemblyQualifiedName)
+            .Select(e => e.ParameterSnapshot)
+            .ToList();
+        Assert.Equal(new string?[] { "id=1", "id=2" }, detailSnapshots);
+
+        // The binding moved with the entry: a snapshot describes the
+        // page with the new parameter.
+        var snapshot = await journal.CaptureSnapshotAsync();
+        var page = Assert.Single(Assert.Single(snapshot.Regions).Pages);
+        Assert.Equal("id=2", page.Parameter);
+    }
+
+    [Fact]
     public async Task GoBackToWithParameter_RecordsParameterOnBackEntry()
     {
         var provider = BuildProvider(journal => journal.RegisterParameter<DetailParam>(
