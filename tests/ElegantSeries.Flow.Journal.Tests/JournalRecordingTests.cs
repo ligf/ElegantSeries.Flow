@@ -473,6 +473,7 @@ public class JournalRecordingTests
         services.AddTransient<InjectedCallbackViewModel>();
         services.AddTransient<DisposeAttemptingViewModel>();
         services.AddTransient<VoteDetailViewModel>();
+        services.AddTransient<ExplodingViewModel>();
         services.AddTransient<GuardedViewModel>();
         services.AddElegantSeriesFlowJournal(configure);
         return services.BuildServiceProvider();

@@ -151,6 +151,37 @@ public sealed class VoteDetailViewModel
     public bool IsNavigationTarget(object? parameter) => parameter is DetailParam;
 }
 
+/// <summary>A value-type parameter whose Equals throws: a record struct
+/// boxes on every hand-off, so the decorator's applied test never
+/// short-circuits on reference equality and always reaches Equals.
+/// The wrapped service's classification guards the vote and Equals
+/// (a throwing Equals counts as not recognized); the page below claims
+/// by vote, so the navigation lands and the decorator's own Equals
+/// call is the one under test.</summary>
+public record struct ExplodingParam(int Id)
+{
+    // The record-synthesized Equals(object?) routes to this overload
+    // after its type check, so every virtual Equals call throws.
+    public bool Equals(ExplodingParam other) =>
+        throw new InvalidOperationException("equals exploded (test double)");
+
+    public override int GetHashCode() => Id;
+}
+
+public sealed class ExplodingViewModel
+    : NavigationViewModelBase, INavigationAware<ExplodingParam>, INavigationTargetAware
+{
+    public ExplodingParam? Received { get; private set; }
+
+    public void OnNavigatedTo(ExplodingParam parameter) => Received = parameter;
+
+    public void OnNavigatedFrom()
+    {
+    }
+
+    public bool IsNavigationTarget(object? parameter) => parameter is ExplodingParam;
+}
+
 // ── Stores ──────────────────────────────────────────────────────────
 
 /// <summary>A store whose append always fails, for recording-isolation
@@ -382,7 +413,9 @@ public sealed class FakeNavigationService : INavigationService, IDisposable, IAs
     public INavigationViewModel? Current { get; set; }
     public List<INavigationViewModel> Stack { get; } = [];
     public bool CanGoBackValue { get; set; }
-    public NavigationRetention CurrentRetentionValue { get; set; } = NavigationRetention.Destroy;
+    /// <summary>The value <see cref="GetCurrentRetention"/> reports
+    /// (nullable so tests can stage a null read-back).</summary>
+    public NavigationRetention? CurrentRetentionValue { get; set; } = NavigationRetention.Destroy;
 
     /// <summary>The instance <see cref="GetCurrentParameter"/> reports
     /// <see cref="ParameterValue"/> for (all other instances: null).</summary>
@@ -400,6 +433,22 @@ public sealed class FakeNavigationService : INavigationService, IDisposable, IAs
     public int DisposeAsyncCount { get; private set; }
     public List<string> Calls { get; } = [];
 
+    /// <summary>When nonzero, the Nth Subscribe* call (counted across
+    /// all four Subscribe* methods) throws instead of subscribing.</summary>
+    public int ThrowOnSubscribeCall { get; set; }
+
+    /// <summary>When set, subscription tokens throw from Dispose
+    /// instead of unsubscribing.</summary>
+    public bool ThrowOnTokenDispose { get; set; }
+
+    private int _subscribeCalls;
+
+    /// <summary>Handlers currently held through the Subscribe*
+    /// methods and the event accessors combined.</summary>
+    public int LiveSubscriptionCount =>
+        _navigatedHandlers.Count + _releasedHandlers.Count +
+        _cacheClearedHandlers.Count + _errorHandlers.Count;
+
     public void RaiseRegionNavigated(string region, INavigationViewModel viewModel)
     {
         foreach (var handler in _navigatedHandlers.ToList())
@@ -410,6 +459,12 @@ public sealed class FakeNavigationService : INavigationService, IDisposable, IAs
     {
         foreach (var handler in _releasedHandlers.ToList())
             handler(region, viewModel);
+    }
+
+    public void RaiseRegionCacheCleared(string region)
+    {
+        foreach (var handler in _cacheClearedHandlers.ToList())
+            handler(region);
     }
 
     public event Action<string, INavigationViewModel>? RegionNavigated
@@ -438,27 +493,44 @@ public sealed class FakeNavigationService : INavigationService, IDisposable, IAs
 
     public IDisposable SubscribeRegionNavigated(Action<string, INavigationViewModel> handler)
     {
+        ThrowIfSubscribeArmed();
         _navigatedHandlers.Add(handler);
-        return new Token(() => _navigatedHandlers.Remove(handler));
+        return NewToken(() => _navigatedHandlers.Remove(handler));
     }
 
     public IDisposable SubscribeViewModelReleased(Action<string, INavigationViewModel> handler)
     {
+        ThrowIfSubscribeArmed();
         _releasedHandlers.Add(handler);
-        return new Token(() => _releasedHandlers.Remove(handler));
+        return NewToken(() => _releasedHandlers.Remove(handler));
     }
 
     public IDisposable SubscribeRegionCacheCleared(Action<string> handler)
     {
+        ThrowIfSubscribeArmed();
         _cacheClearedHandlers.Add(handler);
-        return new Token(() => _cacheClearedHandlers.Remove(handler));
+        return NewToken(() => _cacheClearedHandlers.Remove(handler));
     }
 
     public IDisposable SubscribeSubscriberError(Action<Exception> handler)
     {
+        ThrowIfSubscribeArmed();
         _errorHandlers.Add(handler);
-        return new Token(() => _errorHandlers.Remove(handler));
+        return NewToken(() => _errorHandlers.Remove(handler));
     }
+
+    private void ThrowIfSubscribeArmed()
+    {
+        if (++_subscribeCalls == ThrowOnSubscribeCall)
+            throw new InvalidOperationException("subscribe failed (test double)");
+    }
+
+    private Token NewToken(Action unsubscribe) => new(() =>
+    {
+        if (ThrowOnTokenDispose)
+            throw new InvalidOperationException("token dispose failed (test double)");
+        unsubscribe();
+    });
 
     /// <summary>The value <see cref="IsInLifecycleCallback"/> reports;
     /// settable so decorator tests can simulate a caller inside one of
