@@ -127,4 +127,42 @@ public class JournalSettleBindingRefreshTests
         Assert.Equal(typeof(ExplodingViewModel).AssemblyQualifiedName, page.ViewModelType);
         Assert.Equal("id=1", page.Parameter);
     }
+
+    [Fact]
+    public async Task SettleRefresh_ReadBackRetentionNull_FallsBackToCallRetention()
+    {
+        var inner = new FakeNavigationService();
+        var page = new FakeViewModel();
+        inner.Current = page;
+        inner.ParameterOwner = page;
+        inner.ParameterValue = null;
+        inner.AllStacksValue = new Dictionary<string, IReadOnlyList<INavigationViewModel>>
+        {
+            ["MainRegion"] = [page],
+        };
+        var store = new InMemoryJournalStore();
+        var decorator = new JournalNavigationService(inner, store, new JournalBuilder());
+        var journal = new NavigationJournal(decorator, store);
+
+        // While the forward call is in flight, stage its landing with
+        // a null retention read-back, then hide the page from the
+        // call's continuation: the continuation defers its binding
+        // (AddDeferredLanding) instead of applying one, so the final
+        // binding can only have come from the settle-time refresh.
+        inner.NavigateHook = () =>
+        {
+            inner.CurrentRetentionValue = null;
+            inner.RaiseRegionNavigated("MainRegion", page);
+            inner.Current = null;
+        };
+
+        Assert.True(await decorator.NavigateToAsync<FakeViewModel>(
+            retention: NavigationRetention.KeepAlive));
+
+        var snapshot = await journal.CaptureSnapshotAsync();
+        var region = Assert.Single(snapshot.Regions);
+        var captured = Assert.Single(region.Pages);
+        Assert.Equal(typeof(FakeViewModel).AssemblyQualifiedName, captured.ViewModelType);
+        Assert.Equal(NavigationRetention.KeepAlive, captured.Retention);
+    }
 }

@@ -413,7 +413,9 @@ public sealed class FakeNavigationService : INavigationService, IDisposable, IAs
     public INavigationViewModel? Current { get; set; }
     public List<INavigationViewModel> Stack { get; } = [];
     public bool CanGoBackValue { get; set; }
-    public NavigationRetention CurrentRetentionValue { get; set; } = NavigationRetention.Destroy;
+    /// <summary>The value <see cref="GetCurrentRetention"/> reports
+    /// (nullable so tests can stage a null read-back).</summary>
+    public NavigationRetention? CurrentRetentionValue { get; set; } = NavigationRetention.Destroy;
 
     /// <summary>The instance <see cref="GetCurrentParameter"/> reports
     /// <see cref="ParameterValue"/> for (all other instances: null).</summary>
