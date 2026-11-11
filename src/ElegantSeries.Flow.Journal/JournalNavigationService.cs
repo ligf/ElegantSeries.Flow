@@ -994,10 +994,14 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     // binding for a settled page that has none — whichever call (if
     // any) produced the landing, an unbound settled page would
     // otherwise surface in snapshots with no parameter and Destroy
-    // retention. The binding derives from the page's effective state
-    // and never overwrites a call-side binding. One exception in
-    // timing, not in source: when the landing is attributable to
-    // exactly one in-flight call, that call's own payload refreshes
+    // retention. For a landing a call accounts for, the binding derives
+    // from the page's effective state and never overwrites a call-side
+    // binding. For a landing no call accounts for, the announcement is
+    // itself the latest recorded activation: RebindAtSettle replaces
+    // the binding with the settle-time freeze (see its comment). One
+    // exception in timing, not in source: when the landing is
+    // attributable to exactly one in-flight call, that call's own
+    // payload refreshes
     // the binding here (RefreshBindingFromCall) instead of waiting
     // for the call's continuation. An entry, by contrast,
     // is synthesized only when the landing provably came from no call:
