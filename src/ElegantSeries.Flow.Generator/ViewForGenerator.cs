@@ -921,16 +921,21 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     /// <summary>
     /// The <see cref="IsFileLocal(INamedTypeSymbol)"/> check over an arbitrary
     /// type occurring as (part of) a generic type argument: arrays and
-    /// pointers defer to their element type. Anything that is not a named
-    /// type — a type parameter (open generics are rejected before these
-    /// checks run) or an error type (the compiler already reports it) —
-    /// cannot be file-local in a way the generated code would trip on.
+    /// pointers defer to their element type, function pointers to the types
+    /// in their signature — the generated code writes all of them out in
+    /// full. What remains — a type parameter (open generics are rejected
+    /// before these checks run) or an error type (the compiler already
+    /// reports it) — cannot be file-local in a way the generated code
+    /// would trip on.
     /// </summary>
     private static bool IsFileLocal(ITypeSymbol type) => type switch
     {
         INamedTypeSymbol named => IsFileLocal(named),
         IArrayTypeSymbol array => IsFileLocal(array.ElementType),
         IPointerTypeSymbol pointer => IsFileLocal(pointer.PointedAtType),
+        IFunctionPointerTypeSymbol functionPointer =>
+            IsFileLocal(functionPointer.Signature.ReturnType) ||
+            functionPointer.Signature.Parameters.Any(parameter => IsFileLocal(parameter.Type)),
         _ => false,
     };
 
@@ -983,6 +988,9 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         INamedTypeSymbol named => HasGenericContainingType(named),
         IArrayTypeSymbol array => HasGenericContainingType(array.ElementType),
         IPointerTypeSymbol pointer => HasGenericContainingType(pointer.PointedAtType),
+        IFunctionPointerTypeSymbol functionPointer =>
+            HasGenericContainingType(functionPointer.Signature.ReturnType) ||
+            functionPointer.Signature.Parameters.Any(parameter => HasGenericContainingType(parameter.Type)),
         _ => false,
     };
 
@@ -1026,6 +1034,9 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         INamedTypeSymbol named => IsAccessibleFromGeneratedCode(named),
         IArrayTypeSymbol array => IsAccessibleFromGeneratedCode(array.ElementType),
         IPointerTypeSymbol pointer => IsAccessibleFromGeneratedCode(pointer.PointedAtType),
+        IFunctionPointerTypeSymbol functionPointer =>
+            IsAccessibleFromGeneratedCode(functionPointer.Signature.ReturnType) &&
+            functionPointer.Signature.Parameters.All(parameter => IsAccessibleFromGeneratedCode(parameter.Type)),
         _ => true,
     };
 

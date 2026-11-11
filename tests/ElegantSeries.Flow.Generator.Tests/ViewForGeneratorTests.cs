@@ -1497,6 +1497,44 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void InferredGenericViewModelWithFunctionPointerTypeArgument_ReportsFlowGen017()
+    {
+        // A function pointer inside the type argument is written out in
+        // full by the generated code too: the private nested type in its
+        // signature is unnameable there. (The explicit attribute form
+        // never reaches this check — a function pointer is not a named
+        // type, so FLOWGEN006 reports it instead; inference through
+        // BaseView<T> is the reachable path.)
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class DetailViewModel<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                public class Container
+                {
+                    private class Secret { }
+
+                    [ElegantSeries.Flow.Routing.ViewFor]
+                    public unsafe class DetailView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.DetailViewModel<delegate*<Secret>>> { }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("not accessible", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
     public void AbstractViewModel_ReportsFlowGen017()
     {
         // RegisterTransient registers the ViewModel type itself with the
