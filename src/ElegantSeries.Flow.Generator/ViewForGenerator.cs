@@ -524,7 +524,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
         // The ViewModel type is either explicit ([ViewFor<VM>]) or inferred
         // from the view's BaseView<TViewModel> base class ([ViewFor]).
-        var baseViewModel = FindBaseViewModel(viewType);
+        var baseViewModel = FindBaseViewModel(ctx.SemanticModel.Compilation, viewType);
         INamedTypeSymbol? explicitViewModelSymbol = null;
         string? viewModelName = null;
         var cannotInfer = false;
@@ -825,17 +825,17 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
             if (!IsAccessibleFromGeneratedCode(effectiveViewModel))
             {
-                viewModelConstraintViolations.Add("it is not accessible from the generated registration code (the view model and any containing types must be public or internal)");
+                viewModelConstraintViolations.Add("it is not accessible from the generated registration code (the view model, any containing types and any generic type arguments must be public or internal)");
             }
 
             if (IsFileLocal(effectiveViewModel))
             {
-                viewModelConstraintViolations.Add("it is file-local (or nested in a file-local type) and cannot be referenced from the generated registration code");
+                viewModelConstraintViolations.Add("it is file-local (or nested in a file-local type, or a generic type argument is) and cannot be referenced from the generated registration code");
             }
 
             if (HasGenericContainingType(effectiveViewModel))
             {
-                viewModelConstraintViolations.Add("it is nested in a generic type and cannot be named by the generated registration code");
+                viewModelConstraintViolations.Add("it is nested in a generic type (or a generic type argument is) and cannot be named by the generated registration code");
             }
         }
 
@@ -893,6 +893,9 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     /// <summary>
     /// True when the view or any containing type is file-local: the generated
     /// registration code lives in a different file and cannot reference it.
+    /// The generated code writes a constructed generic type's arguments out
+    /// in full, so the check recurses into every type argument along the
+    /// containing chain as well.
     /// </summary>
     private static bool IsFileLocal(INamedTypeSymbol viewType)
     {
@@ -902,23 +905,13 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             {
                 return true;
             }
-        }
 
-        return false;
-    }
-
-    /// <summary>
-    /// True when any containing type of <paramref name="viewType"/> is generic:
-    /// the view's fully qualified name would then contain an unbound type
-    /// parameter, which the generated registration code cannot name.
-    /// </summary>
-    private static bool HasGenericContainingType(INamedTypeSymbol viewType)
-    {
-        for (var current = viewType.ContainingType; current is not null; current = current.ContainingType)
-        {
-            if (current.IsGenericType)
+            foreach (var argument in current.TypeArguments)
             {
-                return true;
+                if (IsFileLocal(argument))
+                {
+                    return true;
+                }
             }
         }
 
@@ -926,11 +919,80 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     }
 
     /// <summary>
+    /// The <see cref="IsFileLocal(INamedTypeSymbol)"/> check over an arbitrary
+    /// type occurring as (part of) a generic type argument: arrays and
+    /// pointers defer to their element type. Anything that is not a named
+    /// type — a type parameter (open generics are rejected before these
+    /// checks run) or an error type (the compiler already reports it) —
+    /// cannot be file-local in a way the generated code would trip on.
+    /// </summary>
+    private static bool IsFileLocal(ITypeSymbol type) => type switch
+    {
+        INamedTypeSymbol named => IsFileLocal(named),
+        IArrayTypeSymbol array => IsFileLocal(array.ElementType),
+        IPointerTypeSymbol pointer => IsFileLocal(pointer.PointedAtType),
+        _ => false,
+    };
+
+    /// <summary>
+    /// True when any containing type of <paramref name="viewType"/> is generic:
+    /// the view's fully qualified name would then contain an unbound type
+    /// parameter, which the generated registration code cannot name. Type
+    /// arguments are checked recursively for the same reason as in
+    /// <see cref="IsFileLocal(INamedTypeSymbol)"/>.
+    /// </summary>
+    private static bool HasGenericContainingType(INamedTypeSymbol viewType)
+    {
+        // The type's own arguments come first: unlike the accessibility
+        // and file-local checks above, this one's chain starts at the
+        // containing type, so without this the head type's arguments
+        // would never be examined.
+        foreach (var argument in viewType.TypeArguments)
+        {
+            if (HasGenericContainingType(argument))
+            {
+                return true;
+            }
+        }
+
+        for (var current = viewType.ContainingType; current is not null; current = current.ContainingType)
+        {
+            if (current.IsGenericType)
+            {
+                return true;
+            }
+
+            foreach (var argument in current.TypeArguments)
+            {
+                if (HasGenericContainingType(argument))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The <see cref="HasGenericContainingType(INamedTypeSymbol)"/> check
+    /// over an arbitrary type occurring as (part of) a generic type argument.
+    /// </summary>
+    private static bool HasGenericContainingType(ITypeSymbol type) => type switch
+    {
+        INamedTypeSymbol named => HasGenericContainingType(named),
+        IArrayTypeSymbol array => HasGenericContainingType(array.ElementType),
+        IPointerTypeSymbol pointer => HasGenericContainingType(pointer.PointedAtType),
+        _ => false,
+    };
+
+    /// <summary>
     /// True when the generated registration class (a public class in the same
     /// assembly, in an unrelated namespace) can name <paramref name="viewType"/>:
     /// neither the view nor any containing type may be private or protected.
     /// Internal and public are both fine (same assembly); protected internal is
-    /// fine through its internal part.
+    /// fine through its internal part. Type arguments are checked recursively
+    /// for the same reason as in <see cref="IsFileLocal(INamedTypeSymbol)"/>.
     /// </summary>
     private static bool IsAccessibleFromGeneratedCode(INamedTypeSymbol viewType)
     {
@@ -941,10 +1003,31 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             {
                 return false;
             }
+
+            foreach (var argument in current.TypeArguments)
+            {
+                if (!IsAccessibleFromGeneratedCode(argument))
+                {
+                    return false;
+                }
+            }
         }
 
         return true;
     }
+
+    /// <summary>
+    /// The <see cref="IsAccessibleFromGeneratedCode(INamedTypeSymbol)"/>
+    /// check over an arbitrary type occurring as (part of) a generic type
+    /// argument.
+    /// </summary>
+    private static bool IsAccessibleFromGeneratedCode(ITypeSymbol type) => type switch
+    {
+        INamedTypeSymbol named => IsAccessibleFromGeneratedCode(named),
+        IArrayTypeSymbol array => IsAccessibleFromGeneratedCode(array.ElementType),
+        IPointerTypeSymbol pointer => IsAccessibleFromGeneratedCode(pointer.PointedAtType),
+        _ => true,
+    };
 
     /// <summary>
     /// Walks the view's base-type chain for the framework's
@@ -953,17 +1036,48 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     /// does not inherit it — or when the argument is an open type parameter,
     /// which cannot be inferred from.
     /// </summary>
-    private static INamedTypeSymbol? FindBaseViewModel(INamedTypeSymbol viewType)
+    /// <remarks>
+    /// A name-and-namespace match alone is not enough: a same-named
+    /// <c>BaseView</c> defined outside the platform assembly is not the
+    /// framework base class (it carries no <c>INavigationViewModel</c>
+    /// constraint, so inferring from it could emit a registration the
+    /// generated code cannot compile). When the platform's
+    /// <c>IViewLocator</c> resolves, the candidate must live in the same
+    /// assembly as it. When the locator does not resolve at all, this
+    /// compilation cannot generate registrations anyway, and the name-based
+    /// match is kept so the remaining diagnostics describe the declaration
+    /// as written.
+    /// </remarks>
+    private static INamedTypeSymbol? FindBaseViewModel(Compilation compilation, INamedTypeSymbol viewType)
     {
         for (var current = viewType.BaseType; current is not null; current = current.BaseType)
         {
             var original = current.OriginalDefinition;
-            if (original is { Name: "BaseView", Arity: 1 } &&
-                original.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) is
-                    AvaloniaViewsNamespace or WpfViewsNamespace)
+            string? locatorMetadataName = null;
+            if (original is { Name: "BaseView", Arity: 1 })
             {
-                return current.TypeArguments.FirstOrDefault() as INamedTypeSymbol;
+                locatorMetadataName =
+                    original.ContainingNamespace?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) switch
+                    {
+                        AvaloniaViewsNamespace => AvaloniaLocatorMetadataName,
+                        WpfViewsNamespace => WpfLocatorMetadataName,
+                        _ => null,
+                    };
             }
+
+            if (locatorMetadataName is null)
+            {
+                continue;
+            }
+
+            var locator = compilation.GetTypeByMetadataName(locatorMetadataName);
+            if (locator is not null &&
+                !SymbolEqualityComparer.Default.Equals(original.ContainingAssembly, locator.ContainingAssembly))
+            {
+                continue;
+            }
+
+            return current.TypeArguments.FirstOrDefault() as INamedTypeSymbol;
         }
 
         return null;
@@ -1170,16 +1284,21 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     {
         if (snapshot.GeneratedNamespace is null &&
             (!mappings.Items.IsEmpty ||
-             (snapshot.PlatformCount == 1 && !snapshot.SinglePlatformProviders.IsEmpty)))
+             !snapshot.AvaloniaProviders.IsEmpty ||
+             !snapshot.WpfProviders.IsEmpty))
         {
             // An invalid [assembly: ViewForGeneratedNamespace] value leaves
             // no namespace to generate into; like this compilation's own
             // mapping errors, it cancels all generation for the assembly.
             // The report is gated on the compilation actually generating —
-            // attributed views of its own, or an aggregation it would emit:
-            // a compilation with neither stays silent, the same gating the
-            // ambiguous-platform report follows, so a stray attribute in a
-            // shared assembly-info file cannot break inert projects.
+            // attributed views of its own, or validated providers of either
+            // platform it would aggregate over (the invalid override is
+            // judged before the platform count, so a dual-platform
+            // provider-only compilation hears about the override, not the
+            // ambiguity): a compilation with neither stays silent, the same
+            // gating the ambiguous-platform report follows, so a stray
+            // attribute in a shared assembly-info file cannot break inert
+            // projects.
             spc.ReportDiagnostic(Diagnostic.Create(
                 DiagnosticDescriptors.InvalidGeneratedNamespace, Location.None, snapshot.NamespaceOverride));
             return;

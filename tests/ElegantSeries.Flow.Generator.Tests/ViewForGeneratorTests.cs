@@ -1362,6 +1362,141 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void GenericViewModelWithPrivateNestedTypeArgument_ReportsFlowGen017()
+    {
+        // The ViewModel type itself is public, but the generated code
+        // writes its type argument out in full: a private nested type
+        // argument is just as unnameable as a private nested ViewModel.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class DetailViewModel<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                public class Container
+                {
+                    private class Secret { }
+
+                    [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.DetailViewModel<Secret>>]
+                    public class DetailView : Avalonia.Controls.Control { }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("not accessible", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void GenericViewModelWithFileLocalTypeArgument_ReportsFlowGen017()
+    {
+        // A file-local type argument cannot be referenced from the
+        // generated file, exactly like a file-local ViewModel.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class DetailViewModel<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+
+                file class LocalDto { }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.DetailViewModel<TestApp.ViewModels.LocalDto>>]
+                public class DetailView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("file-local", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void GenericViewModelWithGenericNestedTypeArgument_ReportsFlowGen017()
+    {
+        // A type argument nested in a generic type carries an unbound
+        // type parameter in its fully qualified name; the generated code
+        // cannot name it.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class Container<T>
+                {
+                    public class NestedDto { }
+                }
+
+                public class DetailViewModel<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.DetailViewModel<TestApp.ViewModels.Container<int>.NestedDto>>]
+                public class DetailView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("nested in a generic type", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void InferredGenericViewModelWithPrivateNestedTypeArgument_ReportsFlowGen017()
+    {
+        // The inferred path is checked too: the type argument of the
+        // BaseView-inferred generic ViewModel is a private nested class.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class DetailViewModel<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                public class Container
+                {
+                    private class Secret { }
+
+                    [ElegantSeries.Flow.Routing.ViewFor]
+                    public class DetailView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.DetailViewModel<Secret>> { }
+                }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("not accessible", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
     public void AbstractViewModel_ReportsFlowGen017()
     {
         // RegisterTransient registers the ViewModel type itself with the
@@ -2305,6 +2440,117 @@ public class ViewForGeneratorTests
         var (_, diagnostics, _) = RunGenerator(
             sources, additionalReferences: new[] { FlowStubsReference, plugin });
         Assert.Contains(diagnostics, d => d.Id == "FLOWGEN002");
+    }
+
+    [Fact]
+    public void ProviderOnlyApp_InvalidNamespaceOverrideWithAmbiguousPlatforms_ReportsFlowGen016NotFlowGen002()
+    {
+        // The invalid-override report precedes the platform-count
+        // judgement on every path: a provider-only compilation with both
+        // locators visible and a validated provider hears FLOWGEN016,
+        // not FLOWGEN002 (the ambiguity surfaces once the override is
+        // fixed).
+        var plugin = BuildProviderLibrary("Plugin", "Plugin", "ReportView", "ReportViewModel");
+        var sources = "[assembly: ElegantSeries.Flow.Routing.ViewForGeneratedNamespace(\"1bad\")]\n" +
+            AttributeStub + AvaloniaLocatorStub + WpfLocatorStub + """
+            namespace TestApp
+            {
+                public class ShellMarker { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { FlowStubsReference, plugin });
+        Assert.Contains(diagnostics, d => d.Id == "FLOWGEN016");
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN002");
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
+    [Fact]
+    public void InferredViewModel_FromBaseViewOutsideLocatorAssembly_IsNotInferred()
+    {
+        // A same-named BaseView defined in a different assembly than the
+        // platform locator is not the framework base class: it carries
+        // no INavigationViewModel constraint guarantee, so nothing is
+        // inferred from it and the parameterless attribute reports
+        // FLOWGEN004 instead of emitting an uncompilable registration.
+        var foreignPlatform = BuildStubLibrary(
+            "Contoso.Platform",
+            AvaloniaControlsStub + NavigationViewModelStub + AvaloniaBaseViewStub);
+        var sources = AttributeStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { foreignPlatform });
+        Assert.Contains(diagnostics, d => d.Id == "FLOWGEN004");
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void InferredViewModel_FromBaseViewInLocatorAssembly_IsInferred()
+    {
+        // The positive counterpart: BaseView and the locator living in
+        // the one referenced platform assembly (the production layout)
+        // infer as before.
+        var platform = BuildStubLibrary(
+            "Contoso.Platform",
+            AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub);
+        var sources = AttributeStub + """
+            namespace TestApp.ViewModels
+            {
+                public class HomeViewModel : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class HomeView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.HomeViewModel> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(
+            sources, additionalReferences: new[] { platform });
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.Single(runResult.GeneratedSources, s => s.HintName == "ViewForRegistrations.g.cs");
+    }
+
+    /// <summary>
+    /// Builds a small stub library (any of the shared stub sources) as a
+    /// metadata reference under the given assembly name, so a test can
+    /// place stub types in a different assembly than the compilation
+    /// under test.
+    /// </summary>
+    private static MetadataReference BuildStubLibrary(string assemblyName, string sources)
+    {
+        var references = new[]
+        {
+            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(System.Attribute).Assembly.Location),
+        };
+        var compilation = CSharpCompilation.Create(
+            assemblyName,
+            new[] { CSharpSyntaxTree.ParseText(sources) },
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var errors = compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
+        Assert.Empty(errors);
+        return compilation.ToMetadataReference();
     }
 
     [Fact]
