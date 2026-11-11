@@ -76,6 +76,16 @@ public interface INavigationJournal
 /// Default <see cref="INavigationJournal"/> implementation, bound to one
 /// decorated navigation service (same lifetime).
 /// </summary>
+/// <remarks>
+/// Entry sequence numbers are assigned per journal instance — one
+/// decorated navigation service — starting at 1 and strictly increasing
+/// in append order. They are not coordinated across instances: when
+/// several journal instances share one store (for example scoped
+/// journals in several windows writing to a singleton store), each
+/// instance numbers its own entries from 1, so the store can hold the
+/// same sequence number on entries from different instances; across
+/// instances, only the store's arrival order is meaningful.
+/// </remarks>
 public sealed class NavigationJournal : INavigationJournal
 {
     private const int SupportedFormatVersion = 1;

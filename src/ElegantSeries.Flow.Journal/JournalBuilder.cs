@@ -27,6 +27,10 @@ public sealed class JournalBuilder
     /// Only parameters of registered types get a serialized snapshot in
     /// the journal and in stack snapshots; unregistered types are
     /// journaled with a null snapshot and restore as a null parameter.
+    /// Matching is by the parameter's exact runtime type: registering
+    /// a base class or an interface does not cover instances of derived
+    /// or implementing types — those are journaled with a null
+    /// snapshot, exactly like unregistered types.
     /// The delegates run on the navigating thread at call time (serialize)
     /// and on the restoring thread (deserialize), must be thread-safe if
     /// the same registration serves concurrent windows, and may use any

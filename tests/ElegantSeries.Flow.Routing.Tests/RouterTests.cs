@@ -587,6 +587,30 @@ public class RouterTests
         Assert.Equal(1, provider.GetRequiredService<RouteTable>().Count);
     }
 
+    [Fact]
+    public void Di_CalledTwice_SecondCallDoesNotRunConfigure()
+    {
+        // The second call is a pure no-op (keep-first, as in
+        // AddElegantSeriesFlowJournal): its configure never runs, so a
+        // malformed pattern in it cannot fail startup and its side
+        // effects do not repeat.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<HomeViewModel>();
+        services.AddElegantSeriesFlowRouting(routes => routes.Map<HomeViewModel>("first"));
+
+        var secondConfigureRan = false;
+        services.AddElegantSeriesFlowRouting(routes =>
+        {
+            secondConfigureRan = true;
+            routes.Map<HomeViewModel>("orders/{id");
+        });
+
+        Assert.False(secondConfigureRan);
+        using var provider = services.BuildServiceProvider();
+        Assert.Equal(1, provider.GetRequiredService<RouteTable>().Count);
+    }
+
     private static ServiceProvider BuildProvider()
     {
         var services = new ServiceCollection();

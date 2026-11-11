@@ -22,7 +22,9 @@ public static class ServiceCollectionExtensions
     /// instance. The route table itself is registered as a singleton
     /// instance (it is immutable). Both registrations use TryAdd: if
     /// a router or a route table is already registered, this call
-    /// leaves it in place (and its table is not replaced).
+    /// leaves it in place (and its table is not replaced); when a
+    /// route table is already registered the call is a pure no-op and
+    /// <paramref name="configure"/> does not run again.
     /// </summary>
     /// <remarks>
     /// Call <c>AddElegantSeriesFlow</c> first: the navigation service
@@ -44,6 +46,19 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configure);
+
+        // Double registration keeps the first table: only this method
+        // registers a RouteTable, so an existing unkeyed descriptor
+        // means this call is a repeat — a pure no-op that does not run
+        // configure again (the same keep-first shape as
+        // AddElegantSeriesFlowJournal). Without the check, TryAdd below
+        // would discard the built table anyway, but configure's side
+        // effects — and its exceptions — would still happen.
+        foreach (var descriptor in services)
+        {
+            if (descriptor.ServiceType == typeof(RouteTable) && !descriptor.IsKeyedService)
+                return services;
+        }
 
         // Unkeyed resolution — the kind the router's constructor
         // performs — ignores keyed registrations entirely and uses the
