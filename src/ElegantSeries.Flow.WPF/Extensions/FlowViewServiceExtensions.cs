@@ -27,7 +27,11 @@ public static class FlowViewServiceExtensions
     /// registration wins when <see cref="IViewLocator"/> is resolved, so the
     /// view <i>mappings</i> of a later call replace those of an earlier one.
     /// ViewModel lifetime registrations, however, accumulate in call order
-    /// and are not rolled back by a later call.
+    /// and are not rolled back by a later call. The same applies within a
+    /// single call: if <paramref name="configure"/> throws partway, the
+    /// ViewModel registrations it already added stay in the collection
+    /// (the locator itself is not registered in that case), so retrying
+    /// on the same collection adds to them rather than starting over.
     /// </para>
     /// <para>
     /// The <paramref name="configure"/> action runs eagerly, i.e. during this

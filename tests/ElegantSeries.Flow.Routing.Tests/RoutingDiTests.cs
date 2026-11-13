@@ -105,4 +105,26 @@ public sealed class RoutingDiTests
         Assert.Same(stub, provider.GetRequiredService<IRouter>());
     }
 
+    [Fact]
+    public void Registration_PreRegisteredTableOnly_StillRegistersTheRouter()
+    {
+        // A pre-built table registered on its own (Build is public)
+        // is only half of what this method registers: the call is not
+        // a no-op, the router half still lands through TryAdd, and it
+        // binds to the caller's table — the helper's own built table
+        // is the one discarded.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        var prebuiltTable = new RouteTableBuilder().Map<DiHomeViewModel>("prebuilt").Build();
+        services.AddSingleton(prebuiltTable);
+        services.AddElegantSeriesFlowRouting(Configure);
+
+        Assert.Single(services, d => d.ServiceType == typeof(IRouter));
+        Assert.Single(services, d => d.ServiceType == typeof(RouteTable));
+
+        using var provider = services.BuildServiceProvider();
+        Assert.Same(prebuiltTable, provider.GetRequiredService<RouteTable>());
+        Assert.IsType<Router>(provider.GetRequiredService<IRouter>());
+    }
+
 }

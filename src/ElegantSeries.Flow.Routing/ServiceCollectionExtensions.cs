@@ -22,7 +22,10 @@ public static class ServiceCollectionExtensions
     /// instance. The route table itself is registered as a singleton
     /// instance (it is immutable). Both registrations use TryAdd: if
     /// a router or a route table is already registered, this call
-    /// leaves it in place (and its table is not replaced).
+    /// leaves it in place (and its table is not replaced); when both
+    /// are already registered — the state a previous call leaves — the
+    /// call is a pure no-op and <paramref name="configure"/> does not
+    /// run again.
     /// </summary>
     /// <remarks>
     /// Call <c>AddElegantSeriesFlow</c> first: the navigation service
@@ -44,6 +47,32 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configure);
+
+        // A repeat call keeps the first registration: a previous call
+        // leaves BOTH an unkeyed RouteTable and an unkeyed IRouter
+        // descriptor, and only when both are present is this call a
+        // pure no-op that does not run configure again (the same
+        // keep-first shape as AddElegantSeriesFlowJournal). Either one
+        // alone can also come from the caller — RouteTableBuilder.Build
+        // is public, so a pre-built table may be registered without a
+        // router — and then the missing half is still this call's to
+        // register through the TryAdd path below. Without the check,
+        // TryAdd would discard a repeat call's built table anyway, but
+        // configure's side effects — and its exceptions — would still
+        // happen.
+        var hasTable = false;
+        var hasRouter = false;
+        foreach (var descriptor in services)
+        {
+            if (descriptor.IsKeyedService)
+                continue;
+            if (descriptor.ServiceType == typeof(RouteTable))
+                hasTable = true;
+            else if (descriptor.ServiceType == typeof(IRouter))
+                hasRouter = true;
+        }
+        if (hasTable && hasRouter)
+            return services;
 
         // Unkeyed resolution — the kind the router's constructor
         // performs — ignores keyed registrations entirely and uses the

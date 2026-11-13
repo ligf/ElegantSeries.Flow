@@ -40,6 +40,12 @@ public interface IRouter
     /// matches returns <see langword="false"/> instead of throwing
     /// <see cref="RouteNotFoundException"/>.
     /// </summary>
+    /// <returns><see langword="false"/> when no route matches. When a
+    /// route does match, the navigation's fate exactly as
+    /// <see cref="NavigateAsync"/> reports it: <see langword="true"/>
+    /// when it was executed, <see langword="false"/> when it was
+    /// vetoed, superseded, or discarded — so a <see langword="false"/>
+    /// result does not by itself mean the URI matched nothing.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="uri"/>
     /// is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="uri"/> is
