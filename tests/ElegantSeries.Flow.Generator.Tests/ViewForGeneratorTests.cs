@@ -246,6 +246,212 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
+    public void DuplicateViewModel_DynamicAndObjectTypeArguments_ReportsFlowGen001()
+    {
+        // Wrapper<dynamic> and Wrapper<object> are the same runtime
+        // type, but their display names differ: a display-name
+        // duplicate check lets both registrations through to the
+        // runtime duplicate-registration failure FLOWGEN001 exists to
+        // pre-empt. (The ViewModels arrive by BaseView inference:
+        // dynamic cannot appear in an attribute type argument —
+        // CS8970 — but it can in a base-class type argument.)
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class Wrapper<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class DynamicView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<dynamic>> { }
+
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class ObjectView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<object>> { }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGeneratorWithFullFrameworkReferences(sources);
+
+        Assert.Single(diagnostics, d => d.Id == "FLOWGEN001");
+    }
+
+    [Fact]
+    public void DistinctViewModels_FunctionPointerRefKindsDiffer_DoNotReportFlowGen001()
+    {
+        // Function pointer types that differ only in a parameter's or
+        // the return's ref kind are distinct runtime types: their
+        // registrations must both be emitted. (Inference through
+        // BaseView<T> is the reachable path for function pointer type
+        // arguments, as in the FLOWGEN017 function-pointer test.)
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class Wrapper<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public unsafe class ValueParamView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<delegate*<int, void>>> { }
+
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public unsafe class RefParamView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<delegate*<ref int, void>>> { }
+
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public unsafe class ValueReturnView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<delegate*<int>>> { }
+
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public unsafe class RefReturnView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<delegate*<ref int>>> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN001");
+        Assert.Single(runResult.GeneratedSources, s => s.HintName == "ViewForRegistrations.g.cs");
+    }
+
+    [Fact]
+    public void DuplicateViewModel_FunctionPointerParameterRefFlavors_ReportsFlowGen001()
+    {
+        // All by-ref parameter flavors of a function pointer are the
+        // same runtime type: the signature carries only by-value vs.
+        // by-ref, never ref vs. in vs. out. Wrapper<delegate*<ref int,
+        // void>[]> and Wrapper<delegate*<in int, void>[]> therefore
+        // collide in the runtime registry exactly like a plain
+        // duplicate. (The function pointer sits in an array element
+        // inside the type argument: the direct argument position is
+        // CS0306-barred for by-ref signatures.)
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class Wrapper<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public unsafe class RefParamView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<delegate*<ref int, void>[]>> { }
+
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public unsafe class InParamView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<delegate*<in int, void>[]>> { }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(sources);
+
+        Assert.Single(diagnostics, d => d.Id == "FLOWGEN001");
+    }
+
+    [Fact]
+    public void DuplicateViewModel_FunctionPointerReturnRefFlavors_ReportsFlowGen001()
+    {
+        // A by-ref return has no flavor at runtime either:
+        // delegate*<ref int> and delegate*<ref readonly int> are the
+        // same runtime type.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class Wrapper<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public unsafe class RefReturnView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<delegate*<ref int>[]>> { }
+
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public unsafe class RefReadonlyReturnView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<delegate*<ref readonly int>[]>> { }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(sources);
+
+        Assert.Single(diagnostics, d => d.Id == "FLOWGEN001");
+    }
+
+    [Fact]
+    public void DistinctViewModels_FunctionPointerCallingConventionsDiffer_DoNotReportFlowGen001()
+    {
+        // The managed and the unmanaged calling conventions are part
+        // of a function pointer type's identity, as are the specific
+        // unmanaged conventions: delegate*<int, void>,
+        // delegate* unmanaged[Cdecl]<int, void> and
+        // delegate* unmanaged[Stdcall]<int, void> are three distinct
+        // runtime types.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class Wrapper<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public unsafe class ManagedView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<delegate*<int, void>>> { }
+
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public unsafe class CdeclView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<delegate* unmanaged[Cdecl]<int, void>>> { }
+
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public unsafe class StdcallView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.Wrapper<delegate* unmanaged[Stdcall]<int, void>>> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN001");
+        Assert.Single(runResult.GeneratedSources, s => s.HintName == "ViewForRegistrations.g.cs");
+    }
+
+    [Fact]
+    public void DuplicateViewModel_TupleElementNamesDiffer_ReportsFlowGen001()
+    {
+        // Tuple element names are not part of the runtime type:
+        // Wrapper<(int A, string B)> and Wrapper<(int X, string Y)>
+        // are both Wrapper<ValueTuple<int, string>>, while their
+        // display names differ by the element names.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class Wrapper<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.Wrapper<(int A, string B)>>]
+                public class TupleABView : Avalonia.Controls.Control { }
+
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.Wrapper<(int X, string Y)>>]
+                public class TupleXYView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (_, diagnostics, _) = RunGenerator(sources);
+
+        Assert.Single(diagnostics, d => d.Id == "FLOWGEN001");
+    }
+
+    [Fact]
     public void BothFormsOnOneView_SameViewModel_ReportsFlowGen013()
     {
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
@@ -2568,6 +2774,79 @@ public class ViewForGeneratorTests
         Assert.Single(runResult.GeneratedSources, s => s.HintName == "ViewForRegistrations.g.cs");
     }
 
+    [Fact]
+    public void InferredViewModel_FromOtherPlatformBaseViewName_WhenItsLocatorIsAbsent_IsNotInferred()
+    {
+        // The compilation references only the Avalonia platform (its
+        // locator is present, the WPF locator is not referenced at
+        // all). A same-named BaseView in the WPF namespace — e.g. a
+        // migration leftover in the app's own source, carrying no
+        // INavigationViewModel constraint — is not the framework base
+        // class: nothing is inferred from it, and the parameterless
+        // attribute reports FLOWGEN004 instead of emitting a
+        // registration the locator's constraints would reject in the
+        // generated file (CS0311).
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace ElegantSeries.Flow.WPF.Views
+            {
+                public abstract class BaseView<TViewModel> : global::Avalonia.Controls.UserControl
+                {
+                }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public class PlainViewModel
+                {
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class LegacyView : ElegantSeries.Flow.WPF.Views.BaseView<TestApp.ViewModels.PlainViewModel> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+        Assert.Contains(diagnostics, d => d.Id == "FLOWGEN004");
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
+    [Fact]
+    public void InferredViewModel_FromOtherPlatformBaseViewName_WithStructViewModel_IsNotInferred()
+    {
+        // The same escape in its value-type flavor: the leftover base
+        // class's type argument is a struct, which the generated
+        // RegisterTransient call could never name (CS0452 in the
+        // generated file).
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace ElegantSeries.Flow.WPF.Views
+            {
+                public abstract class BaseView<TViewModel> : global::Avalonia.Controls.UserControl
+                {
+                }
+            }
+
+            namespace TestApp.ViewModels
+            {
+                public struct StructViewModel
+                {
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public class LegacyView : ElegantSeries.Flow.WPF.Views.BaseView<TestApp.ViewModels.StructViewModel> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+        Assert.Contains(diagnostics, d => d.Id == "FLOWGEN004");
+        Assert.Empty(runResult.GeneratedSources);
+    }
+
     /// <summary>
     /// Builds a small stub library (any of the shared stub sources) as a
     /// metadata reference under the given assembly name, so a test can
@@ -2813,6 +3092,35 @@ public class ViewForGeneratorTests
 
         var compilation = CSharpCompilation.Create(
             assemblyName,
+            new[] { syntaxTree },
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(new ViewForGenerator());
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var updatedCompilation, out _);
+        var runResult = driver.GetRunResult();
+
+        return (runResult.Results.Single(), runResult.Diagnostics, updatedCompilation);
+    }
+
+    /// <summary>
+    /// Like <see cref="RunGenerator"/>, but the compilation references the
+    /// full framework (the test process's trusted platform assemblies)
+    /// instead of the two core assemblies. Sources that use
+    /// <c>dynamic</c> need this: with only the minimal references the
+    /// compiler cannot find <c>DynamicAttribute</c> (CS1980) and the
+    /// dynamic type symbols degrade before the generator sees them.
+    /// </summary>
+    private static (GeneratorRunResult RunResult, ImmutableArray<Diagnostic> Diagnostics, Compilation UpdatedCompilation)
+        RunGeneratorWithFullFrameworkReferences(string sources)
+    {
+        var syntaxTree = CSharpSyntaxTree.ParseText(sources);
+        var references = ((string)System.AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(System.IO.Path.PathSeparator)
+            .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
+            .ToList();
+        var compilation = CSharpCompilation.Create(
+            "TestCompilation",
             new[] { syntaxTree },
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
