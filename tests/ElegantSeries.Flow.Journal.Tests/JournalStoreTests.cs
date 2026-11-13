@@ -203,6 +203,51 @@ public class JournalStoreTests
     }
 
     [Fact]
+    public async Task InMemory_SaveSnapshot_MalformedShapes_ThrowArgumentException()
+    {
+        // The same structural validation as NavigationJournal.RestoreAsync:
+        // a hand-built snapshot with null Regions/Pages is malformed
+        // input (ArgumentException), not a NullReferenceException from
+        // the store's snapshot clone.
+        var store = new InMemoryJournalStore();
+
+        var nullRegions = await Assert.ThrowsAsync<ArgumentException>(
+            async () => await store.SaveSnapshotAsync(new JournalSnapshot { Regions = null! }));
+        Assert.Contains("Regions is null", nullRegions.Message);
+
+        var nullRegion = await Assert.ThrowsAsync<ArgumentException>(
+            async () => await store.SaveSnapshotAsync(new JournalSnapshot
+            {
+                Regions = new List<JournalRegionSnapshot> { null! },
+            }));
+        Assert.Contains("a region or its Pages is null", nullRegion.Message);
+
+        var nullPages = await Assert.ThrowsAsync<ArgumentException>(
+            async () => await store.SaveSnapshotAsync(new JournalSnapshot
+            {
+                Regions = [new JournalRegionSnapshot { Region = "MainRegion", Pages = null! }],
+            }));
+        Assert.Contains("a region or its Pages is null", nullPages.Message);
+
+        var nullPage = await Assert.ThrowsAsync<ArgumentException>(
+            async () => await store.SaveSnapshotAsync(new JournalSnapshot
+            {
+                Regions =
+                [
+                    new JournalRegionSnapshot
+                    {
+                        Region = "MainRegion",
+                        Pages = new List<JournalPageSnapshot> { null! },
+                    },
+                ],
+            }));
+        Assert.Contains("a page is null", nullPage.Message);
+
+        // None of the rejected saves stored anything.
+        Assert.Null(await store.LoadSnapshotAsync());
+    }
+
+    [Fact]
     public async Task InMemory_LoadedSnapshot_IsIsolatedFromTheStore()
     {
         var store = new InMemoryJournalStore();

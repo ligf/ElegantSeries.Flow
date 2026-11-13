@@ -994,10 +994,14 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     // binding for a settled page that has none — whichever call (if
     // any) produced the landing, an unbound settled page would
     // otherwise surface in snapshots with no parameter and Destroy
-    // retention. The binding derives from the page's effective state
-    // and never overwrites a call-side binding. One exception in
-    // timing, not in source: when the landing is attributable to
-    // exactly one in-flight call, that call's own payload refreshes
+    // retention. For a landing a call accounts for, the binding derives
+    // from the page's effective state and never overwrites a call-side
+    // binding. For a landing no call accounts for, the announcement is
+    // itself the latest recorded activation: RebindAtSettle replaces
+    // the binding with the settle-time freeze (see its comment). One
+    // exception in timing, not in source: when the landing is
+    // attributable to exactly one in-flight call, that call's own
+    // payload refreshes
     // the binding here (RefreshBindingFromCall) instead of waiting
     // for the call's continuation. An entry, by contrast,
     // is synthesized only when the landing provably came from no call:
@@ -1078,14 +1082,24 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         if (refreshCandidate is not null)
             RefreshBindingFromCall(region, settled, refreshCandidate);
 
-        // The freeze that fills the binding reports a failing
-        // serializer only when the landing came from no call: a call's
-        // own freeze (at call time) is the one that reports, exactly
-        // once, for its landing and for a deferred landing alike.
-        var (parameterType, parameterSnapshot) = BindIfUnbound(
-            region, settled, reportFreezeErrors: !attributedToCall && !deferredLanding);
         if (attributedToCall || deferredLanding || absorbed)
+        {
+            // The freeze that fills the binding reports a failing
+            // serializer only when the landing came from no call: a call's
+            // own freeze (at call time) is the one that reports, exactly
+            // once, for its landing and for a deferred landing alike.
+            BindIfUnbound(
+                region, settled, reportFreezeErrors: !attributedToCall && !deferredLanding);
             return;
+        }
+
+        // A landing no call accounts for is itself a recorded activation
+        // of the instance: the entry freezes the parameter the wrapped
+        // service effectively holds now, and the binding is replaced
+        // with that same freeze. An existing binding describes an
+        // earlier activation; letting it supply the entry would record
+        // (and later replay) a parameter the page no longer holds.
+        var (parameterType, parameterSnapshot) = RebindAtSettle(region, settled);
 
         // A synthesized landing leaves no token behind: the wrapped
         // service announces a landing at most once (its surfaced
@@ -1095,6 +1109,27 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         Enqueue(new PendingEntry(
             region, JournalEntryKind.Navigated, settled.GetType().AssemblyQualifiedName,
             parameterType, parameterSnapshot));
+    }
+
+    // Settle-time freeze for a landing no call accounts for (a bypass
+    // landing through the wrapped service itself): replaces the
+    // instance's binding wholesale with the parameter and retention the
+    // wrapped service effectively holds at this moment — the same
+    // values the synthesized entry records, so entry, binding and later
+    // snapshots all describe this activation. A failing serializer is
+    // reported (exactly once: no call froze this landing) and the
+    // parameter records as null, exactly as in BindIfUnbound's freeze.
+    private (string? ParameterType, string? ParameterSnapshot) RebindAtSettle(
+        string region, INavigationViewModel settled)
+    {
+        string? parameterType = null;
+        string? parameterSnapshot = null;
+        var parameter = _inner.GetCurrentParameter(settled, region);
+        if (parameter is not null)
+            (parameterType, parameterSnapshot) = FreezeParameter(parameter, reportErrors: true);
+        var retention = _inner.GetCurrentRetention(region) ?? NavigationRetention.Destroy;
+        SetBinding(settled, parameterType, parameterSnapshot, retention);
+        return (parameterType, parameterSnapshot);
     }
 
     // Applies an in-flight call's binding payload to its landed page
@@ -1149,8 +1184,11 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     // object via GetCurrentParameter, frozen now; retention via
     // GetCurrentRetention), and returns the bound parameter description
     // (the existing binding's, when one was already present). Existing
-    // bindings are never overwritten: call-side bindings carry the
-    // call-time frozen snapshot and win.
+    // bindings are never overwritten here: call-side bindings carry the
+    // call-time frozen snapshot and win. A landing no call accounts for
+    // does not come through this method for its entry — OnPageSettled
+    // sends it to RebindAtSettle, which replaces the binding with the
+    // settle-time freeze instead.
     private (string? ParameterType, string? ParameterSnapshot) BindIfUnbound(
         string region, INavigationViewModel settled, bool reportFreezeErrors)
     {
