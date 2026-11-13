@@ -819,6 +819,23 @@ public class DetachThrowingViewModel : INavigationViewModel, IDisposable
 }
 
 /// <summary>
+/// Page that counts how many times the service raises its
+/// Navigation-changed notification, for exactly-once attach checks.
+/// </summary>
+public class NavigationChangedCountingViewModel : INavigationViewModel
+{
+    public static int NavigationChangedCount;
+
+    public static void Reset() => NavigationChangedCount = 0;
+
+    INavigationService? INavigationViewModel.Navigation { get; set; }
+
+    void INavigationViewModel.SetNavigationSilent(INavigationService? service) { }
+
+    void INavigationViewModel.RaiseNavigationChanged() => Interlocked.Increment(ref NavigationChangedCount);
+}
+
+/// <summary>
 /// Page whose detach throws AND whose own disposal throws, for the
 /// compound hop-failure test: the detach throw faults the hop, and
 /// the salvaged scope disposal's failure must be reported through
@@ -1272,6 +1289,13 @@ public class NavigationServiceTests
         services.AddTransient<ThrowingDependencyViewModel>();
         services.AddSingleton<SingletonViewModel>();
         services.AddTransient<RefreshableViewModel>();
+        services.AddTransient<RecoveryProbeViewModel>();
+        services.AddTransient<BlockingRefreshViewModel>();
+        services.AddTransient<StubbornRefreshViewModel>();
+        services.AddTransient<BlockingReviveViewModel>();
+        services.AddTransient<InterruptTargetViewModel>();
+        services.AddTransient<SelfNoOpRefreshViewModel>();
+        services.AddTransient<WithdrawProbeRefreshViewModel>();
         services.AddTransient<ConstructionCountingViewModel>();
         services.AddTransient<BothAwareViewModel>();
         services.AddTransient<AsyncThrowingViewModel>();
@@ -1320,6 +1344,7 @@ public class NavigationServiceTests
         services.AddTransient<StackMidViewModel>();
         services.AddTransient<StackTopViewModel>();
         services.AddTransient<DetachThrowingViewModel>();
+        services.AddTransient<NavigationChangedCountingViewModel>();
         services.AddTransient<StateLockProbeViewModel>();
         services.AddTransient<DetachAndDisposalThrowingViewModel>();
         services.AddTransient<CrossCallerViewModel>();
@@ -3287,6 +3312,177 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task Refresh_BlockedAsyncCallback_InterruptedByNewNavigation()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        services.AddTransient<BlockingRefreshViewModel>();
+        services.AddTransient<InterruptTargetViewModel>();
+        using var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        Assert.True(await nav.NavigateToAsync<BlockingRefreshViewModel>());
+        var vm = Assert.IsType<BlockingRefreshViewModel>(nav.GetCurrentViewModel());
+
+        // The refresh's To callback blocks until its lifecycle token is
+        // cancelled — the documented way to learn "you are leaving".
+        var refresh = nav.NavigateToAsync<BlockingRefreshViewModel>(refreshIfActive: true);
+        await vm.RefreshCallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // A new navigation registered while the refresh callback is
+        // blocked must cancel the refresh's token (as the entering step
+        // does for a still-activating page), letting the callback
+        // finish and the new navigation proceed. Without the interrupt
+        // both calls hang until the callback gives up on its own.
+        var toDetail = nav.NavigateToAsync<InterruptTargetViewModel>();
+        Assert.True(await refresh.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(await toDetail.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(vm.ObservedCancellation);
+        Assert.IsType<InterruptTargetViewModel>(nav.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Refresh_AsyncCallbackIgnoringCancellation_AbandonedAtGateTimeout()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow(o => o.DisposalGateTimeout = TimeSpan.FromMilliseconds(300));
+        services.AddTransient<StubbornRefreshViewModel>();
+        services.AddTransient<InterruptTargetViewModel>();
+        using var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var errors = new List<Exception>();
+        nav.SubscriberError += errors.Add;
+
+        Assert.True(await nav.NavigateToAsync<StubbornRefreshViewModel>());
+        var vm = Assert.IsType<StubbornRefreshViewModel>(nav.GetCurrentViewModel());
+
+        // The refresh's To callback ignores its token and blocks on a
+        // gate only the test controls.
+        var refresh = nav.NavigateToAsync<StubbornRefreshViewModel>(refreshIfActive: true);
+        await vm.RefreshCallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            // The interrupting navigation must still land: the gate
+            // timeout abandons the stuck callback instead of letting
+            // it block navigation forever, and reports the timeout.
+            var toDetail = nav.NavigateToAsync<InterruptTargetViewModel>();
+            Assert.True(await toDetail.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.True(await refresh.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.IsType<InterruptTargetViewModel>(nav.GetCurrentViewModel());
+            await WaitUntilAsync(() => errors.OfType<TimeoutException>().Any());
+        }
+        finally
+        {
+            // Let the abandoned runner finish so it cannot leak into
+            // other tests.
+            vm.ReleaseRefresh.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task Refresh_SelfNoOpRegisteredInCallback_ConsumedWithoutCancellingToken()
+    {
+        await _navigationService.NavigateToAsync<SelfNoOpRefreshViewModel>();
+        var vm = Assert.IsType<SelfNoOpRefreshViewModel>(_navigationService.GetCurrentViewModel());
+
+        // The refresh's To registers a same-type navigation (no refresh
+        // flag) from inside the callback and then stays in the callback:
+        // the request is a self no-op — the page is not leaving — so the
+        // interrupt judgment must consume it in place and must NOT
+        // cancel the page's token for it.
+        var refresh = _navigationService.NavigateToAsync<SelfNoOpRefreshViewModel>(refreshIfActive: true);
+        await vm.CallbackRegistered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Give the judgment its chance to (wrongly) cancel: with the
+        // no-op consumed in place, the token stays live.
+        var winner = await Task.WhenAny(vm.TokenCancelled.Task, Task.Delay(TimeSpan.FromMilliseconds(300)));
+        Assert.NotSame(vm.TokenCancelled.Task, winner);
+
+        vm.ReleaseCallback.TrySetResult();
+        Assert.True(await refresh.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(2, vm.ToCount);
+        Assert.Same(vm, _navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Refresh_InterruptingIntentWithdrawnDuringCallback_SettlesCancelledAndPageRests()
+    {
+        await _navigationService.NavigateToAsync<WithdrawProbeRefreshViewModel>();
+        var vm = Assert.IsType<WithdrawProbeRefreshViewModel>(_navigationService.GetCurrentViewModel());
+
+        // The refresh's To blocks on its lifecycle token.
+        var refresh = _navigationService.NavigateToAsync<WithdrawProbeRefreshViewModel>(refreshIfActive: true);
+        await vm.RefreshStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // An interrupting navigation arrives with a caller token; the
+        // interrupt cancels the page's token (observed by the blocked
+        // callback, which then stays in the callback on a gate) and
+        // claims the intent out of the slot.
+        using var cts = new CancellationTokenSource();
+        var interrupting = _navigationService.NavigateToAsync<InterruptTargetViewModel>(cancellationToken: cts.Token);
+        await vm.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The interrupting caller withdraws while the interrupt holds
+        // its claim: the claim must settle as cancelled — never
+        // executed, never restored — and the refresh completes with
+        // the page resting. (The renewal of the resting page's token
+        // at the rest decisions has no black-box observable — every
+        // later callback is preceded by its own renewal, and a From
+        // always receives a cancelled-by-design token; it is pinned
+        // by construction against the entering step's identical
+        // rests-after-claim renewal.)
+        cts.Cancel();
+        vm.ReleaseRefresh.TrySetResult();
+
+        Assert.True(await refresh.WaitAsync(TimeSpan.FromSeconds(10)));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await interrupting.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Same(vm, _navigationService.GetCurrentViewModel());
+        Assert.Equal(2, vm.ToCount);
+
+        // The region is fully usable afterwards.
+        Assert.True(await _navigationService.NavigateToAsync<InterruptTargetViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<InterruptTargetViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Refresh_ClaimSettledWithWithdrawnSlotOccupant_ClaimStillExecutes()
+    {
+        await _navigationService.NavigateToAsync<WithdrawProbeRefreshViewModel>();
+        var vm = Assert.IsType<WithdrawProbeRefreshViewModel>(_navigationService.GetCurrentViewModel());
+
+        var refresh = _navigationService.NavigateToAsync<WithdrawProbeRefreshViewModel>(refreshIfActive: true);
+        await vm.RefreshStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The interrupting claim is held by the interrupt judgment
+        // while the refresh callback stays open on its gate.
+        var claim = _navigationService.NavigateToAsync<InterruptTargetViewModel>();
+        await vm.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // While the claim is held, another request registers into the
+        // emptied slot and is withdrawn again before the callback
+        // finishes.
+        using var occupantCts = new CancellationTokenSource();
+        var occupant = _navigationService.NavigateToAsync<TestHomeViewModel>(cancellationToken: occupantCts.Token);
+        occupantCts.Cancel();
+
+        vm.ReleaseRefresh.TrySetResult();
+
+        // The withdrawn occupant never superseded the claim — the
+        // claim was held outside the slot when it registered, and it
+        // is dead at settle time — so the claim is restored and
+        // executes, and the occupant settles as cancelled.
+        Assert.True(await refresh.WaitAsync(TimeSpan.FromSeconds(10)));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await occupant.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(await claim.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<InterruptTargetViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
     public async Task NavigateToAsync_SameTypeNoOp_DoesNotResolveTemporaryViewModel()
     {
         ConstructionCountingViewModel.ConstructionCount = 0;
@@ -3517,6 +3713,173 @@ public class NavigationServiceTests
         }
 
         public void OnNavigatedFrom() { }
+    }
+
+    /// <summary>Plain navigation target for the interrupt tests (no
+    /// disposal requirements of its own).</summary>
+    private sealed class InterruptTargetViewModel : NavigationViewModelBase;
+
+    /// <summary>
+    /// Records the state each activation observes: whether the token it
+    /// was handed was already cancelled and whether the navigation
+    /// reference was attached at that moment.
+    /// </summary>
+    private sealed class RecoveryProbeViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public int ToCount;
+        public bool LastToTokenCancelled;
+        public bool LastToNavigationAttached;
+
+        public Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+        {
+            ToCount++;
+            LastToTokenCancelled = cancellationToken.IsCancellationRequested;
+            LastToNavigationAttached = Navigation is not null;
+            return Task.CompletedTask;
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// First activation completes at once; the refresh activation
+    /// blocks until its lifecycle token is cancelled, recording that
+    /// the cancellation was observed.
+    /// </summary>
+    private sealed class BlockingRefreshViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public TaskCompletionSource RefreshCallbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool ObservedCancellation { get; private set; }
+        private int _toCount;
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _toCount) == 2)
+            {
+                RefreshCallbackStarted.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    ObservedCancellation = true;
+                }
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// First activation completes at once; the refresh activation
+    /// ignores its token and blocks on a gate only the test releases.
+    /// </summary>
+    private sealed class StubbornRefreshViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public TaskCompletionSource RefreshCallbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseRefresh { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _toCount;
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _toCount) == 2)
+            {
+                RefreshCallbackStarted.TrySetResult();
+                await ReleaseRefresh.Task;
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The refresh activation registers a same-type navigation from
+    /// inside the callback, signals that the token was cancelled if it
+    /// ever is, and stays in the callback until the test releases it.
+    /// </summary>
+    private sealed class SelfNoOpRefreshViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public TaskCompletionSource CallbackRegistered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource TokenCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseCallback { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int ToCount;
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref ToCount) == 2)
+            {
+                using var registration = cancellationToken.Register(() => TokenCancelled.TrySetResult());
+                _ = Navigation!.NavigateToAsync<SelfNoOpRefreshViewModel>();
+                CallbackRegistered.TrySetResult();
+                await ReleaseCallback.Task;
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The refresh activation blocks on its lifecycle token; once the
+    /// cancellation is observed it signals and stays in the callback
+    /// until released.
+    /// </summary>
+    private sealed class WithdrawProbeRefreshViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public TaskCompletionSource RefreshStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CancellationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseRefresh { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int ToCount => _toCount;
+        private int _toCount;
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _toCount) == 2)
+            {
+                RefreshStarted.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    CancellationObserved.TrySetResult();
+                    await ReleaseRefresh.Task;
+                }
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// First activation completes at once; the revive activation (the
+    /// second To, after a faulted departure) blocks until its
+    /// lifecycle token is cancelled.
+    /// </summary>
+    private sealed class BlockingReviveViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public TaskCompletionSource ReviveCallbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool ObservedCancellation { get; private set; }
+        private int _toCount;
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _toCount) == 2)
+            {
+                ReviveCallbackStarted.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    ObservedCancellation = true;
+                }
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class ConstructionCountingViewModel : NavigationViewModelBase, INavigationAware
@@ -4993,6 +5356,29 @@ public class NavigationServiceTests
         Assert.Equal(0, ButtonTargetViewModel.ConstructionCount);
         Assert.Equal(1, page.NavigatedFromCount);
         Assert.Equal("two", page.LastParameter);
+    }
+
+    [Fact]
+    public async Task Revive_BlockedAsyncCallback_InterruptedByNewNavigation()
+    {
+        await _navigationService.NavigateToAsync<BlockingReviveViewModel>();
+        var vm = Assert.IsType<BlockingReviveViewModel>(_navigationService.GetCurrentViewModel());
+
+        // The unregistered target faults after From ran, so the current
+        // page is revived — and the revive's To callback blocks until
+        // its lifecycle token is cancelled.
+        var failing = _navigationService.NavigateToAsync<UnregisteredViewModel>();
+        await vm.ReviveCallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // A new navigation registered while the revive callback is
+        // blocked must cancel the revive's token, letting the callback
+        // finish and the new navigation proceed.
+        var toDetail = _navigationService.NavigateToAsync<TestDetailViewModel>();
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await failing.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(await toDetail.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(vm.ObservedCancellation);
+        Assert.IsType<TestDetailViewModel>(_navigationService.GetCurrentViewModel());
     }
 
     [Fact]
@@ -6519,6 +6905,110 @@ public class NavigationServiceTests
         // The region is fully usable afterwards.
         Assert.True(await _navigationService.NavigateToAsync<TestHomeViewModel>()
             .WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task GoBack_DetachThrowOnPoppedPage_ReactivatesPageBelowWithLiveTokenAndNavigation()
+    {
+        DetachThrowingViewModel.Reset();
+
+        await _navigationService.NavigateToAsync<RecoveryProbeViewModel>();
+        var probe = Assert.IsType<RecoveryProbeViewModel>(_navigationService.GetCurrentViewModel());
+        Assert.Equal(1, probe.ToCount);
+        Assert.False(probe.LastToTokenCancelled);
+        Assert.True(probe.LastToNavigationAttached);
+
+        await _navigationService.NavigateToAsync<DetachThrowingViewModel>();
+        DetachThrowingViewModel.ThrowOnDetach = true;
+
+        // The back hop queues the popped page's disposal (whose detach
+        // throws) before it renews the target's activation or
+        // re-attaches its navigation reference; the hop faults.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _navigationService.GoBackAsync()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("Detach boom.", ex.Message);
+        DetachThrowingViewModel.ThrowOnDetach = false;
+
+        // The page below is current again — and genuinely reactivated:
+        // the recovery must renew its activation (its token was
+        // cancelled when it was covered) and re-attach its navigation
+        // reference (detached at the same time). Without that, the page
+        // sits current with a dead token and no way to navigate.
+        Assert.Same(probe, _navigationService.GetCurrentViewModel());
+        await WaitUntilAsync(() => probe.ToCount == 2);
+        Assert.False(probe.LastToTokenCancelled);
+        Assert.True(probe.LastToNavigationAttached);
+
+        // The re-attached reference really navigates.
+        Assert.True(await probe.Navigation!.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task GoBackTo_DetachThrowOnLastPop_ReactivatesTargetWithLiveTokenAndNavigation()
+    {
+        DetachThrowingViewModel.Reset();
+
+        await _navigationService.NavigateToAsync<RecoveryProbeViewModel>();
+        var probe = Assert.IsType<RecoveryProbeViewModel>(_navigationService.GetCurrentViewModel());
+        await _navigationService.NavigateToAsync<DetachThrowingViewModel>();
+        await _navigationService.NavigateToAsync<InterruptTargetViewModel>();
+        DetachThrowingViewModel.ThrowOnDetach = true;
+
+        // The GoBackTo hop pops the top page (queued normally), then
+        // the detach-throwing mid page: queueing its disposal throws
+        // before the hop renews the target's activation or re-attaches
+        // its navigation reference — the same recovery obligation as
+        // the single-pop GoBack, through the multi-pop hop.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _navigationService.GoBackToAsync<RecoveryProbeViewModel>()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("Detach boom.", ex.Message);
+        DetachThrowingViewModel.ThrowOnDetach = false;
+
+        await WaitUntilAsync(() => DetachThrowingViewModel.DisposedCount == 1);
+        Assert.Same(probe, _navigationService.GetCurrentViewModel());
+        await WaitUntilAsync(() => probe.ToCount == 2);
+        Assert.False(probe.LastToTokenCancelled);
+        Assert.True(probe.LastToNavigationAttached);
+
+        // The re-attached reference really navigates.
+        Assert.True(await probe.Navigation!.NavigateToAsync<TestHomeViewModel>()
+            .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<TestHomeViewModel>(_navigationService.GetCurrentViewModel());
+    }
+
+    [Fact]
+    public async Task Navigate_PushDetachThrow_LandedPageNavigationChangedRaisedOnce()
+    {
+        DetachThrowingViewModel.Reset();
+        NavigationChangedCountingViewModel.Reset();
+
+        await _navigationService.NavigateToAsync<DetachThrowingViewModel>();
+        DetachThrowingViewModel.ThrowOnDetach = true;
+
+        // A plain push: the navigate commit covers the detach-throwing
+        // page (queueing its detach, which throws), but keeps the
+        // commit — the landed page is renewed and attached by the
+        // commit itself, which then deliberately exits its gate
+        // registration and rethrows so the pump's recovery registers a
+        // replacement gate. The recovery must not attach a second
+        // time: the landed page's Navigation-changed notification is
+        // raised exactly once.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _navigationService.NavigateToAsync<NavigationChangedCountingViewModel>()
+                .WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("Detach boom.", ex.Message);
+        DetachThrowingViewModel.ThrowOnDetach = false;
+
+        Assert.IsType<NavigationChangedCountingViewModel>(_navigationService.GetCurrentViewModel());
+        await WaitUntilAsync(() => NavigationChangedCountingViewModel.NavigationChangedCount >= 1);
+        // Give a duplicate delivery its chance to arrive, then pin
+        // the exactly-once outcome.
+        await Task.Delay(200);
+        Assert.Equal(1, NavigationChangedCountingViewModel.NavigationChangedCount);
     }
 
     [Fact]
