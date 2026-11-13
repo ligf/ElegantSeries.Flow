@@ -38,8 +38,14 @@ namespace ElegantSeries.Flow.Journal;
 /// that landed the page, from that read-back state. When a page settles
 /// without a binding — it was registered from a lifecycle callback
 /// before it existed, or it bypassed the decorator — the settle
-/// announcement fills one in from the same read-back state; an
-/// announcement never overwrites an existing binding.
+/// announcement fills one in from the same read-back state. An
+/// announcement for a landing a recorded call accounts for refreshes
+/// the binding from that call: it replaces the binding with the call's
+/// frozen snapshot when the call's parameter was applied, and
+/// otherwise fills only a missing binding. A landing no call accounts
+/// for is rebound at settle instead — its announcement replaces any
+/// existing binding with the read-back state, so the binding describes
+/// the instance's most recent recorded activation.
 /// </para>
 /// <para>
 /// <b>Navigations that bypass the decorator.</b> A ViewModel's attached

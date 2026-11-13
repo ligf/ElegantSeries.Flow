@@ -16,10 +16,11 @@ public enum NavigationRetention
 
     /// <summary>
     /// The page is cached for reuse when it leaves, instead of being
-    /// destroyed. A later navigation to the same ViewModel type with
-    /// <see cref="KeepAlive"/> retention reuses the cached instance when
-    /// the navigation is recognized as addressed to it; otherwise a new
-    /// instance is created and the cached one stays cached until evicted.
+    /// destroyed. A later forward navigation to the same ViewModel type
+    /// — with any retention — reuses the cached instance when the
+    /// navigation is recognized as addressed to it, and the instance
+    /// then takes that navigation's retention; otherwise a new instance
+    /// is created and the cached one stays cached until evicted.
     /// </summary>
     /// <remarks>
     /// The cache key is <c>(region, ViewModel type)</c>: each region holds at most one

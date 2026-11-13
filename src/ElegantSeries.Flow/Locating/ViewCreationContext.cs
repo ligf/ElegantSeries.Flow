@@ -26,9 +26,10 @@ namespace ElegantSeries.Flow.Locating;
 /// </para>
 /// <para>
 /// A view is created once per ViewModel instance (the host caches views by
-/// instance), so a factory runs on the instance's first activation only;
+/// instance), so a factory runs when the instance's view is first created;
 /// later re-activations of a kept-alive page reuse the cached view and the
-/// factory is not consulted again.
+/// factory is not consulted again. If a factory throws, nothing is cached,
+/// so a later activation consults the factory again.
 /// </para>
 /// </remarks>
 public sealed class ViewCreationContext

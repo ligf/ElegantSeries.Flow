@@ -7,9 +7,10 @@ namespace ElegantSeries.Flow.Navigation;
 /// </summary>
 /// <remarks>
 /// <para>
-/// When a forward navigation (push) targets a page type that already has
+/// When a forward navigation targets a page type that already has
 /// <see cref="NavigationRetention.KeepAlive"/> instances — covered entries on
-/// the region's stack, or the entry held in the KeepAlive cache — the service
+/// the region's stack (classified on a push), or the entry held in the
+/// KeepAlive cache (checked on every forward operation) — the service
 /// must decide which existing instance, if any, the navigation is addressed
 /// to. Candidates are considered nearest to the stack top first. For each
 /// candidate whose ViewModel implements this interface, the return value of
@@ -17,7 +18,10 @@ namespace ElegantSeries.Flow.Navigation;
 /// no other rule is consulted for it. A candidate that answers
 /// <see langword="true"/> is reactivated with the new parameter; if no
 /// candidate is recognized, a new instance is created — an existing instance
-/// is never reused merely because it has the same type.
+/// is never reused merely because it has the same type. The same verdict is
+/// also consulted when a parameterized <c>GoBackTo</c> searches the stack
+/// for the entry it returns to, and when a parameterized <c>Remove</c>
+/// classifies the covered entries it addresses.
 /// </para>
 /// <para>
 /// For candidates that do not implement this interface, the service compares

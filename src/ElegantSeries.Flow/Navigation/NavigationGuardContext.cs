@@ -30,7 +30,7 @@ public sealed class NavigationGuardContext
     /// </param>
     /// <param name="parameter">
     /// The navigation parameter — or, for back navigation, the parameter the target page
-    /// was originally navigated with.
+    /// was most recently activated with (updated on every activation).
     /// </param>
     /// <param name="isBack"><see langword="true"/> when the pending navigation is a back navigation.</param>
     public NavigationGuardContext(
@@ -75,7 +75,7 @@ public sealed class NavigationGuardContext
 
     /// <summary>
     /// Gets the navigation parameter — or, for back navigation, the parameter the target
-    /// page was originally navigated with.
+    /// page was most recently activated with (updated on every activation).
     /// </summary>
     public object? Parameter { get; }
 

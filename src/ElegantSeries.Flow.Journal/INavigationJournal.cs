@@ -36,9 +36,10 @@ public interface INavigationJournal
     /// is called once per page — <see cref="JournalRestoreOperation.Root"/>
     /// for the first page, <see cref="JournalRestoreOperation.Push"/> for
     /// the rest — and performs that page's navigation, returning the
-    /// navigation's fate. When a page fails (the delegate returns false,
-    /// throws, or the page's serialized parameter has no registered
-    /// deserializer), restoration of that region stops at the failed page
+    /// navigation's fate. When a page fails (the delegate returns false
+    /// or throws, the page's serialized parameter has no registered
+    /// deserializer, or the registered deserializer throws), restoration
+    /// of that region stops at the failed page
     /// — pages already restored stay — and the remaining regions are
     /// still restored. Per-region outcomes are reported in the returned
     /// <see cref="JournalRestoreResult"/>; a page failure never makes this
