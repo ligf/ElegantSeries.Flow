@@ -932,8 +932,10 @@ public interface INavigationService
     /// Reentrancy: throws <see cref="InvalidOperationException"/> if called
     /// from within a page lifecycle callback. Call it outside the callback
     /// instead. After the service is disposed, returns 0 without doing
-    /// anything; the disposed check runs first, so a call from within a
-    /// callback after disposal has begun returns 0 instead of throwing.
+    /// anything; the disposed check runs before the reentrancy check, so
+    /// a call from within a callback after disposal has begun returns 0
+    /// instead of throwing. (The region name is validated before both, so
+    /// an invalid name throws even after disposal.)
     /// </para>
     /// </remarks>
     int Remove<TViewModel>(string regionName = DefaultRegionName)
@@ -1008,8 +1010,10 @@ public interface INavigationService
     /// </para>
     /// <para>
     /// After the service is disposed, this is a silent no-op; the disposed
-    /// check runs first, so a call from within a page lifecycle callback
-    /// after disposal has begun is a silent no-op instead of throwing.
+    /// check runs before the reentrancy check, so a call from within a
+    /// page lifecycle callback after disposal has begun is a silent no-op
+    /// instead of throwing. (The region name is validated before both, so
+    /// an invalid name throws even after disposal.)
     /// </para>
     /// </remarks>
     void ClearCache(string regionName);
@@ -1087,8 +1091,10 @@ public interface INavigationService
     /// </para>
     /// <para>
     /// After the service is disposed, this is a silent no-op; the disposed
-    /// check runs first, so a call from within a page lifecycle callback
-    /// after disposal has begun is a silent no-op instead of throwing.
+    /// check runs before the reentrancy check, so a call from within a
+    /// page lifecycle callback after disposal has begun is a silent no-op
+    /// instead of throwing. (The region name is validated before both, so
+    /// an invalid name throws even after disposal.)
     /// </para>
     /// </remarks>
     ValueTask ClearCacheAsync(string regionName);

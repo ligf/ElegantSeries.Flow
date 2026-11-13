@@ -22,7 +22,9 @@ namespace ElegantSeries.Flow.Journal;
 /// is moved over the target), which is sized for the capped history
 /// (<see cref="JournalOptions.MaxHistoryEntries"/>). A file whose content
 /// is not valid journal JSON surfaces as an exception on the next
-/// operation instead of being silently discarded.
+/// operation that reads it (appending, reading entries back, or loading
+/// a snapshot) instead of being silently discarded; saving a snapshot
+/// and clearing replace the files without reading them.
 /// </para>
 /// <para>
 /// Concurrent calls on one instance are serialized internally, but that

@@ -135,8 +135,9 @@ public sealed class JournalRegionRestoreResult
     public JournalPageSnapshot? FailedPage { get; init; }
 
     /// <summary>The exception the restore delegate threw for
-    /// <see cref="FailedPage"/>, or null when the page failed by returning
-    /// false or by having no registered deserializer.</summary>
+    /// <see cref="FailedPage"/> — or the exception the registered
+    /// parameter deserializer threw for it — or null when the page failed
+    /// by returning false or by having no registered deserializer.</summary>
     public Exception? Error { get; init; }
 
     /// <summary>True when every page of the region was restored.</summary>
