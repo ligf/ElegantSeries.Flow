@@ -100,10 +100,11 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
     private sealed class ViewMapping : IEquatable<ViewMapping>
     {
-        public ViewMapping(string viewName, string viewModelName, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType, bool isOpenGenericView, bool isOpenGenericViewModel, string? viewModelNotImplementingInterface, ImmutableArray<string> viewConstraintViolations, string? viewModelNotReferenceType, ImmutableArray<string> viewModelConstraintViolations)
+        public ViewMapping(string viewName, string viewModelName, string viewModelRuntimeKey, string registerMethod, Location location, string? invalidLifetime, bool cannotInferViewModel, string? conflictingBaseViewModel, bool unresolvableViewModelType, bool isOpenGenericView, bool isOpenGenericViewModel, string? viewModelNotImplementingInterface, ImmutableArray<string> viewConstraintViolations, string? viewModelNotReferenceType, ImmutableArray<string> viewModelConstraintViolations)
         {
             ViewName = viewName;
             ViewModelName = viewModelName;
+            ViewModelRuntimeKey = viewModelRuntimeKey;
             RegisterMethod = registerMethod;
             Location = location;
             InvalidLifetime = invalidLifetime;
@@ -120,6 +121,16 @@ public sealed class ViewForGenerator : IIncrementalGenerator
 
         public string ViewName { get; }
         public string ViewModelName { get; }
+
+        /// <summary>
+        /// The ViewModel's runtime identity key (see
+        /// <c>ComputeRuntimeTypeKey</c>): two mappings whose ViewModels are
+        /// the same runtime <see cref="System.Type"/> share a key even when
+        /// their display names differ (a <c>dynamic</c> type argument, tuple
+        /// element names). The FLOWGEN001 duplicate check keys on this, not
+        /// on the display name.
+        /// </summary>
+        public string ViewModelRuntimeKey { get; }
         public string RegisterMethod { get; }
         public Location Location { get; }
 
@@ -203,6 +214,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             other is not null &&
             string.Equals(ViewName, other.ViewName, StringComparison.Ordinal) &&
             string.Equals(ViewModelName, other.ViewModelName, StringComparison.Ordinal) &&
+            string.Equals(ViewModelRuntimeKey, other.ViewModelRuntimeKey, StringComparison.Ordinal) &&
             string.Equals(RegisterMethod, other.RegisterMethod, StringComparison.Ordinal) &&
             string.Equals(InvalidLifetime, other.InvalidLifetime, StringComparison.Ordinal) &&
             CannotInferViewModel == other.CannotInferViewModel &&
@@ -226,6 +238,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                 var hash = 17;
                 hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(ViewName);
                 hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(ViewModelName);
+                hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(ViewModelRuntimeKey);
                 hash = (hash * 31) + StringComparer.Ordinal.GetHashCode(RegisterMethod);
                 hash = (hash * 31) + (InvalidLifetime is null ? 0 : StringComparer.Ordinal.GetHashCode(InvalidLifetime));
                 hash = (hash * 31) + CannotInferViewModel.GetHashCode();
@@ -839,9 +852,14 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             }
         }
 
+        var viewModelRuntimeKey = effectiveViewModel is not null
+            ? ComputeRuntimeTypeKey(effectiveViewModel)
+            : viewModelName ?? string.Empty;
+
         return new ViewMapping(
             viewName,
             viewModelName ?? string.Empty,
+            viewModelRuntimeKey,
             registerMethod ?? string.Empty,
             location,
             invalidLifetime,
@@ -1054,10 +1072,13 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     /// constraint, so inferring from it could emit a registration the
     /// generated code cannot compile). When the platform's
     /// <c>IViewLocator</c> resolves, the candidate must live in the same
-    /// assembly as it. When the locator does not resolve at all, this
-    /// compilation cannot generate registrations anyway, and the name-based
-    /// match is kept so the remaining diagnostics describe the declaration
-    /// as written.
+    /// assembly as it. When it does not resolve but the other platform's
+    /// locator does, the compilation targets that platform and the
+    /// name-based match is rejected: a same-named base class in this
+    /// namespace is an impostor then, not the framework base class. Only
+    /// when neither locator resolves — a compilation that cannot generate
+    /// registrations anyway — is the name-based match kept, so the
+    /// remaining diagnostics describe the declaration as written.
     /// </remarks>
     private static INamedTypeSymbol? FindBaseViewModel(Compilation compilation, INamedTypeSymbol viewType)
     {
@@ -1082,16 +1103,160 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             }
 
             var locator = compilation.GetTypeByMetadataName(locatorMetadataName);
-            if (locator is not null &&
-                !SymbolEqualityComparer.Default.Equals(original.ContainingAssembly, locator.ContainingAssembly))
+            if (locator is not null)
             {
-                continue;
+                if (!SymbolEqualityComparer.Default.Equals(original.ContainingAssembly, locator.ContainingAssembly))
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                // The platform this base type names is not referenced by
+                // the compilation. When the OTHER platform's locator
+                // resolves, the compilation targets that platform, and a
+                // same-named base type in this namespace is an impostor
+                // (e.g. a migration leftover): its type argument must not
+                // be inferred from. When neither locator resolves,
+                // generation is suppressed downstream (FLOWGEN014 /
+                // FLOWGEN002) and the name match is kept as before.
+                var otherLocatorMetadataName = locatorMetadataName == AvaloniaLocatorMetadataName
+                    ? WpfLocatorMetadataName
+                    : AvaloniaLocatorMetadataName;
+                if (compilation.GetTypeByMetadataName(otherLocatorMetadataName) is not null)
+                {
+                    continue;
+                }
             }
 
             return current.TypeArguments.FirstOrDefault() as INamedTypeSymbol;
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Computes the runtime identity key of a ViewModel type: two types
+    /// share a key exactly when they are the same runtime
+    /// <see cref="System.Type"/>, which is the identity the generated
+    /// registrations are keyed by at runtime. The display name cannot
+    /// serve here — it distinguishes types the runtime identifies
+    /// (<c>Wrapper&lt;dynamic&gt;</c> vs <c>Wrapper&lt;object&gt;</c>;
+    /// tuple element names), which let duplicate registrations through
+    /// FLOWGEN001 to a runtime failure. Normalization: <c>dynamic</c>
+    /// is <see cref="object"/>; a tuple type is its underlying
+    /// <see cref="System.ValueTuple"/> construction (element names are
+    /// dropped, element types normalized recursively); a named type is
+    /// its original definition plus its normalized type arguments (so
+    /// nullable reference annotations, which the runtime does not
+    /// distinguish, do not split a key); arrays and pointers recurse
+    /// into their element types; a function pointer keys on its
+    /// calling convention and its signature's types, with by-value
+    /// vs. by-ref as the only ref distinction (the runtime identifies
+    /// all by-ref flavors — ref, in, out, ref readonly — as one type).
+    /// </summary>
+    private static string ComputeRuntimeTypeKey(ITypeSymbol type)
+    {
+        var sb = new StringBuilder();
+        AppendRuntimeTypeKey(sb, type);
+        return sb.ToString();
+    }
+
+    private static void AppendRuntimeTypeKey(StringBuilder sb, ITypeSymbol type)
+    {
+        switch (type)
+        {
+            case IDynamicTypeSymbol:
+                // The named-type branch renders System.Object through
+                // FullyQualifiedFormat, whose special-type form is the
+                // keyword: the dynamic key must use that same form.
+                sb.Append("object");
+                break;
+            case IArrayTypeSymbol array:
+                AppendRuntimeTypeKey(sb, array.ElementType);
+                sb.Append(array.IsSZArray ? "[]" : $"[{array.Rank}*]");
+                break;
+            case IPointerTypeSymbol pointer:
+                AppendRuntimeTypeKey(sb, pointer.PointedAtType);
+                sb.Append('*');
+                break;
+            case IFunctionPointerTypeSymbol functionPointer:
+            {
+                // The signature is part of the runtime identity: the
+                // calling convention (including the unmanaged
+                // convention types) and by-value vs. by-ref for the
+                // return and each parameter. By-ref FLAVOR is not:
+                // the runtime signature carries no ref/in/out
+                // distinction — typeof of every by-ref flavor is the
+                // one type — and the custom modifiers Roslyn attaches
+                // for the flavors (modreq In/Out) are likewise absent
+                // from the runtime identity, so all by-ref parameters
+                // and returns normalize to the one "ref" marker and
+                // the modifiers are not keyed at all.
+                var signature = functionPointer.Signature;
+                sb.Append("fnptr[");
+                sb.Append(signature.CallingConvention.ToString());
+                foreach (var conventionType in signature.UnmanagedCallingConventionTypes)
+                {
+                    sb.Append('+');
+                    sb.Append(conventionType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                }
+
+                sb.Append(';');
+                if (signature.ReturnsByRef || signature.ReturnsByRefReadonly)
+                {
+                    sb.Append("ref ");
+                }
+
+                AppendRuntimeTypeKey(sb, signature.ReturnType);
+                foreach (var parameter in signature.Parameters)
+                {
+                    sb.Append(';');
+                    if (parameter.RefKind != RefKind.None)
+                    {
+                        sb.Append("ref ");
+                    }
+
+                    AppendRuntimeTypeKey(sb, parameter.Type);
+                }
+
+                sb.Append(']');
+                break;
+            }
+            case INamedTypeSymbol named when named.IsTupleType && named.TupleUnderlyingType is not null:
+                // A tuple type is its underlying ValueTuple construction:
+                // the element names are not part of the runtime type.
+                AppendRuntimeTypeKey(sb, named.TupleUnderlyingType);
+                break;
+            case INamedTypeSymbol named:
+                sb.Append(named.OriginalDefinition.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                if (named.TypeArguments.Length > 0)
+                {
+                    sb.Append('<');
+                    for (var i = 0; i < named.TypeArguments.Length; i++)
+                    {
+                        if (i > 0)
+                        {
+                            sb.Append(',');
+                        }
+
+                        AppendRuntimeTypeKey(sb, named.TypeArguments[i]);
+                    }
+
+                    sb.Append('>');
+                }
+
+                break;
+            case ITypeParameterSymbol typeParameter:
+                // Mappings are closed constructions; a bare type parameter
+                // reaches here only for open/error shapes that the
+                // duplicate check excludes anyway.
+                sb.Append(typeParameter.Name);
+                break;
+            default:
+                sb.Append(type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                break;
+        }
     }
 
     /// <summary>
@@ -1471,7 +1636,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                 continue;
             }
 
-            if (!seenViewModels.Add(mapping.ViewModelName))
+            if (!seenViewModels.Add(mapping.ViewModelRuntimeKey))
             {
                 spc.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticDescriptors.DuplicateViewModel, mapping.Location, mapping.ViewModelName));
