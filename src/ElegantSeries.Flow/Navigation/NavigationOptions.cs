@@ -19,7 +19,9 @@ public sealed class NavigationOptions
     /// <para>
     /// Default is 5 seconds. Increase it if pages have legitimately slow cleanup
     /// (flushing buffers, closing connections); decrease it for snappier navigation
-    /// when ViewModels are known to honor cancellation promptly.
+    /// when ViewModels are known to honor cancellation promptly. Any positive value
+    /// is accepted; a value above the framework timer maximum (about 49.7 days,
+    /// e.g. <see cref="TimeSpan.MaxValue"/>) is treated as that maximum.
     /// </para>
     /// </remarks>
     public TimeSpan DisposalGateTimeout

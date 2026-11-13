@@ -9,11 +9,24 @@ namespace ElegantSeries.Flow.Navigation;
 public sealed partial class NavigationService
 {
     /// <summary>
+    /// The longest wait the framework timer underlying <see cref="Task.Delay(TimeSpan)"/>
+    /// can represent (UInt32.MaxValue − 1 milliseconds, about 49.7 days); constructing
+    /// a longer delay throws <see cref="ArgumentOutOfRangeException"/>.
+    /// </summary>
+    private static readonly TimeSpan MaxGateDelay = TimeSpan.FromMilliseconds(4294967294d);
+
+    /// <summary>
     /// How long disposal gating waits for an entry's in-flight async lifecycle to
     /// complete before releasing its page scope anyway. Guards against a ViewModel
-    /// that ignores its cancellation token blocking navigation forever.
+    /// that ignores its cancellation token blocking navigation forever. The option
+    /// accepts any positive value — <see cref="TimeSpan.MaxValue"/> is the idiomatic
+    /// "wait indefinitely" — so the effective timeout is clamped to
+    /// <see cref="MaxGateDelay"/>: every gate wait races its delay against the gate
+    /// itself, so a clamped wait still ends the moment the gate completes.
     /// </summary>
-    private TimeSpan DisposalGateTimeout => _options.DisposalGateTimeout;
+    private TimeSpan DisposalGateTimeout => _options.DisposalGateTimeout <= MaxGateDelay
+        ? _options.DisposalGateTimeout
+        : MaxGateDelay;
 
     /// <summary>
     /// Tracks the entry whose lifecycle processing is running on the current
