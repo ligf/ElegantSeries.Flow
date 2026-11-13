@@ -1132,6 +1132,40 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         return (parameterType, parameterSnapshot);
     }
 
+    // The applied test shared by the announcement-side refresh and
+    // both post-call bindings: whether the landed page's effective
+    // parameter is the object the call passed. The comparison runs
+    // user code (the parameter's Equals; mirrors how the wrapped
+    // service's classification guards the vote and Equals of user
+    // parameters): a throwing Equals is a recording-side failure — it
+    // is reported through SubscriberError once and the parameter
+    // counts as not applied, with proven set to false — so it can
+    // neither abort the announcement's remaining processing nor reach
+    // the navigation's caller (nor skip the entry the caller is about
+    // to append). Callers that would turn a plain "not applied" into
+    // a written record must consult proven: an unproven test says
+    // nothing about the parameter the page holds.
+    private bool ParameterApplied(object? effective, object? passedParameter, out bool proven)
+    {
+        proven = true;
+        if (effective is null)
+            return passedParameter is null;
+        if (passedParameter is null)
+            return false;
+        if (ReferenceEquals(effective, passedParameter))
+            return true;
+        try
+        {
+            return effective.Equals(passedParameter);
+        }
+        catch (Exception ex)
+        {
+            proven = false;
+            RaiseErrorHandlers(SnapshotErrorHandlers(), ex);
+            return false;
+        }
+    }
+
     // Applies an in-flight call's binding payload to its landed page
     // at announcement time, with the same decision the call's own
     // post-call binding (BindAfterNavigation /
@@ -1148,28 +1182,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
     private void RefreshBindingFromCall(string region, INavigationViewModel settled, InFlightCall call)
     {
         var effective = _inner.GetCurrentParameter(settled, region);
-        bool applied;
-        try
-        {
-            // The parameter's Equals is user code: it must not abort
-            // this announcement's remaining processing (binding fill,
-            // entry synthesis, republication). A throwing Equals is
-            // reported once and counts as not applied — the post-call
-            // binding makes the same decision on the call flow, where
-            // its own Equals failure reaches the caller instead.
-            // (Mirrors how the wrapped service's classification guards
-            // the vote and Equals of user parameters.)
-            applied = effective is null
-                ? call.PassedParameter is null
-                : call.PassedParameter is not null &&
-                  (ReferenceEquals(effective, call.PassedParameter) || effective.Equals(call.PassedParameter));
-        }
-        catch (Exception ex)
-        {
-            RaiseErrorHandlers(SnapshotErrorHandlers(), ex);
-            return;
-        }
-        if (!applied)
+        if (!ParameterApplied(effective, call.PassedParameter, out _))
             return;
         var retention = call.Kind == InFlightCallKind.GoBackTo
             ? TryGetBinding(settled, out var existing)
@@ -1249,20 +1262,23 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
 
         var retention = _inner.GetCurrentRetention(region) ?? fallbackRetention;
         var effective = _inner.GetCurrentParameter(current, region);
-        var applied = effective is null
-            ? passedParameter is null
-            : passedParameter is not null &&
-              (ReferenceEquals(effective, passedParameter) || effective.Equals(passedParameter));
+        var applied = ParameterApplied(effective, passedParameter, out var proven);
         if (applied)
         {
             SetBinding(current, parameterType, parameterSnapshot, retention);
         }
-        else if (!TryGetBinding(current, out _))
+        else if (proven && !TryGetBinding(current, out _))
         {
             // The page kept a parameter this call did not supply and has
             // no binding yet (it was created outside the journal): record
             // its retention only. Serializing the effective parameter now
-            // would break the call-time freeze rule.
+            // would break the call-time freeze rule. An unproven test
+            // (the comparison itself threw) writes nothing instead: the
+            // settle announcement's bind-if-unbound remains free to fill
+            // the binding from the page's effective parameter — in the
+            // announcement-first ordering it already has, and this branch
+            // is not reached — while a retention-only record here would
+            // pre-empt that fill with a null parameter.
             SetBinding(current, null, null, retention);
         }
         // Otherwise the existing binding already describes the page's
@@ -1288,10 +1304,7 @@ public sealed class JournalNavigationService : INavigationService, IDisposable, 
         // bound only when the landed page's effective parameter is the
         // object this call passed (a non-claimed GoBackTo leaves the
         // page's stored parameter — and its binding — untouched).
-        var applied = effective is null
-            ? passedParameter is null
-            : passedParameter is not null &&
-              (ReferenceEquals(effective, passedParameter) || effective.Equals(passedParameter));
+        var applied = ParameterApplied(effective, passedParameter, out _);
         if (!applied)
             return; // the landed page kept its previous parameter
         var retention = TryGetBinding(current, out var existing)
