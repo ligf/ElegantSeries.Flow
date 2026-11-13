@@ -783,8 +783,12 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         // as it names the view, so the same three nameability requirements
         // the view is checked against above apply to the ViewModel too —
         // accessible from the generated file, not file-local, not nested
-        // in a generic type. Without these checks the failure surfaces as
-        // a raw compiler error (CS0122) inside the generated file.
+        // in a generic type — plus a fourth the view's own name can never
+        // trip: the name must not contain a pointer or function pointer
+        // type, which only an unsafe context can name and the generated
+        // file does not provide one. Without these checks the failure
+        // surfaces as a raw compiler error (CS0122/CS0214) inside the
+        // generated file.
         // RegisterTransient/RegisterSingleton additionally register the
         // ViewModel type itself with the service collection, so for those
         // two lifetimes the ViewModel must also be instantiable: an
@@ -849,6 +853,11 @@ public sealed class ViewForGenerator : IIncrementalGenerator
             if (HasGenericContainingType(effectiveViewModel))
             {
                 viewModelConstraintViolations.Add("it is nested in a generic type (or a generic type argument is) and cannot be named by the generated registration code");
+            }
+
+            if (ContainsPointerType(effectiveViewModel))
+            {
+                viewModelConstraintViolations.Add("it contains a pointer or function pointer type (or a generic type argument does), which the generated registration code cannot name outside an unsafe context");
             }
         }
 
@@ -1009,6 +1018,52 @@ public sealed class ViewForGenerator : IIncrementalGenerator
         IFunctionPointerTypeSymbol functionPointer =>
             HasGenericContainingType(functionPointer.Signature.ReturnType) ||
             functionPointer.Signature.Parameters.Any(parameter => HasGenericContainingType(parameter.Type)),
+        _ => false,
+    };
+
+    /// <summary>
+    /// True when <paramref name="viewType"/>'s name, written out in full,
+    /// contains a pointer or function pointer type: in any of its own type
+    /// arguments, or in a containing type's (a nested type's written name
+    /// includes its containing types with their arguments). The generated
+    /// registration code names the type exactly that way, and a pointer
+    /// type can only be named inside an unsafe context, which the
+    /// generated file does not provide (CS0214). Type arguments are
+    /// walked along the containing chain for the same reason as in
+    /// <see cref="IsFileLocal(INamedTypeSymbol)"/>.
+    /// </summary>
+    private static bool ContainsPointerType(INamedTypeSymbol viewType)
+    {
+        for (INamedTypeSymbol? current = viewType; current is not null; current = current.ContainingType)
+        {
+            foreach (var argument in current.TypeArguments)
+            {
+                if (ContainsPointerType(argument))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The <see cref="ContainsPointerType(INamedTypeSymbol)"/> check over
+    /// an arbitrary type occurring as (part of) a generic type argument:
+    /// a pointer or function pointer type is itself the violation — there
+    /// is nothing to recurse into, because naming one at any depth
+    /// already requires the unsafe context. What remains — a type
+    /// parameter (open generics are rejected before these checks run) or
+    /// an error type (the compiler already reports it) — cannot contain
+    /// one in a way the generated code would trip on.
+    /// </summary>
+    private static bool ContainsPointerType(ITypeSymbol type) => type switch
+    {
+        IPointerTypeSymbol => true,
+        IFunctionPointerTypeSymbol => true,
+        INamedTypeSymbol named => ContainsPointerType(named),
+        IArrayTypeSymbol array => ContainsPointerType(array.ElementType),
         _ => false,
     };
 

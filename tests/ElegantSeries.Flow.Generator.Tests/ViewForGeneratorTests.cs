@@ -280,13 +280,17 @@ public class ViewForGeneratorTests
     }
 
     [Fact]
-    public void DistinctViewModels_FunctionPointerRefKindsDiffer_DoNotReportFlowGen001()
+    public void PointerCarryingViewModels_RefKindsDiffer_ReportFlowGen017()
     {
         // Function pointer types that differ only in a parameter's or
-        // the return's ref kind are distinct runtime types: their
-        // registrations must both be emitted. (Inference through
-        // BaseView<T> is the reachable path for function pointer type
-        // arguments, as in the FLOWGEN017 function-pointer test.)
+        // the return's ref kind are distinct runtime types — the
+        // FLOWGEN001 key question this scenario originally pinned. It is
+        // moot at the generator surface now: a ViewModel carrying a
+        // function pointer type is rejected by FLOWGEN017 before
+        // duplicate detection runs, whichever ref kinds the signatures
+        // use. (Inference through BaseView<T> is the reachable path for
+        // function pointer type arguments, as in the FLOWGEN017
+        // function-pointer test.)
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
             namespace TestApp.ViewModels
             {
@@ -314,21 +318,23 @@ public class ViewForGeneratorTests
 
         var (runResult, diagnostics, _) = RunGenerator(sources);
 
+        Assert.Equal(4, diagnostics.Count(d => d.Id == "FLOWGEN017"));
         Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN001");
-        Assert.Single(runResult.GeneratedSources, s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
     }
 
     [Fact]
-    public void DuplicateViewModel_FunctionPointerParameterRefFlavors_ReportsFlowGen001()
+    public void PointerCarryingViewModels_ParameterRefFlavors_ReportFlowGen017()
     {
         // All by-ref parameter flavors of a function pointer are the
         // same runtime type: the signature carries only by-value vs.
         // by-ref, never ref vs. in vs. out. Wrapper<delegate*<ref int,
         // void>[]> and Wrapper<delegate*<in int, void>[]> therefore
-        // collide in the runtime registry exactly like a plain
-        // duplicate. (The function pointer sits in an array element
-        // inside the type argument: the direct argument position is
-        // CS0306-barred for by-ref signatures.)
+        // share the FLOWGEN001 key exactly like a plain duplicate — but
+        // FLOWGEN017 rejects both mappings before duplicate detection
+        // runs, so no FLOWGEN001 is reported. (The function pointer sits
+        // in an array element inside the type argument: the direct
+        // argument position is CS0306-barred for by-ref signatures.)
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
             namespace TestApp.ViewModels
             {
@@ -348,17 +354,21 @@ public class ViewForGeneratorTests
             }
             """;
 
-        var (_, diagnostics, _) = RunGenerator(sources);
+        var (runResult, diagnostics, _) = RunGenerator(sources);
 
-        Assert.Single(diagnostics, d => d.Id == "FLOWGEN001");
+        Assert.Equal(2, diagnostics.Count(d => d.Id == "FLOWGEN017"));
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN001");
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
     }
 
     [Fact]
-    public void DuplicateViewModel_FunctionPointerReturnRefFlavors_ReportsFlowGen001()
+    public void PointerCarryingViewModels_ReturnRefFlavors_ReportFlowGen017()
     {
         // A by-ref return has no flavor at runtime either:
         // delegate*<ref int> and delegate*<ref readonly int> are the
-        // same runtime type.
+        // same runtime type, so the two mappings share the FLOWGEN001
+        // key — but FLOWGEN017 rejects both before duplicate detection
+        // runs, so no FLOWGEN001 is reported.
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
             namespace TestApp.ViewModels
             {
@@ -378,20 +388,24 @@ public class ViewForGeneratorTests
             }
             """;
 
-        var (_, diagnostics, _) = RunGenerator(sources);
+        var (runResult, diagnostics, _) = RunGenerator(sources);
 
-        Assert.Single(diagnostics, d => d.Id == "FLOWGEN001");
+        Assert.Equal(2, diagnostics.Count(d => d.Id == "FLOWGEN017"));
+        Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN001");
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
     }
 
     [Fact]
-    public void DistinctViewModels_FunctionPointerCallingConventionsDiffer_DoNotReportFlowGen001()
+    public void PointerCarryingViewModels_CallingConventionsDiffer_ReportFlowGen017()
     {
         // The managed and the unmanaged calling conventions are part
         // of a function pointer type's identity, as are the specific
         // unmanaged conventions: delegate*<int, void>,
         // delegate* unmanaged[Cdecl]<int, void> and
         // delegate* unmanaged[Stdcall]<int, void> are three distinct
-        // runtime types.
+        // runtime types, so the three mappings carry three distinct
+        // FLOWGEN001 keys — a question FLOWGEN017 pre-empts by
+        // rejecting all three mappings first.
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
             namespace TestApp.ViewModels
             {
@@ -416,8 +430,9 @@ public class ViewForGeneratorTests
 
         var (runResult, diagnostics, _) = RunGenerator(sources);
 
+        Assert.Equal(3, diagnostics.Count(d => d.Id == "FLOWGEN017"));
         Assert.DoesNotContain(diagnostics, d => d.Id == "FLOWGEN001");
-        Assert.Single(runResult.GeneratedSources, s => s.HintName == "ViewForRegistrations.g.cs");
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
     }
 
     [Fact]
@@ -1710,7 +1725,9 @@ public class ViewForGeneratorTests
         // signature is unnameable there. (The explicit attribute form
         // never reaches this check — a function pointer is not a named
         // type, so FLOWGEN006 reports it instead; inference through
-        // BaseView<T> is the reachable path.)
+        // BaseView<T> is the reachable path.) The pointer violation now
+        // co-reports on the same mapping; this test pins the
+        // accessibility one.
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
             namespace TestApp.ViewModels
             {
@@ -1734,9 +1751,104 @@ public class ViewForGeneratorTests
 
         var (runResult, diagnostics, _) = RunGenerator(sources);
 
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017" && d.GetMessage().Contains("not accessible"));
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void InferredViewModelWithFunctionPointerArrayTypeArgument_ReportsFlowGen017()
+    {
+        // A function pointer type nested inside the ViewModel's type
+        // argument — here under an array element; a bare pointer type
+        // cannot be a type argument in the user's own code either — is
+        // written out in full by the generated code, which cannot name it
+        // outside an unsafe context (CS0214).
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """
+            namespace TestApp.ViewModels
+            {
+                public class DetailViewModel<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor]
+                public unsafe class DetailView : ElegantSeries.Flow.Avalonia.Views.BaseView<TestApp.ViewModels.DetailViewModel<delegate*<int>[]>> { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
         var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
         Assert.Equal(DiagnosticSeverity.Error, error.Severity);
-        Assert.Contains("not accessible", error.GetMessage());
+        Assert.Contains("pointer", error.GetMessage());
+        Assert.Contains("unsafe", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void PointerArrayViewModel_ReportsFlowGen017()
+    {
+        // The explicit attribute form, with a pointer type nested under
+        // an array element of the ViewModel's type argument: the same
+        // CS0214 in the generated file without this check.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class Wrapper<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.Wrapper<int*[]>>]
+                public unsafe class PointerView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("pointer", error.GetMessage());
+        Assert.Contains("unsafe", error.GetMessage());
+        Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
+    }
+
+    [Fact]
+    public void ViewModelWithFunctionPointerArrayTupleElement_ReportsFlowGen017()
+    {
+        // A function pointer array as a tuple element inside the
+        // ViewModel's type argument is written out in full by the
+        // generated code (element name included): the same unsafe-context
+        // failure, one more level down.
+        var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + """
+            namespace TestApp.ViewModels
+            {
+                public class Wrapper<T> : ElegantSeries.Flow.Navigation.INavigationViewModel
+                {
+                    public ElegantSeries.Flow.Navigation.INavigationService? Navigation { get; set; }
+                }
+            }
+
+            namespace TestApp.Views
+            {
+                [ElegantSeries.Flow.Routing.ViewFor<TestApp.ViewModels.Wrapper<(delegate*<int>[] Signal, int Count)>>]
+                public unsafe class TupleView : Avalonia.Controls.Control { }
+            }
+            """;
+
+        var (runResult, diagnostics, _) = RunGenerator(sources);
+
+        var error = Assert.Single(diagnostics, d => d.Id == "FLOWGEN017");
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("pointer", error.GetMessage());
+        Assert.Contains("unsafe", error.GetMessage());
         Assert.Empty(runResult.GeneratedSources.Where(s => s.HintName == "ViewForRegistrations.g.cs"));
     }
 
