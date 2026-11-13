@@ -675,6 +675,42 @@ public class DisposalInterleavingTests
         ((IDisposable)nav).Dispose();
     }
 
+    /// <summary>
+    /// The same gated disposal with DisposalGateTimeout =
+    /// TimeSpan.MaxValue: the value is inside the option's
+    /// documented-valid set (any positive value), but the framework
+    /// timer behind Task.Delay cannot represent a wait above ~49.7
+    /// days. The effective timeout clamps to that ceiling, so disposal
+    /// parks on the gate instead of faulting with
+    /// ArgumentOutOfRangeException before any scope is disposed.
+    /// </summary>
+    [Fact]
+    public async Task DisposeAsync_WithGateTimeoutAboveTimerCeiling_WaitsForGate_ThenReleasesEverything()
+    {
+        var provider = BuildProvider(options =>
+        {
+            options.DisposalGateTimeout = TimeSpan.MaxValue;
+        });
+        var ledger = provider.GetRequiredService<PageScopeLedger>();
+        var nav = provider.GetRequiredService<INavigationService>();
+        var gate = provider.GetRequiredService<CallbackGate>();
+
+        var navigation = nav.NavigateToAsync<GatedPage>();
+        await gate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var disposal = ((IAsyncDisposable)nav).DisposeAsync().AsTask();
+
+        // Parked on the gate, not faulted at the delay construction.
+        var early = await Task.WhenAny(disposal, Task.Delay(400));
+        Assert.NotSame(disposal, early);
+
+        gate.Release();
+        Assert.True(await navigation.WaitAsync(TimeSpan.FromSeconds(10)));
+        await disposal.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await WaitForScopeBalanceAsync(ledger, "after ceiling-clamped disposal");
+    }
+
     // ── Departure asymmetry: sync Dispose wins mid-From ───────
 
     /// <summary>

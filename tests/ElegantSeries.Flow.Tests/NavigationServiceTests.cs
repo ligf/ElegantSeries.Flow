@@ -3382,6 +3382,44 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task Refresh_StubbornCallback_WithGateTimeoutAboveTimerCeiling_InterruptParksUntilRelease()
+    {
+        // The pump-side gate wait under the same ceiling clamp as
+        // DisposeAsync: with DisposalGateTimeout = TimeSpan.MaxValue
+        // the interrupting navigation's wait for the stuck refresh
+        // callback must park (no timeout can fire) instead of faulting
+        // with ArgumentOutOfRangeException when it constructs its
+        // delay; once the callback releases, both navigations settle
+        // and nothing is reported.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow(o => o.DisposalGateTimeout = TimeSpan.MaxValue);
+        services.AddTransient<StubbornRefreshViewModel>();
+        services.AddTransient<InterruptTargetViewModel>();
+        using var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var errors = new List<Exception>();
+        nav.SubscriberError += errors.Add;
+
+        Assert.True(await nav.NavigateToAsync<StubbornRefreshViewModel>());
+        var vm = Assert.IsType<StubbornRefreshViewModel>(nav.GetCurrentViewModel());
+
+        var refresh = nav.NavigateToAsync<StubbornRefreshViewModel>(refreshIfActive: true);
+        await vm.RefreshCallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var toDetail = nav.NavigateToAsync<InterruptTargetViewModel>();
+        await Task.Delay(400);
+        Assert.False(toDetail.IsCompleted);
+        Assert.Empty(errors);
+
+        vm.ReleaseRefresh.TrySetResult();
+        Assert.True(await toDetail.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(await refresh.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsType<InterruptTargetViewModel>(nav.GetCurrentViewModel());
+        Assert.Empty(errors);
+    }
+
+    [Fact]
     public async Task Refresh_SelfNoOpRegisteredInCallback_ConsumedWithoutCancellingToken()
     {
         await _navigationService.NavigateToAsync<SelfNoOpRefreshViewModel>();
