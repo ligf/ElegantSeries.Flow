@@ -890,6 +890,58 @@ public sealed partial class NavigationService
         }
     }
 
+    /// <summary>
+    /// Prepares a stack-top entry landed by a faulted back hop for its
+    /// entering step: renews its activation, re-attaches its navigation
+    /// reference (the notification queues into <paramref name="work"/>,
+    /// like a hop's own attach), and registers its activation gate — the
+    /// hop's own order, under the navigation lock with the disposed flag
+    /// re-validated inside, so either a disposal snapshot observes the
+    /// gate, or the recovery abstains. A throwing attach is collected
+    /// into <paramref name="errors"/> (delivered with the entering
+    /// step's errors) instead of escaping the recovery: the page then
+    /// activates unattached rather than wedging the pump on a second
+    /// throw from the same user code. Returns null when the service is
+    /// disposed.
+    /// </summary>
+    private async Task<Task?> RegisterRecoveryActivationAsync(
+        NavigationEntry entry, TransitionWork work, List<Exception> errors)
+    {
+        CancellationTokenSource? retiredCts;
+        Task gate;
+        await _navigationLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed)
+            {
+                return null;
+            }
+
+            retiredCts = entry.BeginNewActivation();
+            try
+            {
+                AttachNavigation(entry.ViewModel, work);
+            }
+            catch (Exception ex)
+            {
+                errors.Add(ex);
+            }
+
+            gate = entry.EnterInFlightLifecycle();
+        }
+        finally
+        {
+            _navigationLock.Release();
+        }
+
+        if (retiredCts is not null)
+        {
+            entry.CancelRetiredOutsideLocks(retiredCts);
+        }
+
+        return gate;
+    }
+
     private Task<bool> RecoverStuckLeaving(RegionWindow window, string regionName)
     {
         ReportSubscriberError(new InvalidOperationException(
@@ -916,6 +968,8 @@ public sealed partial class NavigationService
         NavigationIntent? intent;
         WindowPhase phase;
         INavigationViewModel? settleRaise = null;
+        NavigationEntry? settleRenewEntry = null;
+        CancellationTokenSource? settleRetired = null;
         using (_stateLock.EnterScope())
         {
             phase = window.Phase;
@@ -934,24 +988,54 @@ public sealed partial class NavigationService
                 window.ChainTrace.Clear();
                 RemoveWindowIfIdleLocked(window, regionName);
                 if (phase == WindowPhase.Open
-                    && !window.CurrentPageSurfaced
                     && _regionStacks.TryGetValue(regionName, out var stack)
                     && stack.Count > 0)
                 {
-                    // Last-resort surfacing: every earlier raise point defers
-                    // to a later one when a further intent is pending (the
-                    // entering step, refresh/revive rests checks, the
-                    // departure wrapper); if that intent was withdrawn before
-                    // executing, this settle is the page's final chance to be
-                    // reported as the region's resting current page.
-                    window.CurrentPageSurfaced = true;
-                    settleRaise = stack.Peek().ViewModel;
+                    // Terminal rest decision: the region settles with
+                    // this page current, and every rest outcome passes
+                    // through here. If an interrupt cancelled the page's
+                    // token for a request that has since gone away —
+                    // including one withdrawn after the callers' own
+                    // rest decisions, on a page that was already
+                    // surfaced and so reaches no surfacing point — the
+                    // activation is renewed: the swap happens in this
+                    // section (atomically with the settle, before a
+                    // successor pump can start), the retired source is
+                    // cancelled after it, exactly as
+                    // RenewActivationIfCancelled splits the two.
+                    var top = stack.Peek();
+                    if (!_disposed && top.LifecycleCts.IsCancellationRequested)
+                    {
+                        settleRetired = top.BeginNewActivation();
+                        settleRenewEntry = top;
+                    }
+
+                    if (!window.CurrentPageSurfaced)
+                    {
+                        // Last-resort surfacing: every earlier raise point defers
+                        // to a later one when a further intent is pending (the
+                        // entering step, refresh/revive rests checks, the
+                        // departure wrapper); if that intent was withdrawn before
+                        // executing, this settle is the page's final chance to be
+                        // reported as the region's resting current page.
+                        window.CurrentPageSurfaced = true;
+                        settleRaise = top.ViewModel;
+                    }
                 }
             }
         }
 
         if (intent is null)
         {
+            if (settleRenewEntry is not null && settleRetired is not null)
+            {
+                settleRenewEntry.CancelRetiredOutsideLocks(settleRetired);
+                if (_disposed)
+                {
+                    NavigationEntry.CancelOutsideLocks(settleRenewEntry.LifecycleCts);
+                }
+            }
+
             if (settleRaise is not null && !_disposed)
             {
                 RaiseRegionNavigated(regionName, settleRaise);
@@ -1404,6 +1488,7 @@ public sealed partial class NavigationService
     private void SurfaceCurrentPageIfNeeded(RegionWindow window, string regionName)
     {
         INavigationViewModel? toRaise = null;
+        NavigationEntry? toRenew = null;
         using (_stateLock.EnterScope())
         {
             if (window.Phase == WindowPhase.Leaving)
@@ -1428,12 +1513,21 @@ public sealed partial class NavigationService
                 // the page about to depart again; surfacing it here would
                 // report a resting page that is already leaving.
                 window.CurrentPageSurfaced = true;
-                toRaise = stack.Peek().ViewModel;
+                toRenew = stack.Peek();
+                toRaise = toRenew.ViewModel;
             }
         }
 
         if (toRaise is not null)
         {
+            // The page is presented as resting: if an interrupt
+            // cancelled its token for a request that has since gone
+            // away, renew it first (a no-op when the token is live).
+            if (toRenew is not null)
+            {
+                RenewActivationIfCancelled(toRenew);
+            }
+
             RaiseRegionNavigated(regionName, toRaise);
         }
     }
@@ -1855,22 +1949,26 @@ public sealed partial class NavigationService
             return true;
         }
 
-        // In-place refresh: the guard above has been consulted (it may veto a
-        // refresh, as with any departure candidate); a plain same-type no-op
-        // was already short-circuited before the guard. The refresh runs the
-        // page's To again without a departure.
-        if (IsSelfRefresh(candidate, current))
-        {
-            await ExecuteRefreshAsync(window, regionName, current, candidate).ConfigureAwait(false);
-            return !_disposed;
-        }
-
         // The departure begins here: the window enters the Leaving phase and
-        // requests registered during From race the disposal-gate clock.
+        // requests registered during it race the disposal-gate clock. An
+        // in-place refresh is part of the departure step too and runs after
+        // this setup, so a request registered during the refresh's To
+        // callbacks completes the close signal and can interrupt them,
+        // exactly as during From.
         using (_stateLock.EnterScope())
         {
             window.Phase = WindowPhase.Leaving;
             window.CloseSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        // In-place refresh: the guard above has been consulted (it may veto a
+        // refresh, as with any departure candidate); a plain same-type no-op
+        // was already short-circuited before the guard. The refresh runs the
+        // page's To again without a physical departure.
+        if (IsSelfRefresh(candidate, current))
+        {
+            await ExecuteRefreshAsync(window, regionName, current, candidate).ConfigureAwait(false);
+            return !_disposed;
         }
 
         // From phase. The entry's Navigation reference stays attached throughout
@@ -2106,8 +2204,21 @@ public sealed partial class NavigationService
                 // The commit landed a different page before throwing: activate
                 // it (with no entered intent — its errors report via
                 // SubscriberError) rather than wedging the region on an
-                // unactivated stack top.
-                var recoveryGate = await RegisterRecoveryGateAsync(top).ConfigureAwait(false);
+                // unactivated stack top. What the recovery owes the landed
+                // page depends on the hop: a back hop queues the outgoing
+                // page's disposal before it renews the target's activation
+                // or re-attaches its navigation reference, so a throw from
+                // that disposal leaves both undone and the recovery must
+                // perform them, or the page would activate with the token
+                // cancelled when it was covered and no navigation
+                // reference. The navigate commit instead renews and
+                // attaches before it can fault, and deliberately exits its
+                // gate registration before rethrowing — it is owed only a
+                // gate, and redoing the attach would raise the page's
+                // Navigation-changed notification twice.
+                var recoveryGate = final.Kind is NavigationIntentKind.GoBack or NavigationIntentKind.GoBackTo
+                    ? await RegisterRecoveryActivationAsync(top, work, departureErrors).ConfigureAwait(false)
+                    : await RegisterRecoveryGateAsync(top).ConfigureAwait(false);
                 if (recoveryGate is null)
                 {
                     return false;
@@ -2387,6 +2498,211 @@ public sealed partial class NavigationService
     // ────────────────────────── Refresh & revive ──────────────────────────
 
     /// <summary>
+    /// Runs the To callbacks of a page that is already active (a refresh
+    /// or a revive), with the same close-request interrupt the entering
+    /// step applies to a still-activating page: while the callbacks run,
+    /// a newly registered request wants the window closed. The wake is
+    /// judged under the state lock (re-arming the signal first, as the
+    /// entering step does): a withdrawn or absent request voids the
+    /// wake, a self no-op against this page is consumed in place (the
+    /// page is not leaving, so its token must not be cancelled), and
+    /// any other live request cancels the page's lifecycle token — the
+    /// documented "you are leaving" signal — and starts the
+    /// disposal-gate clock. A callback that ignores the token is
+    /// abandoned at the timeout (gate recorded as abandoned, timeout
+    /// reported once) and its later errors are delivered through
+    /// <see cref="SubscriberError"/> like the entering step's late
+    /// runner errors. The judged request is claimed out of the slot
+    /// while the callbacks finish (so its withdrawal cannot strand a
+    /// cancelled token on a page that stays) and restored afterwards
+    /// if it is still the latest live request, for the pump's next
+    /// step. If the request went away again and the page comes to
+    /// rest after all, an activation cancelled by the interrupt is
+    /// renewed, as in the entering step's rests-after-claim path.
+    /// Returns whether the interrupt cancelled the page's token (the
+    /// callers renew at their own rest decisions as well: a claim
+    /// restored here can still be withdrawn before their rest is
+    /// decided).
+    /// </summary>
+    private async Task<bool> RunActivatedToCallbacksAsync(
+        RegionWindow window, NavigationEntry entry, object? parameter, Task gate, List<Exception> errors)
+    {
+        var toErrors = new List<Exception>();
+        var toTask = RunToCallbacksAsync(entry, parameter, gate, toErrors);
+        var tokenCancelled = false;
+        NavigationIntent? claimed = null;
+        if (!toTask.IsCompleted)
+        {
+            while (!toTask.IsCompleted)
+            {
+                Task? signal;
+                using (_stateLock.EnterScope())
+                {
+                    signal = window.CloseSignal?.Task;
+                }
+
+                if (signal is null)
+                {
+                    await toTask.ConfigureAwait(false);
+                    break;
+                }
+
+                var first = await Task.WhenAny(toTask, signal).ConfigureAwait(false);
+                if (ReferenceEquals(first, toTask) || toTask.IsCompleted)
+                {
+                    break;
+                }
+
+                // Re-arm before judging this wake, so a registration
+                // racing the liveness check is never lost: it either
+                // lands in the slot before the check (and is seen) or
+                // completes the fresh signal (and wakes the next
+                // iteration).
+                using (_stateLock.EnterScope())
+                {
+                    if (ReferenceEquals(window.CloseSignal?.Task, signal))
+                    {
+                        window.CloseSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    }
+                }
+
+                if (_disposed)
+                {
+                    break;
+                }
+
+                // Claim the pending intent out of the slot before
+                // judging it, as the entering step does: once claimed,
+                // slot withdrawal can no longer remove it, so a
+                // cancellation of this page can never be left behind
+                // by a request that went away.
+                NavigationIntent? pending;
+                using (_stateLock.EnterScope())
+                {
+                    pending = window.PendingIntent;
+                    window.PendingIntent = null;
+                }
+
+                if (pending is null)
+                {
+                    continue;
+                }
+
+                if (pending.IsWithdrawn)
+                {
+                    CancelIntent(pending);
+                    continue;
+                }
+
+                if (IsSelfNoOp(pending, entry))
+                {
+                    CompleteIntent(pending, result: true);
+                    continue;
+                }
+
+                // A live request wants this page gone. Hold the claim:
+                // it is settled after the callbacks (restored to the
+                // slot if it is still the latest live request, so the
+                // pump executes it as the next step).
+                claimed = pending;
+                NavigationEntry.CancelOutsideLocks(entry.LifecycleCts);
+                tokenCancelled = true;
+                var finished = await Task.WhenAny(toTask, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
+                if (!ReferenceEquals(finished, toTask))
+                {
+                    entry.AbandonedGateTask = gate;
+                    ReportGateTimeout(entry);
+                }
+
+                break;
+            }
+
+            if (toTask.IsCompleted)
+            {
+                // The runner collects callback exceptions into toErrors
+                // and never faults; awaiting a completed task only joins
+                // the flow.
+                await toTask.ConfigureAwait(false);
+            }
+        }
+
+        // Snapshot under the list's lock: after a gate-timeout
+        // abandonment the runner may still be appending to toErrors in
+        // the background. Everything past the snapshot is delivered
+        // late through SubscriberError instead of being dropped.
+        int deliveredToErrorCount;
+        bool toRunnerSettled;
+        lock (toErrors)
+        {
+            deliveredToErrorCount = toErrors.Count;
+            toRunnerSettled = toTask.IsCompleted;
+            errors.AddRange(toErrors);
+        }
+
+        if (!toRunnerSettled)
+        {
+            ReportLateRunnerErrors(toTask, toErrors, deliveredToErrorCount);
+        }
+
+        if (claimed is not null)
+        {
+            // Settle the claim against the slot's current state in one
+            // critical section: restore it when it is still the latest
+            // live request (the pump then executes it as the next
+            // step); a claim that was withdrawn while held is cancelled,
+            // and one superseded by a newer live registration — or held
+            // while the service was disposed — completes as not
+            // executed. A slot occupant that is itself withdrawn never
+            // superseded the claim (the claim was held outside the
+            // slot when it registered): it is evicted and cancelled,
+            // and the claim takes the slot — the same "a withdrawn
+            // pending is not a live request" test the entering step's
+            // rests decision applies.
+            var restore = false;
+            NavigationIntent? evicted = null;
+            using (_stateLock.EnterScope())
+            {
+                if (!_disposed && !claimed.IsWithdrawn)
+                {
+                    var occupant = window.PendingIntent;
+                    if (occupant is null || occupant.IsWithdrawn)
+                    {
+                        evicted = occupant;
+                        window.PendingIntent = claimed;
+                        restore = true;
+                    }
+                }
+            }
+
+            if (evicted is not null)
+            {
+                CancelIntent(evicted);
+            }
+
+            if (!restore)
+            {
+                if (claimed.IsWithdrawn)
+                {
+                    CancelIntent(claimed);
+                }
+                else
+                {
+                    CompleteIntent(claimed, result: false);
+                }
+            }
+
+            claimed = null;
+        }
+
+        if (tokenCancelled && !HasLivePendingIntent(window))
+        {
+            RenewActivationIfCancelled(entry);
+        }
+
+        return tokenCancelled;
+    }
+
+    /// <summary>
     /// Executes a refresh of the resting/entering current page: same entry, same
     /// page scope, new parameter; only the activation callbacks run again.
     /// </summary>
@@ -2428,7 +2744,7 @@ public sealed partial class NavigationService
         }
 
         var errors = new List<Exception>();
-        await RunToCallbacksAsync(current, intent.Parameter, gate, errors).ConfigureAwait(false);
+        var tokenCancelled = await RunActivatedToCallbacksAsync(window, current, intent.Parameter, gate, errors).ConfigureAwait(false);
 
         bool rests;
         using (_stateLock.EnterScope())
@@ -2442,6 +2758,15 @@ public sealed partial class NavigationService
 
         if (rests && !_disposed)
         {
+            // A claim restored by the interrupt helper can still have
+            // been withdrawn before this rest was decided; the page
+            // then rests here, so renew an interrupt-cancelled token
+            // before it is presented as resting.
+            if (tokenCancelled)
+            {
+                RenewActivationIfCancelled(current);
+            }
+
             RaiseRegionNavigatedTracked(window, regionName, current.ViewModel);
         }
 
@@ -2511,7 +2836,7 @@ public sealed partial class NavigationService
             current.CancelRetiredOutsideLocks(retiredCts);
         }
 
-        await RunToCallbacksAsync(current, parameter, gate, errors).ConfigureAwait(false);
+        var tokenCancelled = await RunActivatedToCallbacksAsync(window, current, parameter, gate, errors).ConfigureAwait(false);
 
         using (_stateLock.EnterScope())
         {
@@ -2536,6 +2861,13 @@ public sealed partial class NavigationService
 
             if (rests && !_disposed)
             {
+                // As in the refresh path: renew an interrupt-cancelled
+                // token before the page is presented as resting.
+                if (tokenCancelled)
+                {
+                    RenewActivationIfCancelled(current);
+                }
+
                 RaiseRegionNavigatedTracked(window, regionName, current.ViewModel);
             }
         }
