@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace ElegantSeries.Flow.Journal.Tests;
 
 /// <summary>Built-in store tests: cap enforcement, snapshot handling,
@@ -171,6 +173,128 @@ public class JournalStoreTests
             await File.WriteAllTextAsync(path, "this is not json");
             using var store = new JsonFileNavigationJournalStore(path);
             await Assert.ThrowsAnyAsync<Exception>(async () => await store.ReadEntriesAsync());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task JsonFile_EntriesFileWithNullDocument_ThrowsOnReadAndAppend()
+    {
+        // A JSON null document deserializes successfully (to a null
+        // list) — it must still surface as corruption on the reading
+        // operations, not be treated as an empty history that the next
+        // append silently overwrites.
+        var directory = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(directory, "journal.json");
+            await File.WriteAllTextAsync(path, "null");
+            using var store = new JsonFileNavigationJournalStore(path);
+            await Assert.ThrowsAsync<JsonException>(async () => await store.ReadEntriesAsync());
+            await Assert.ThrowsAsync<JsonException>(async () => await store.AppendAsync(Entry(1)));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task JsonFile_EntriesFileWithNullEntry_ThrowsOnRead()
+    {
+        var directory = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(directory, "journal.json");
+            await File.WriteAllTextAsync(path, "[null]");
+            using var store = new JsonFileNavigationJournalStore(path);
+            await Assert.ThrowsAsync<JsonException>(async () => await store.ReadEntriesAsync());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task JsonFile_EntriesFileWithNullRegion_ThrowsOnRead()
+    {
+        // Deserialization does not run the property initializer, so a
+        // member declared non-nullable can come back null.
+        var directory = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(directory, "journal.json");
+            await File.WriteAllTextAsync(path, "[{\"Sequence\":1,\"Kind\":0}]");
+            using var store = new JsonFileNavigationJournalStore(path);
+            await Assert.ThrowsAsync<JsonException>(async () => await store.ReadEntriesAsync());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task JsonFile_EntriesFileWithUndefinedKind_ThrowsOnRead()
+    {
+        var directory = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(directory, "journal.json");
+            await File.WriteAllTextAsync(path, "[{\"Sequence\":1,\"Region\":\"MainRegion\",\"Kind\":999}]");
+            using var store = new JsonFileNavigationJournalStore(path);
+            await Assert.ThrowsAsync<JsonException>(async () => await store.ReadEntriesAsync());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task JsonFile_SaveSnapshot_MalformedShapes_ThrowArgumentException()
+    {
+        // The same structural validation (and wording) as the
+        // in-memory store's save boundary: a malformed snapshot is
+        // rejected here instead of being persisted and only failing
+        // later, at load or restore time.
+        var directory = CreateTempDirectory();
+        try
+        {
+            var path = Path.Combine(directory, "journal.json");
+            using var store = new JsonFileNavigationJournalStore(path);
+
+            var nullRegions = await Assert.ThrowsAsync<ArgumentException>(
+                async () => await store.SaveSnapshotAsync(new JournalSnapshot { Regions = null! }));
+            Assert.Contains("Regions is null", nullRegions.Message);
+
+            var nullRegion = await Assert.ThrowsAsync<ArgumentException>(
+                async () => await store.SaveSnapshotAsync(new JournalSnapshot
+                {
+                    Regions = new List<JournalRegionSnapshot> { null! },
+                }));
+            Assert.Contains("a region or its Pages is null", nullRegion.Message);
+
+            var nullPages = await Assert.ThrowsAsync<ArgumentException>(
+                async () => await store.SaveSnapshotAsync(new JournalSnapshot
+                {
+                    Regions = [new JournalRegionSnapshot { Region = "MainRegion", Pages = null! }],
+                }));
+            Assert.Contains("a region or its Pages is null", nullPages.Message);
+
+            var nullPage = await Assert.ThrowsAsync<ArgumentException>(
+                async () => await store.SaveSnapshotAsync(new JournalSnapshot
+                {
+                    Regions = [new JournalRegionSnapshot { Region = "MainRegion", Pages = new List<JournalPageSnapshot> { null! } }],
+                }));
+            Assert.Contains("a page is null", nullPage.Message);
+
+            // Nothing was persisted by the rejected saves.
+            Assert.Null(await store.LoadSnapshotAsync());
         }
         finally
         {
