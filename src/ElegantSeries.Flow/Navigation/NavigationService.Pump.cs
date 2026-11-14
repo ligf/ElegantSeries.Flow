@@ -1243,8 +1243,14 @@ public sealed partial class NavigationService
                 }
 
                 NavigationEntry.CancelOutsideLocks(entry.LifecycleCts);
-                var finished = await Task.WhenAny(toTask, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
-                if (!ReferenceEquals(finished, toTask))
+                using var delayCts = new CancellationTokenSource();
+                var finished = await Task.WhenAny(toTask, Task.Delay(DisposalGateTimeout, delayCts.Token)).ConfigureAwait(false);
+                if (ReferenceEquals(finished, toTask))
+                {
+                    // Gate won: cancel the delay to release its timer early.
+                    delayCts.Cancel();
+                }
+                else
                 {
                     entry.AbandonedGateTask = gate;
                     ReportGateTimeout(entry);
@@ -2055,8 +2061,14 @@ public sealed partial class NavigationService
                     continue;
                 }
 
-                var finished = await Task.WhenAny(fromTask, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
-                if (!ReferenceEquals(finished, fromTask))
+                using var delayCts = new CancellationTokenSource();
+                var finished = await Task.WhenAny(fromTask, Task.Delay(DisposalGateTimeout, delayCts.Token)).ConfigureAwait(false);
+                if (ReferenceEquals(finished, fromTask))
+                {
+                    // Gate won: cancel the delay to release its timer early.
+                    delayCts.Cancel();
+                }
+                else
                 {
                     current.AbandonedGateTask = current.InFlightGateTask;
                     ReportGateTimeout(current);
@@ -2607,8 +2619,14 @@ public sealed partial class NavigationService
                 claimed = pending;
                 NavigationEntry.CancelOutsideLocks(entry.LifecycleCts);
                 tokenCancelled = true;
-                var finished = await Task.WhenAny(toTask, Task.Delay(DisposalGateTimeout)).ConfigureAwait(false);
-                if (!ReferenceEquals(finished, toTask))
+                using var delayCts = new CancellationTokenSource();
+                var finished = await Task.WhenAny(toTask, Task.Delay(DisposalGateTimeout, delayCts.Token)).ConfigureAwait(false);
+                if (ReferenceEquals(finished, toTask))
+                {
+                    // Gate won: cancel the delay to release its timer early.
+                    delayCts.Cancel();
+                }
+                else
                 {
                     entry.AbandonedGateTask = gate;
                     ReportGateTimeout(entry);
