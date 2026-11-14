@@ -159,20 +159,10 @@ public sealed class NavigationJournal : INavigationJournal
         // A structurally incomplete snapshot — a hand-built instance
         // with null Regions/Pages, or a persisted file that deserialized
         // into one — is malformed input, not a per-page restore
-        // failure: reject it here instead of escaping with a
-        // NullReferenceException from the loops below.
-        if (snapshot.Regions is null)
-            throw new ArgumentException("The snapshot is malformed: Regions is null.", nameof(snapshot));
-        foreach (var region in snapshot.Regions)
-        {
-            if (region is null || region.Pages is null)
-                throw new ArgumentException("The snapshot is malformed: a region or its Pages is null.", nameof(snapshot));
-            foreach (var page in region.Pages)
-            {
-                if (page is null)
-                    throw new ArgumentException("The snapshot is malformed: a page is null.", nameof(snapshot));
-            }
-        }
+        // failure: the shared structural validation rejects it here
+        // instead of escaping with a NullReferenceException from the
+        // loops below.
+        JournalSnapshotValidation.ThrowIfMalformed(snapshot);
 
         var serializers = _navigation.Serializers;
         var regionResults = new List<JournalRegionRestoreResult>();

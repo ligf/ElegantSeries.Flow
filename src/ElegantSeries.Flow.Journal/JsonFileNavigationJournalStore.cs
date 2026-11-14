@@ -128,6 +128,12 @@ public sealed class JsonFileNavigationJournalStore : INavigationJournalStore, ID
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        // The shared structural validation, at the same boundary and
+        // with the same wording as the in-memory store: a malformed
+        // snapshot is rejected here instead of being persisted and
+        // only failing later, at load or restore time.
+        JournalSnapshotValidation.ThrowIfMalformed(snapshot);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -199,8 +205,33 @@ public sealed class JsonFileNavigationJournalStore : INavigationJournalStore, ID
             return _entries;
         }
         var json = await File.ReadAllTextAsync(_entriesPath, cancellationToken).ConfigureAwait(false);
-        _entries = JsonSerializer.Deserialize(json, JournalJsonContext.Default.ListJournalEntry) ?? [];
+        _entries = ValidateLoadedEntries(JsonSerializer.Deserialize(json, JournalJsonContext.Default.ListJournalEntry));
         return _entries;
+    }
+
+    // Deserialization alone does not make the content valid journal
+    // data: a JSON null document deserializes to a null list, a null
+    // element and an out-of-range enum value deserialize successfully,
+    // and property initializers do not run, so a member declared
+    // non-nullable can come back null. The store's contract is that
+    // content which is not valid journal JSON surfaces as an exception
+    // on the reading operation instead of being silently discarded or
+    // passed on, so those shapes are rejected here — at the single
+    // read path every consumer (read-back and append) goes through.
+    private static List<JournalEntry> ValidateLoadedEntries(List<JournalEntry>? entries)
+    {
+        if (entries is null)
+            throw new JsonException("The journal entries file is malformed: the document is null, not an entry list.");
+        foreach (var entry in entries)
+        {
+            if (entry is null)
+                throw new JsonException("The journal entries file is malformed: it contains a null entry.");
+            if (entry.Region is null)
+                throw new JsonException("The journal entries file is malformed: an entry has a null region.");
+            if (!Enum.IsDefined(entry.Kind))
+                throw new JsonException($"The journal entries file is malformed: an entry has the undefined kind value {(int)entry.Kind}.");
+        }
+        return entries;
     }
 
     private async ValueTask WriteEntriesCoreAsync(List<JournalEntry> entries, CancellationToken cancellationToken)
