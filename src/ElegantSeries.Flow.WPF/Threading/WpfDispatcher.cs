@@ -11,12 +11,24 @@ public sealed class WpfDispatcher : IDispatcher
     private readonly Dispatcher _dispatcher;
 
     /// <summary>
-    /// Initializes a new instance using the current application's dispatcher,
-    /// falling back to the calling thread's dispatcher when there is no application
-    /// (e.g. in unit tests).
+    /// Initializes a new instance using the dispatcher of the thread that
+    /// constructs it when that thread already has one — the usual case: a
+    /// host created on the UI thread it belongs to, including a secondary
+    /// UI thread in a multi-dispatcher application — falling back to the
+    /// current application's dispatcher, and then to the calling thread's
+    /// dispatcher when there is no application (e.g. in unit tests).
     /// </summary>
     /// <remarks>
-    /// The fallback deserves care: <see cref="Dispatcher.CurrentDispatcher"/>
+    /// The constructing thread wins over the application:
+    /// <see cref="Application.Current"/> names the application's main
+    /// dispatcher, so preferring it would marshal a host created on a
+    /// secondary UI thread to a thread that does not own its elements.
+    /// <see cref="Dispatcher.FromThread"/> never creates a dispatcher.
+    /// It does return a dispatcher that has already shut down (the
+    /// association outlives the loop), and no liveness check is applied:
+    /// a host constructed on a thread that no longer pumps cannot
+    /// function under any priority.
+    /// The final fallback deserves care: <see cref="Dispatcher.CurrentDispatcher"/>
     /// creates a dispatcher for the calling thread when the thread has none,
     /// and a dispatcher only executes posted work while its thread runs a
     /// message loop. On a thread without one (a plain background thread, a
@@ -28,9 +40,22 @@ public sealed class WpfDispatcher : IDispatcher
     /// thread pumps, whenever there is no running application.
     /// </remarks>
     public WpfDispatcher()
-        : this(Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher)
+        : this(SelectDispatcher(
+            Dispatcher.FromThread(Thread.CurrentThread),
+            Application.Current?.Dispatcher,
+            static () => Dispatcher.CurrentDispatcher))
     {
     }
+
+    // The default-dispatcher priority, factored out so the ordering is
+    // testable without a running Application: the constructing thread's
+    // existing dispatcher first, then the application's, then the
+    // lazily evaluated (creating) current-thread fallback.
+    internal static Dispatcher SelectDispatcher(
+        Dispatcher? constructingThreadDispatcher,
+        Dispatcher? applicationDispatcher,
+        Func<Dispatcher> currentDispatcherFallback)
+        => constructingThreadDispatcher ?? applicationDispatcher ?? currentDispatcherFallback();
 
     /// <summary>
     /// Initializes a new instance using the specified dispatcher.
