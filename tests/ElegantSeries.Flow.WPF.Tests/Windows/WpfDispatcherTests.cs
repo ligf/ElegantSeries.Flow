@@ -50,6 +50,40 @@ public sealed class WpfDispatcherTests
     }
 
     [Fact]
+    public void SelectDispatcher_PrefersConstructingThreadOverApplication()
+    {
+        var threadDispatcher = StaHelper.Run(() => Dispatcher.CurrentDispatcher);
+        var applicationDispatcher = StaHelper.Run(() => Dispatcher.CurrentDispatcher);
+        Assert.NotSame(threadDispatcher, applicationDispatcher);
+
+        // A host constructed on a secondary UI thread must marshal to
+        // that thread, not to the application's main dispatcher.
+        var selected = WpfDispatcher.SelectDispatcher(
+            threadDispatcher, applicationDispatcher, () => Dispatcher.CurrentDispatcher);
+
+        Assert.Same(threadDispatcher, selected);
+    }
+
+    [Fact]
+    public void SelectDispatcher_FallsBackInOrder_AndLazily()
+    {
+        var applicationDispatcher = StaHelper.Run(() => Dispatcher.CurrentDispatcher);
+        var fallbackDispatcher = StaHelper.Run(() => Dispatcher.CurrentDispatcher);
+        int fallbackCalls = 0;
+        Dispatcher Fallback()
+        {
+            fallbackCalls++;
+            return fallbackDispatcher;
+        }
+
+        Assert.Same(applicationDispatcher, WpfDispatcher.SelectDispatcher(null, applicationDispatcher, Fallback));
+        Assert.Equal(0, fallbackCalls);
+
+        Assert.Same(fallbackDispatcher, WpfDispatcher.SelectDispatcher(null, null, Fallback));
+        Assert.Equal(1, fallbackCalls);
+    }
+
+    [Fact]
     public void Post_ExecutesActionOnDispatcher()
     {
         StaHelper.Run(() =>
