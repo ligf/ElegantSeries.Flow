@@ -59,14 +59,20 @@ public class JournalMalformedSnapshotTests
         var directory = CreateTempDirectory();
         try
         {
+            // The malformed snapshot arrives as a file on disk (the
+            // JSON store's save boundary now rejects this shape, so the
+            // file is written directly): loading stays lenient, and the
+            // restore must reject what deserialization produced.
+            var snapshotPath = Path.Combine(directory, "journal.snapshot.json");
+            await File.WriteAllTextAsync(snapshotPath, "{\"FormatVersion\":1,\"Regions\":null}");
             using var store = new JsonFileNavigationJournalStore(Path.Combine(directory, "journal.json"));
-            await store.SaveSnapshotAsync(new JournalSnapshot { Regions = null! });
             var loaded = await store.LoadSnapshotAsync();
             Assert.NotNull(loaded);
 
             var journal = BuildJournal(store);
-            await Assert.ThrowsAsync<ArgumentException>(
+            var exception = await Assert.ThrowsAsync<ArgumentException>(
                 () => journal.RestoreAsync(loaded!, _ => Task.FromResult(true)));
+            Assert.Contains("Regions is null", exception.Message);
         }
         finally
         {
