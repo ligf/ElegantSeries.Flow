@@ -31,13 +31,14 @@ public sealed class RouteMatch
 
     /// <summary>Placeholder name → captured segment text
     /// (percent-decoded), for every placeholder in the matched
-    /// pattern.</summary>
+    /// pattern. Keys are the placeholder names exactly as written in
+    /// the pattern, and lookup is case-sensitive.</summary>
     public IReadOnlyDictionary<string, string> Values { get; }
 
     /// <summary>Query key → decoded value. A key without
     /// <c>=</c> maps to an empty string; when a key repeats, the last
     /// value wins. A pair that begins with <c>=</c> (such as the query
     /// <c>"=x"</c>) yields an entry under the empty key, as in
-    /// <c>URLSearchParams</c>.</summary>
+    /// <c>URLSearchParams</c>. Key lookup is case-sensitive.</summary>
     public IReadOnlyDictionary<string, string> Query { get; }
 }

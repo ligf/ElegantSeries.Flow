@@ -52,7 +52,15 @@ retention (defaults: `MainRegion`, `Push`, `Destroy`).
   registration order; the first full match wins.
 - A `{name}` segment is a placeholder and captures that segment into
   `RouteMatch.Values`; literal segments compare case-insensitively
-  (`OrdinalIgnoreCase`).
+  (`OrdinalIgnoreCase`). Placeholder names are case-sensitive — as
+  are the `Values` and `Query` keys — start with a Unicode letter
+  (in the Basic Multilingual Plane) or `_`, and may contain Unicode
+  letters, digits, and `_` (not just ASCII).
+- Patterns are matched against the percent-decoded URI segments and
+  are not themselves decoded: write literals in their decoded form
+  (`café`, not `caf%C3%A9`). A literal containing `?` or `#` only
+  matches a URI carrying the percent-encoded form (`a%3Fb`), because
+  the raw character is structural in the URI.
 - The query string is exposed as `RouteMatch.Query`. A pair beginning with
   `=` produces an empty key, as the browser's `URLSearchParams` does.
 - A full URI (`"app://orders/42"`) is accepted: the `scheme://` prefix is

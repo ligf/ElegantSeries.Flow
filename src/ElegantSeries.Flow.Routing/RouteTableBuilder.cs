@@ -10,8 +10,21 @@ namespace ElegantSeries.Flow.Routing;
 /// </summary>
 /// <remarks>
 /// A pattern is a <c>/</c>-separated list of segments; a segment is
-/// either a literal (matched case-insensitively) or a whole-segment
-/// placeholder <c>{name}</c> that captures the segment's text.
+/// either a literal (matched with
+/// <see cref="StringComparison.OrdinalIgnoreCase"/>) or a whole-segment
+/// placeholder <c>{name}</c> that captures the segment's text. A
+/// placeholder name starts with a Unicode letter (in the Basic
+/// Multilingual Plane) or <c>_</c> and continues with Unicode
+/// letters, digits, or <c>_</c> — it is not restricted to ASCII.
+/// Placeholder names are case-sensitive, so
+/// <c>{id}</c> and <c>{Id}</c> are two different placeholders.
+/// Patterns are matched against the percent-decoded segments of the
+/// URI, and the pattern text itself is not decoded: write literals in
+/// their decoded form (<c>café</c>, not <c>caf%C3%A9</c>). A literal
+/// containing <c>?</c> or <c>#</c> can only be matched by a URI
+/// carrying the percent-encoded form (for example <c>a%3Fb</c>),
+/// because those two characters are structural in a URI — one
+/// starts the query, the other the fragment.
 /// All registration arguments are validated when they are registered —
 /// a malformed pattern, an invalid region (null, empty, or
 /// whitespace-only), or an undefined operation/retention value fails
