@@ -241,6 +241,227 @@ public sealed class NavigationHostControllerTests
     }
 
     [Fact]
+    public void ShowViewThrows_OnSynchronousPath_ReportsThroughHookAndKeepsPreviousContent()
+    {
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var failures = new List<(INavigationViewModel ViewModel, Exception Error)>();
+        var goodVm = new StubViewModel();
+        var badVm = new OtherViewModel();
+        var showError = new InvalidOperationException("show boom");
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (view, vm) =>
+            {
+                if (ReferenceEquals(vm, badVm))
+                {
+                    throw showError;
+                }
+
+                shown.Add((view, vm));
+            },
+            clearView: () => { },
+            onViewCreationFailed: (vm, ex) => failures.Add((vm, ex)));
+        var service = new FakeNavigationService();
+        controller.Attach(service);
+
+        service.RaiseNavigated("MainRegion", goodVm);
+        var escaped = Record.Exception(() => service.RaiseNavigated("MainRegion", badVm));
+
+        // Showing runs view code (a view's DataContext initialization):
+        // its failure takes the creation failure's path — no escape into
+        // the event raiser, previous content kept, hook reports.
+        Assert.Null(escaped);
+        var single = Assert.Single(shown);
+        Assert.Same(goodVm, single.ViewModel);
+        var failure = Assert.Single(failures);
+        Assert.Same(badVm, failure.ViewModel);
+        Assert.Same(showError, failure.Error);
+    }
+
+    [Fact]
+    public void ShowViewThrows_OnQueuedPath_ReportsThroughHookAndDoesNotEscapePostedCallback()
+    {
+        var dispatcher = new FakeDispatcher(hasAccess: false);
+        var failures = new List<(INavigationViewModel ViewModel, Exception Error)>();
+        var showError = new InvalidOperationException("show boom");
+        var vm = new StubViewModel();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (_, _) => throw showError,
+            clearView: () => { },
+            onViewCreationFailed: (failedVm, ex) => failures.Add((failedVm, ex)));
+        var service = new FakeNavigationService();
+        controller.Attach(service);
+
+        service.RaiseNavigated("MainRegion", vm);
+        Assert.Equal(1, dispatcher.PostedCount);
+
+        // An escaping show failure would become an unhandled dispatcher
+        // exception here.
+        var escaped = Record.Exception(() => dispatcher.RunPosted());
+
+        Assert.Null(escaped);
+        var failure = Assert.Single(failures);
+        Assert.Same(vm, failure.ViewModel);
+        Assert.Same(showError, failure.Error);
+    }
+
+    [Fact]
+    public void ShowViewThrows_OnRefreshPath_ReportsThroughHookAndDoesNotEscape()
+    {
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var failures = new List<(INavigationViewModel ViewModel, Exception Error)>();
+        var showError = new InvalidOperationException("show boom");
+        var vm = new StubViewModel();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (_, _) => throw showError,
+            clearView: () => { },
+            onViewCreationFailed: (failedVm, ex) => failures.Add((failedVm, ex)));
+        var service = new FakeNavigationService();
+        service.CurrentByRegion["MainRegion"] = vm;
+        controller.Attach(service);
+
+        // Refresh runs under the platform hosts' property setters: the
+        // show failure must not leak to the setter's caller.
+        var escaped = Record.Exception(() => controller.Refresh());
+
+        Assert.Null(escaped);
+        var failure = Assert.Single(failures);
+        Assert.Same(vm, failure.ViewModel);
+        Assert.Same(showError, failure.Error);
+    }
+
+    [Fact]
+    public void ShowViewThrows_FailureHookAlsoThrows_Swallowed()
+    {
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        int hookCalls = 0;
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (_, _) => throw new InvalidOperationException("show boom"),
+            clearView: () => { },
+            onViewCreationFailed: (_, _) => { hookCalls++; throw new InvalidOperationException("hook boom"); });
+        var service = new FakeNavigationService();
+        controller.Attach(service);
+
+        var escaped = Record.Exception(() => service.RaiseNavigated("MainRegion", new StubViewModel()));
+
+        Assert.Null(escaped);
+        Assert.Equal(1, hookCalls);
+    }
+
+    [Fact]
+    public void ClearViewThrows_OnRefresh_ReportsAgainstLastShownPageAndDoesNotEscape()
+    {
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var failures = new List<(INavigationViewModel ViewModel, Exception Error)>();
+        var clearError = new InvalidOperationException("clear boom");
+        var vm = new StubViewModel();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (view, shownVm) => shown.Add((view, shownVm)),
+            clearView: () => throw clearError,
+            onViewCreationFailed: (failedVm, ex) => failures.Add((failedVm, ex)));
+        var service = new FakeNavigationService();
+        controller.Attach(service);
+
+        service.RaiseNavigated("MainRegion", vm);
+        Assert.Single(shown);
+
+        // The region is empty, so Refresh clears the host; the clear
+        // runs the outgoing view's code and throws. The failure is
+        // reported against the page still on screen and never escapes.
+        var escaped = Record.Exception(() => controller.Refresh());
+
+        Assert.Null(escaped);
+        var failure = Assert.Single(failures);
+        Assert.Same(vm, failure.ViewModel);
+        Assert.Same(clearError, failure.Error);
+    }
+
+    [Fact]
+    public void ClearViewThrows_AfterFailedShow_ReportsAgainstPageStillOnScreen()
+    {
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var shown = new List<(object View, INavigationViewModel ViewModel)>();
+        var failures = new List<(INavigationViewModel ViewModel, Exception Error)>();
+        var showError = new InvalidOperationException("show boom");
+        var clearError = new InvalidOperationException("clear boom");
+        var goodVm = new StubViewModel();
+        var badVm = new OtherViewModel();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (view, vm) =>
+            {
+                if (ReferenceEquals(vm, badVm))
+                {
+                    throw showError;
+                }
+
+                shown.Add((view, vm));
+            },
+            clearView: () => throw clearError,
+            onViewCreationFailed: (vm, ex) => failures.Add((vm, ex)));
+        var service = new FakeNavigationService();
+        controller.Attach(service);
+
+        service.RaiseNavigated("MainRegion", goodVm);
+        service.RaiseNavigated("MainRegion", badVm);
+
+        // The failed show never replaced the shown page, so the clear
+        // failure that follows is attributed to the page still on
+        // screen — not to the page that failed to show.
+        var escaped = Record.Exception(() => controller.Refresh());
+
+        Assert.Null(escaped);
+        Assert.Single(shown);
+        Assert.Equal(2, failures.Count);
+        Assert.Same(badVm, failures[0].ViewModel);
+        Assert.Same(showError, failures[0].Error);
+        Assert.Same(goodVm, failures[1].ViewModel);
+        Assert.Same(clearError, failures[1].Error);
+    }
+
+    [Fact]
+    public void ClearViewThrows_WithNothingShown_SwallowedWithoutReport()
+    {
+        var dispatcher = new FakeDispatcher(hasAccess: true);
+        var failures = new List<(INavigationViewModel ViewModel, Exception Error)>();
+        var controller = new NavigationHostController<object>(
+            dispatcher,
+            regionNameProvider: () => "MainRegion",
+            viewFactory: _ => new object(),
+            showView: (_, _) => { },
+            clearView: () => throw new InvalidOperationException("clear boom"),
+            onViewCreationFailed: (vm, ex) => failures.Add((vm, ex)));
+        var service = new FakeNavigationService();
+        controller.Attach(service);
+
+        // Nothing was ever shown, so there is no page to attribute the
+        // clear failure to: it is swallowed rather than escaping
+        // Refresh, and the hook is not invoked.
+        var escaped = Record.Exception(() => controller.Refresh());
+
+        Assert.Null(escaped);
+        Assert.Empty(failures);
+    }
+
+    [Fact]
     public void ViewFactoryReturnsNull_ReportedAsFailure_AndRetriedNextTime()
     {
         var harness = new Harness();

@@ -33,9 +33,12 @@ namespace ElegantSeries.Flow.WPF.Hosting;
 /// manual cache cleanup is needed.
 /// </para>
 /// <para>
-/// Failure handling: if view creation fails (the <see cref="ViewLocator"/> is not
-/// set, the ViewModel type is not registered, or the view factory throws), the host
-/// keeps showing the previous content and calls <see cref="OnViewCreationFailed"/>.
+/// Failure handling: if creating or displaying a view fails (the <see cref="ViewLocator"/> is not
+/// set, the ViewModel type is not registered, or the view factory throws; showing a
+/// view runs its own initialization, and clearing runs the outgoing view's code), the host
+/// keeps showing the previous content and calls <see cref="OnViewCreationFailed"/>
+/// (except a clear failure when no page has been shown, which has no page to
+/// attribute it to and is swallowed unreported).
 /// Override it to log or surface the error.
 /// </para>
 /// <para>
@@ -182,15 +185,19 @@ public class NavigationHost : ContentControl, IDisposable
     }
 
     /// <summary>
-    /// Called when view creation fails for a navigated ViewModel: the ViewModel
-    /// type is not registered, or the view factory threw. The host keeps showing
-    /// the previous content.
+    /// Called when creating or displaying a view fails for a page: view
+    /// creation failed (the ViewModel type is not registered, or the view
+    /// factory threw), showing the view threw (assigning its DataContext runs
+    /// the view's own initialization), or clearing the previous view threw.
+    /// The host keeps showing the previous content. A clear failure when no
+    /// page has been shown is not reported: there is no page to attribute
+    /// it to.
     /// </summary>
-    /// <param name="viewModel">The ViewModel no view could be created for.</param>
+    /// <param name="viewModel">The ViewModel the failure belongs to: the page no view could be created or shown for, or — for a clear failure — the page the host most recently showed.</param>
     /// <param name="exception">
     /// The failure. An <see cref="InvalidOperationException"/> whose message names
     /// <see cref="ViewLocator"/> indicates missing host configuration; any other
-    /// exception comes from the view factory itself.
+    /// exception comes from the view factory or the view's own code.
     /// </param>
     /// <remarks>
     /// Runs on the UI thread. The default implementation does nothing. Override to

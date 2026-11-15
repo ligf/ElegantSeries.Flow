@@ -25,10 +25,14 @@ namespace ElegantSeries.Flow.Hosting;
 /// </para>
 /// <para>
 /// Failure handling: the view factory may throw (unregistered ViewModel type,
-/// misconfigured host, or a throwing factory). Failures never corrupt the
-/// currently shown content; they are reported through the
-/// <c>onViewCreationFailed</c> hook. They are deliberately not rethrown: the
-/// navigation service isolates event subscribers and swallows their exceptions
+/// misconfigured host, or a throwing factory), and the show and clear
+/// callbacks run view code too — assigning a view's DataContext triggers the
+/// view's own initialization, and clearing detaches the outgoing view.
+/// Failures at any of these steps never corrupt the currently shown content;
+/// they are reported through the <c>onViewCreationFailed</c> hook — with one
+/// exception: a clear failure when no page has been shown has no page to
+/// attribute it to and is swallowed unreported. They are
+/// deliberately not rethrown: the navigation service isolates event subscribers and swallows their exceptions
 /// by design, so throwing could never fail fast — the hook is the observable channel.
 /// The hook is also the terminal channel: an exception thrown by the hook
 /// itself is swallowed and never propagates to the event raiser, a property
@@ -59,6 +63,12 @@ internal sealed class NavigationHostController<TView> where TView : class
     private INavigationService? _navigationService;
     private IDisposable? _navigatedSubscription;
     private bool _closed;
+    // The page the host most recently showed, used to attribute a
+    // clear failure (a clear has no incoming page of its own). Written
+    // after a successful show and cleared after a successful clear;
+    // show and clear only ever run on the UI thread, so no lock is
+    // needed for it.
+    private INavigationViewModel? _lastShownViewModel;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="NavigationHostController{TView}"/> class.
@@ -82,9 +92,9 @@ internal sealed class NavigationHostController<TView> where TView : class
     /// failures are reported via <paramref name="onViewCreationFailed"/> and the
     /// previously shown content is kept.
     /// </param>
-    /// <param name="showView">Displays a view for a ViewModel. Always runs on the UI thread.</param>
-    /// <param name="clearView">Clears the displayed content. Always runs on the UI thread.</param>
-    /// <param name="onViewCreationFailed">Optional hook invoked when <paramref name="viewFactory"/> throws. Exceptions thrown by the hook are swallowed: the hook is the terminal failure channel.</param>
+    /// <param name="showView">Displays a view for a ViewModel. Always runs on the UI thread. May throw (it runs view code); failures are reported via <paramref name="onViewCreationFailed"/> and the previously shown content is kept.</param>
+    /// <param name="clearView">Clears the displayed content. Always runs on the UI thread. May throw (it runs the outgoing view's code); failures are reported via <paramref name="onViewCreationFailed"/> against the most recently shown page, or swallowed unreported when no page has been shown.</param>
+    /// <param name="onViewCreationFailed">Optional hook invoked when creating or displaying a view fails — <paramref name="viewFactory"/>, <paramref name="showView"/>, or <paramref name="clearView"/> throws. Exceptions thrown by the hook are swallowed: the hook is the terminal failure channel.</param>
     public NavigationHostController(
         IDispatcher dispatcher,
         Func<string> regionNameProvider,
@@ -196,24 +206,46 @@ internal sealed class NavigationHostController<TView> where TView : class
         {
             // A transient empty binding value clears the host instead of
             // throwing from GetCurrentViewModel's argument validation.
-            if (!IsClosed())
-            {
-                _clearView();
-            }
+            ClearView();
             return;
         }
 
         var viewModel = service.GetCurrentViewModel(regionName);
         if (viewModel is null)
         {
-            if (!IsClosed())
-            {
-                _clearView();
-            }
+            ClearView();
             return;
         }
 
         ApplyNavigation(viewModel, service, regionName);
+    }
+
+    private void ClearView()
+    {
+        if (IsClosed())
+        {
+            return;
+        }
+
+        try
+        {
+            _clearView();
+            _lastShownViewModel = null;
+        }
+        catch (Exception ex)
+        {
+            // Clearing runs the outgoing view's code (detaching it can
+            // throw): the failure is reported through the hook against
+            // the page the host most recently showed — the page still
+            // on screen — and never escapes Refresh (a property setter
+            // on the platform hosts). When nothing has been shown there
+            // is no page to attribute the failure to; it is swallowed,
+            // like a hook failure, rather than rethrown.
+            if (_lastShownViewModel is not null)
+            {
+                ReportViewFailure(_lastShownViewModel, ex);
+            }
+        }
     }
 
     private bool IsClosed()
@@ -357,27 +389,10 @@ internal sealed class NavigationHostController<TView> where TView : class
         }
         catch (Exception ex)
         {
-            // One bad view must not corrupt the host: keep showing the previous
-            // content and report the failure through the hook. The hook is the
-            // terminal channel: an exception thrown by the hook itself is
-            // swallowed, so one failure cannot surface as three different
-            // outcomes — a subscriber error on the synchronous path, an
-            // unhandled dispatcher exception on the queued path, or a throw
-            // out of a property setter on the refresh path. A failure that
-            // lands after closure is not reported at all: the hook is user
-            // code and must not run on a disposed host.
-            if (!IsClosed())
-            {
-                try
-                {
-                    _onViewCreationFailed?.Invoke(viewModel, ex);
-                }
-                catch
-                {
-                    // Terminal channel: nowhere further to report.
-                }
-            }
-
+            // One bad view must not corrupt the host: keep showing the
+            // previous content and report the failure through the hook
+            // (see ReportViewFailure for the failure-channel design).
+            ReportViewFailure(viewModel, ex);
             return;
         }
 
@@ -390,7 +405,50 @@ internal sealed class NavigationHostController<TView> where TView : class
             return;
         }
 
-        _showView(view, viewModel);
+        try
+        {
+            _showView(view, viewModel);
+        }
+        catch (Exception ex)
+        {
+            // Showing runs view code — assigning the view's DataContext
+            // synchronously runs its initialization — so a show failure
+            // gets the creation failure's treatment: the previous
+            // content stays (the platform show callbacks assign
+            // DataContext before Content, so the throw leaves the old
+            // content in place) and the failure is reported through
+            // the hook instead of escaping.
+            ReportViewFailure(viewModel, ex);
+            return;
+        }
+
+        _lastShownViewModel = viewModel;
+    }
+
+    // The terminal failure channel shared by view creation, showing,
+    // and clearing: the failure is reported through the hook exactly
+    // once and never rethrown, so one failure cannot surface as three
+    // different outcomes — a subscriber error on the synchronous path,
+    // an unhandled dispatcher exception on the queued path, or a throw
+    // out of a property setter on the refresh path. An exception thrown
+    // by the hook itself is swallowed (nowhere further to report). A
+    // failure that lands after closure is not reported at all: the
+    // hook is user code and must not run on a disposed host.
+    private void ReportViewFailure(INavigationViewModel viewModel, Exception exception)
+    {
+        if (IsClosed())
+        {
+            return;
+        }
+
+        try
+        {
+            _onViewCreationFailed?.Invoke(viewModel, exception);
+        }
+        catch
+        {
+            // Terminal channel: nowhere further to report.
+        }
     }
 
     private ViewCreationContext CreateContext(
