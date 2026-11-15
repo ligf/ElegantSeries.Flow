@@ -1243,6 +1243,14 @@ public sealed partial class NavigationService
                 }
 
                 NavigationEntry.CancelOutsideLocks(entry.LifecycleCts);
+                if (ReferenceEquals(entry.AbandonedGateTask, gate))
+                {
+                    // This gate already timed out once and was reported:
+                    // do not wait or report again — proceed exactly as
+                    // after a gate timeout.
+                    break;
+                }
+
                 using var delayCts = new CancellationTokenSource();
                 var finished = await Task.WhenAny(toTask, Task.Delay(DisposalGateTimeout, delayCts.Token)).ConfigureAwait(false);
                 if (ReferenceEquals(finished, toTask))
@@ -2061,6 +2069,14 @@ public sealed partial class NavigationService
                     continue;
                 }
 
+                if (ReferenceEquals(current.AbandonedGateTask, fromGate))
+                {
+                    // This gate already timed out once and was reported:
+                    // do not wait or report again — proceed exactly as
+                    // after a gate timeout.
+                    break;
+                }
+
                 using var delayCts = new CancellationTokenSource();
                 var finished = await Task.WhenAny(fromTask, Task.Delay(DisposalGateTimeout, delayCts.Token)).ConfigureAwait(false);
                 if (ReferenceEquals(finished, fromTask))
@@ -2619,6 +2635,14 @@ public sealed partial class NavigationService
                 claimed = pending;
                 NavigationEntry.CancelOutsideLocks(entry.LifecycleCts);
                 tokenCancelled = true;
+                if (ReferenceEquals(entry.AbandonedGateTask, gate))
+                {
+                    // This gate already timed out once and was reported:
+                    // do not wait or report again — proceed exactly as
+                    // after a gate timeout (the claim is settled below).
+                    break;
+                }
+
                 using var delayCts = new CancellationTokenSource();
                 var finished = await Task.WhenAny(toTask, Task.Delay(DisposalGateTimeout, delayCts.Token)).ConfigureAwait(false);
                 if (ReferenceEquals(finished, toTask))

@@ -3382,6 +3382,111 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task Refresh_RepeatedPreemption_SameGate_ReportsTimeoutExactlyOnce()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow(o => o.DisposalGateTimeout = TimeSpan.FromSeconds(2));
+        services.AddTransient<RepeatedlyStubbornViewModel>();
+        services.AddTransient<InterruptTargetViewModel>();
+        using var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var errors = new List<Exception>();
+        nav.SubscriberError += errors.Add;
+
+        Assert.True(await nav.NavigateToAsync<RepeatedlyStubbornViewModel>());
+        var vm = Assert.IsType<RepeatedlyStubbornViewModel>(nav.GetCurrentViewModel());
+
+        // Refresh #1: its To callback hangs, ignoring its token; the
+        // entry's in-flight gate stays open on that callback.
+        var refresh1 = nav.NavigateToAsync<RepeatedlyStubbornViewModel>(refreshIfActive: true);
+        await vm.SecondCallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            // Refresh #2 is claimed while the first callback hangs: the
+            // gate wait times out and reports, the claim is restored,
+            // and the second refresh runs its own hanging callback on
+            // the SAME gate.
+            var refresh2 = nav.NavigateToAsync<RepeatedlyStubbornViewModel>(refreshIfActive: true);
+            await vm.ThirdCallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            _ = await refresh1.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // The interrupting navigation is claimed while the second
+            // callback hangs on the already-abandoned gate: it proceeds
+            // without waiting on the gate again (the one-second bound
+            // sits well inside the two-second gate timeout) and without
+            // a second timeout report for the same gate.
+            var toDetail = nav.NavigateToAsync<InterruptTargetViewModel>();
+            Assert.True(await toDetail.WaitAsync(TimeSpan.FromSeconds(1)));
+            Assert.IsType<InterruptTargetViewModel>(nav.GetCurrentViewModel());
+            Assert.True(await refresh2.WaitAsync(TimeSpan.FromSeconds(10)));
+
+            Assert.Single(errors.OfType<TimeoutException>());
+        }
+        finally
+        {
+            // Let the abandoned runners finish so they cannot leak into
+            // other tests.
+            vm.ReleaseSecond.TrySetResult();
+            vm.ReleaseThird.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task Departure_ClaimOnAlreadyAbandonedGate_ReportsTimeoutExactlyOnce()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow(o => o.DisposalGateTimeout = TimeSpan.FromSeconds(2));
+        services.AddTransient<StubbornDepartureViewModel>();
+        services.AddTransient<InterruptTargetViewModel>();
+        services.AddTransient<InterruptSecondTargetViewModel>();
+        using var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var errors = new List<Exception>();
+        nav.SubscriberError += errors.Add;
+
+        Assert.True(await nav.NavigateToAsync<StubbornDepartureViewModel>());
+        var vm = Assert.IsType<StubbornDepartureViewModel>(nav.GetCurrentViewModel());
+
+        // The refresh's To callback hangs on the entry's gate.
+        var refresh = nav.NavigateToAsync<StubbornDepartureViewModel>(refreshIfActive: true);
+        await vm.SecondToStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            // The interrupting navigation is claimed during the hanging
+            // To: the gate wait times out and reports, then the restored
+            // navigation departs the page — its From callback runs
+            // under the SAME still-open gate and hangs too.
+            var toMiddle = nav.NavigateToAsync<InterruptTargetViewModel>();
+            await vm.FirstFromStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // A further navigation is claimed during the hanging From:
+            // the departure's gate wait sees the already-abandoned gate
+            // and proceeds without waiting on it again (the one-second
+            // bound sits well inside the two-second gate timeout) or
+            // reporting a second time. At the departure's final
+            // sampling the newer intent wins the hop: the middle
+            // navigation settles false (superseded) and the departure
+            // lands on the final target directly.
+            var toFinal = nav.NavigateToAsync<InterruptSecondTargetViewModel>();
+            Assert.True(await toFinal.WaitAsync(TimeSpan.FromSeconds(1)));
+            Assert.IsType<InterruptSecondTargetViewModel>(nav.GetCurrentViewModel());
+            Assert.False(await toMiddle.WaitAsync(TimeSpan.FromSeconds(10)));
+            _ = await refresh.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Single(errors.OfType<TimeoutException>());
+        }
+        finally
+        {
+            vm.ReleaseSecondTo.TrySetResult();
+            vm.ReleaseFirstFrom.TrySetResult();
+        }
+    }
+
+    [Fact]
     public async Task Refresh_StubbornCallback_WithGateTimeoutAboveTimerCeiling_InterruptParksUntilRelease()
     {
         // The pump-side gate wait under the same ceiling clamp as
@@ -3813,6 +3918,76 @@ public class NavigationServiceTests
     /// First activation completes at once; the refresh activation
     /// ignores its token and blocks on a gate only the test releases.
     /// </summary>
+    /// <summary>Second plain navigation target for the two-hop
+    /// interrupt test.</summary>
+    private sealed class InterruptSecondTargetViewModel : NavigationViewModelBase;
+
+    /// <summary>
+    /// A page whose second To callback and first From callback each
+    /// block on their own test-controlled gate, ignoring their
+    /// cancellation tokens: the departure's From runs under the same
+    /// still-open in-flight gate as the hanging refresh activation.
+    /// </summary>
+    private sealed class StubbornDepartureViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public TaskCompletionSource SecondToStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseSecondTo { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource FirstFromStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseFirstFrom { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _toCount;
+        private int _fromCount;
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _toCount) == 2)
+            {
+                SecondToStarted.TrySetResult();
+                await ReleaseSecondTo.Task;
+            }
+        }
+
+        public async Task OnNavigatedFromAsync(CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _fromCount) == 1)
+            {
+                FirstFromStarted.TrySetResult();
+                await ReleaseFirstFrom.Task;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A page whose second and third To callbacks each block on their
+    /// own test-controlled gate, ignoring their cancellation tokens:
+    /// two consecutive activations hanging on the entry's single
+    /// in-flight gate.
+    /// </summary>
+    private sealed class RepeatedlyStubbornViewModel : NavigationViewModelBase, INavigationAwareAsync
+    {
+        public TaskCompletionSource SecondCallbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ThirdCallbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseSecond { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseThird { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _toCount;
+
+        public async Task OnNavigatedToAsync(object? parameter, CancellationToken cancellationToken = default)
+        {
+            switch (Interlocked.Increment(ref _toCount))
+            {
+                case 2:
+                    SecondCallbackStarted.TrySetResult();
+                    await ReleaseSecond.Task;
+                    break;
+                case 3:
+                    ThirdCallbackStarted.TrySetResult();
+                    await ReleaseThird.Task;
+                    break;
+            }
+        }
+
+        public Task OnNavigatedFromAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
     private sealed class StubbornRefreshViewModel : NavigationViewModelBase, INavigationAwareAsync
     {
         public TaskCompletionSource RefreshCallbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

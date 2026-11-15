@@ -725,7 +725,22 @@ public sealed partial class NavigationService
                 if (gate is not null && !gate.IsCompleted)
                 {
                     TrackDeferredDisposal(gate, entry.Scope, entry.ViewModel, entry.RegionName,
-                        ReportSubscriberError);
+                        ex =>
+                        {
+                            // The gate is reported exactly once across
+                            // all its waiters: if another waiter already
+                            // timed out on this gate (and reported it),
+                            // this deferred timeout stays silent; either
+                            // way the gate is marked abandoned so later
+                            // waiters neither wait nor report again.
+                            if (ReferenceEquals(entry.AbandonedGateTask, gate))
+                            {
+                                return;
+                            }
+
+                            entry.AbandonedGateTask = gate;
+                            ReportSubscriberError(ex);
+                        });
                     // The deferred task raises ViewModelReleased after disposal;
                     // do not enqueue it here (would double-fire).
                 }
