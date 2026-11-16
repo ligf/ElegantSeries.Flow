@@ -451,20 +451,17 @@ public class NavigationServiceCoverageTests
     }
 
     [Fact]
-    public async Task ClearCacheAsync_WhenCachedPageLifecycleHangs_TimesOutReportsAndDisposesAnyway()
-        => await RunClearCacheGateTimeoutScenarioAsync(
-            svc => svc.ClearCacheAsync("MainRegion").AsTask(),
-            "ClearCacheAsync timed out");
+    public async Task ClearCacheAsync_CachedPageWithAbandonedGate_DisposesScopeWithoutSecondTimeoutReport()
+        => await RunClearAbandonedGateScenarioAsync(
+            svc => svc.ClearCacheAsync("MainRegion").AsTask());
 
     [Fact]
-    public async Task ClearAllCacheAsync_WhenCachedPageLifecycleHangs_TimesOutReportsAndDisposesAnyway()
-        => await RunClearCacheGateTimeoutScenarioAsync(
-            svc => svc.ClearAllCacheAsync().AsTask(),
-            "ClearAllCacheAsync timed out");
+    public async Task ClearAllCacheAsync_CachedPageWithAbandonedGate_DisposesScopeWithoutSecondTimeoutReport()
+        => await RunClearAbandonedGateScenarioAsync(
+            svc => svc.ClearAllCacheAsync().AsTask());
 
-    private static async Task RunClearCacheGateTimeoutScenarioAsync(
-        Func<INavigationService, Task> clearAsync,
-        string expectedMessagePrefix)
+    private static async Task RunClearAbandonedGateScenarioAsync(
+        Func<INavigationService, Task> clearAsync)
     {
         var services = new ServiceCollection();
         services.AddElegantSeriesFlow(o => o.DisposalGateTimeout = TimeSpan.FromMilliseconds(200));
@@ -475,12 +472,15 @@ public class NavigationServiceCoverageTests
         var provider = services.BuildServiceProvider();
         var svc = provider.GetRequiredService<INavigationService>();
 
-        var timeoutSeen = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var timeouts = new List<TimeoutException>();
         svc.SubscribeSubscriberError(ex =>
         {
-            if (ex is TimeoutException && ex.Message.StartsWith(expectedMessagePrefix, StringComparison.Ordinal))
+            if (ex is TimeoutException timeout)
             {
-                timeoutSeen.TrySetResult(true);
+                lock (timeouts)
+                {
+                    timeouts.Add(timeout);
+                }
             }
         });
 
@@ -492,23 +492,32 @@ public class NavigationServiceCoverageTests
         {
             // Leave via Replace: the From callback starts and hangs. A second
             // intent registered while it hangs makes the pump wait out the gate
-            // timeout and abandon the callback; the departure then commits and
-            // the KeepAlive entry lands in the cache with its lifecycle gate
-            // still open (the scope is NOT disposed yet).
+            // timeout and abandon the callback (the one and only timeout
+            // report); the departure then commits and the KeepAlive entry
+            // lands in the cache with its lifecycle gate still open (the
+            // scope is NOT disposed yet).
             var away = svc.NavigateToAsync<TestHomeViewModel>(operation: NavigationOperation.Replace);
             await vm.LeaveEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             var third = svc.NavigateToAsync<TestDetailViewModel>(operation: NavigationOperation.Replace);
             Assert.True(await third.WaitAsync(TimeSpan.FromSeconds(30)));
             await away.WaitAsync(TimeSpan.FromSeconds(30));
             Assert.False(vm.Tracked.Disposed);
+            lock (timeouts)
+            {
+                Assert.Single(timeouts);
+            }
 
-            // The clear collects the still-open gate, waits out the same
-            // timeout, reports it, and releases the scope anyway. (The
-            // WaitAsync guards turn a regression of the timeout behavior
-            // into a test failure instead of a hung suite.)
+            // The gate already timed out once and was reported by the
+            // pump, so the clear does not wait on it or report it again:
+            // the cached scope is released as after any gate timeout.
+            // (The WaitAsync guard turns a regression into a test
+            // failure instead of a hung suite.)
             await clearAsync(svc).WaitAsync(TimeSpan.FromSeconds(30));
-            await timeoutSeen.Task.WaitAsync(TimeSpan.FromSeconds(30));
             Assert.True(vm.Tracked.Disposed);
+            lock (timeouts)
+            {
+                Assert.Single(timeouts);
+            }
         }
         finally
         {

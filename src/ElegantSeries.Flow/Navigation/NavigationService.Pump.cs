@@ -1243,7 +1243,7 @@ public sealed partial class NavigationService
                 }
 
                 NavigationEntry.CancelOutsideLocks(entry.LifecycleCts);
-                if (ReferenceEquals(entry.AbandonedGateTask, gate))
+                if (entry.IsGateAbandoned(gate))
                 {
                     // This gate already timed out once and was reported:
                     // do not wait or report again — proceed exactly as
@@ -1258,9 +1258,8 @@ public sealed partial class NavigationService
                     // Gate won: cancel the delay to release its timer early.
                     delayCts.Cancel();
                 }
-                else
+                else if (entry.TryMarkGateAbandoned(gate))
                 {
-                    entry.AbandonedGateTask = gate;
                     ReportGateTimeout(entry);
                 }
 
@@ -2069,7 +2068,7 @@ public sealed partial class NavigationService
                     continue;
                 }
 
-                if (ReferenceEquals(current.AbandonedGateTask, fromGate))
+                if (current.IsGateAbandoned(fromGate))
                 {
                     // This gate already timed out once and was reported:
                     // do not wait or report again — proceed exactly as
@@ -2084,9 +2083,8 @@ public sealed partial class NavigationService
                     // Gate won: cancel the delay to release its timer early.
                     delayCts.Cancel();
                 }
-                else
+                else if (current.TryMarkGateAbandoned(current.InFlightGateTask!))
                 {
-                    current.AbandonedGateTask = current.InFlightGateTask;
                     ReportGateTimeout(current);
                 }
 
@@ -2635,7 +2633,7 @@ public sealed partial class NavigationService
                 claimed = pending;
                 NavigationEntry.CancelOutsideLocks(entry.LifecycleCts);
                 tokenCancelled = true;
-                if (ReferenceEquals(entry.AbandonedGateTask, gate))
+                if (entry.IsGateAbandoned(gate))
                 {
                     // This gate already timed out once and was reported:
                     // do not wait or report again — proceed exactly as
@@ -2650,9 +2648,8 @@ public sealed partial class NavigationService
                     // Gate won: cancel the delay to release its timer early.
                     delayCts.Cancel();
                 }
-                else
+                else if (entry.TryMarkGateAbandoned(gate))
                 {
-                    entry.AbandonedGateTask = gate;
                     ReportGateTimeout(entry);
                 }
 
