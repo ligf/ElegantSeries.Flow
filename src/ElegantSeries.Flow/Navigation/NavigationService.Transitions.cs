@@ -699,7 +699,7 @@ public sealed partial class NavigationService
             var gateTask = entry.InFlightGateTask;
             // A gate the pump already timed out on (and reported) is not waited
             // on again: the scope is released exactly as after a timeout here.
-            bool gateAbandoned = gateTask is not null && ReferenceEquals(entry.AbandonedGateTask, gateTask);
+            bool gateAbandoned = gateTask is not null && entry.IsGateAbandoned(gateTask);
             if (gateTask is not null && !gateTask.IsCompleted && !isSelfDispose && !gateAbandoned)
             {
                 using var delayCts = new CancellationTokenSource();
@@ -708,9 +708,8 @@ public sealed partial class NavigationService
                 {
                     delayCts.Cancel();
                 }
-                else
+                else if (entry.TryMarkGateAbandoned(gateTask))
                 {
-                    entry.AbandonedGateTask = gateTask;
                     ReportGateTimeout(entry);
                 }
             }
@@ -728,18 +727,12 @@ public sealed partial class NavigationService
                         ex =>
                         {
                             // The gate is reported exactly once across
-                            // all its waiters: if another waiter already
-                            // timed out on this gate (and reported it),
-                            // this deferred timeout stays silent; either
-                            // way the gate is marked abandoned so later
-                            // waiters neither wait nor report again.
-                            if (ReferenceEquals(entry.AbandonedGateTask, gate))
+                            // all its waiters: only the waiter that
+                            // atomically claims the gate reports it.
+                            if (entry.TryMarkGateAbandoned(gate))
                             {
-                                return;
+                                ReportSubscriberError(ex);
                             }
-
-                            entry.AbandonedGateTask = gate;
-                            ReportSubscriberError(ex);
                         });
                     // The deferred task raises ViewModelReleased after disposal;
                     // do not enqueue it here (would double-fire).
@@ -1009,8 +1002,42 @@ public sealed partial class NavigationService
         /// The in-flight gate a gate waiter already timed out on (and reported
         /// via SubscriberError). Later waiters on the same gate do not wait or
         /// report again — the scope is released as after any gate timeout.
+        /// Accessed only via <see cref="IsGateAbandoned"/> and
+        /// <see cref="TryMarkGateAbandoned"/>, so the exactly-once report is
+        /// an atomic claim, not a check-then-write.
         /// </summary>
-        public volatile Task? AbandonedGateTask;
+        private Task? _abandonedGateTask;
+
+        /// <summary>Whether <paramref name="gate"/> is the gate a waiter
+        /// already timed out on and reported.</summary>
+        public bool IsGateAbandoned(Task gate) =>
+            ReferenceEquals(Volatile.Read(ref _abandonedGateTask), gate);
+
+        /// <summary>
+        /// Atomically records <paramref name="gate"/> as this entry's
+        /// abandoned gate. Exactly one caller per gate value returns
+        /// <see langword="true"/> — the one that must report the timeout;
+        /// a caller that finds the same gate already recorded, or loses
+        /// the race to record it, returns <see langword="false"/> and
+        /// stays silent. A previously recorded gate is simply replaced:
+        /// the claim is per gate value, not per field vacancy.
+        /// </summary>
+        public bool TryMarkGateAbandoned(Task gate)
+        {
+            var current = Volatile.Read(ref _abandonedGateTask);
+            while (!ReferenceEquals(current, gate))
+            {
+                var previous = Interlocked.CompareExchange(ref _abandonedGateTask, gate, current);
+                if (ReferenceEquals(previous, current))
+                {
+                    return true;
+                }
+
+                current = previous;
+            }
+
+            return false;
+        }
 
         /// <summary>
         /// The static ViewModel type this entry was navigated to: used as

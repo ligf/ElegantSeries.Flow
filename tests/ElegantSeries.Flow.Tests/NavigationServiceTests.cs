@@ -3487,6 +3487,101 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public async Task ClearCacheAsync_CachedPageWithAbandonedGate_DoesNotWaitOrReportAgain()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow(o => o.DisposalGateTimeout = TimeSpan.FromSeconds(2));
+        services.AddTransient<RepeatedlyStubbornViewModel>();
+        services.AddTransient<InterruptTargetViewModel>();
+        using var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var errors = new List<Exception>();
+        nav.SubscriberError += errors.Add;
+        var cacheCleared = new List<string>();
+        nav.RegionCacheCleared += cacheCleared.Add;
+
+        // The page is cached when it leaves the stack (KeepAlive).
+        Assert.True(await nav.NavigateToAsync<RepeatedlyStubbornViewModel>(retention: NavigationRetention.KeepAlive));
+        var vm = Assert.IsType<RepeatedlyStubbornViewModel>(nav.GetCurrentViewModel());
+
+        // The refresh activation hangs, ignoring its token.
+        var refresh = nav.NavigateToAsync<RepeatedlyStubbornViewModel>(refreshIfActive: true);
+        await vm.SecondCallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            // The interrupting navigation (Replace, so the page
+            // actually leaves the stack into the cache) waits the gate
+            // out (one timeout report), departs the page into the
+            // cache, and lands — the hung callback is still running
+            // under the now-abandoned gate.
+            Assert.True(await nav.NavigateToAsync<InterruptTargetViewModel>(operation: NavigationOperation.Replace).WaitAsync(TimeSpan.FromSeconds(10)));
+            _ = await refresh.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Single(errors.OfType<TimeoutException>());
+
+            // Clearing the cache must not wait on the abandoned gate
+            // again (the one-second bound sits well inside the
+            // two-second gate timeout) and must not report it a second
+            // time: the cached scope is released as after any gate
+            // timeout. RegionCacheCleared proves the cached entry was
+            // actually there to be removed.
+            await nav.ClearCacheAsync("MainRegion").AsTask().WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.Equal(["MainRegion"], cacheCleared);
+            Assert.Single(errors.OfType<TimeoutException>());
+
+            // The cached entry is gone: navigating back creates a
+            // fresh instance.
+            Assert.True(await nav.NavigateToAsync<RepeatedlyStubbornViewModel>());
+            Assert.NotSame(vm, nav.GetCurrentViewModel());
+        }
+        finally
+        {
+            vm.ReleaseSecond.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task DisposeAsync_PageWithAbandonedGate_DoesNotWaitOrReportAgain()
+    {
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow(o => o.DisposalGateTimeout = TimeSpan.FromSeconds(2));
+        services.AddTransient<RepeatedlyStubbornViewModel>();
+        services.AddTransient<InterruptTargetViewModel>();
+        using var provider = services.BuildServiceProvider();
+        var nav = provider.GetRequiredService<INavigationService>();
+
+        var errors = new List<Exception>();
+        nav.SubscriberError += errors.Add;
+
+        Assert.True(await nav.NavigateToAsync<RepeatedlyStubbornViewModel>(retention: NavigationRetention.KeepAlive));
+        var vm = Assert.IsType<RepeatedlyStubbornViewModel>(nav.GetCurrentViewModel());
+
+        var refresh = nav.NavigateToAsync<RepeatedlyStubbornViewModel>(refreshIfActive: true);
+        await vm.SecondCallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            // One gate timeout during navigation: the gate is
+            // abandoned and reported, the interrupting navigation
+            // lands, and the hung callback keeps running.
+            Assert.True(await nav.NavigateToAsync<InterruptTargetViewModel>().WaitAsync(TimeSpan.FromSeconds(10)));
+            _ = await refresh.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Single(errors.OfType<TimeoutException>());
+
+            // Disposal must not wait on the abandoned gate again (the
+            // one-second bound sits well inside the two-second gate
+            // timeout) and must not report it a second time.
+            await ((IAsyncDisposable)nav).DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.Single(errors.OfType<TimeoutException>());
+        }
+        finally
+        {
+            vm.ReleaseSecond.TrySetResult();
+        }
+    }
+
+    [Fact]
     public async Task Refresh_StubbornCallback_WithGateTimeoutAboveTimerCeiling_InterruptParksUntilRelease()
     {
         // The pump-side gate wait under the same ceiling clamp as

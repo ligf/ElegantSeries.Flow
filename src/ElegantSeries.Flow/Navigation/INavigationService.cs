@@ -1074,7 +1074,9 @@ public interface INavigationService
     /// stack are cancelled, and the method waits for their in-flight async
     /// lifecycle callbacks to complete — up to
     /// <see cref="NavigationOptions.DisposalGateTimeout"/> (default 5 seconds) —
-    /// before releasing their page scopes. A callback that ignores cancellation
+    /// before releasing their page scopes. A page whose in-flight gate
+    /// already timed out once during navigation is not waited on again:
+    /// its scope is released as after any gate timeout. A callback that ignores cancellation
     /// cannot block the clearing: on timeout, a <see cref="TimeoutException"/>
     /// is reported through <see cref="SubscriberError"/> and the scopes are
     /// released anyway. Page scopes still referenced by a navigation stack are
@@ -1111,7 +1113,9 @@ public interface INavigationService
     /// <see cref="NavigationOptions.DisposalGateTimeout"/>, default 5 seconds)
     /// before releasing their page scopes, a gate timeout is reported through
     /// <see cref="SubscriberError"/> and the scopes are released anyway, and
-    /// scope disposal failures are collected and rethrown to the caller.
+    /// scope disposal failures are collected and rethrown to the caller. A page
+    /// whose in-flight gate already timed out once during navigation is not
+    /// waited on again: its scope is released as after any gate timeout.
     /// <see cref="RegionCacheCleared"/> is raised for each region from which at
     /// least one entry was actually removed.
     /// </para>

@@ -123,7 +123,10 @@ public sealed partial class NavigationService
             // callbacks synchronously which may reenter the service (deadlock).
             ctsToCancel.Add(entry.LifecycleCts);
             var gate = entry.InFlightGateTask;
-            if (gate is not null && !gate.IsCompleted)
+            // A gate a waiter already timed out on (and reported) is not
+            // waited on again: the entry's scope is released as after
+            // any gate timeout.
+            if (gate is not null && !gate.IsCompleted && !entry.IsGateAbandoned(gate))
             {
                 gates.Add(gate);
             }

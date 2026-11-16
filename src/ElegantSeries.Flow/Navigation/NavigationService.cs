@@ -1415,7 +1415,10 @@ public sealed partial class NavigationService(IServiceProvider serviceProvider, 
         foreach (var entry in entriesToCancel)
         {
             var gate = entry.InFlightGateTask;
-            if (gate is not null && !gate.IsCompleted)
+            // A gate a waiter already timed out on (and reported) is
+            // not waited on again: the entry's scope is released as
+            // after any gate timeout.
+            if (gate is not null && !gate.IsCompleted && !entry.IsGateAbandoned(gate))
             {
                 gateTasks.Add(gate);
             }
