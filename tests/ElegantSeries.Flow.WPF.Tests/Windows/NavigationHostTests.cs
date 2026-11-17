@@ -104,6 +104,28 @@ public sealed class NavigationHostTests
     }
 
     [Fact]
+    public void RegionName_WhitespaceOnly_ClearsHostAndMatchesNothing()
+    {
+        StaHelper.Run(() =>
+        {
+            var (host, _, service) = CreateHost();
+            service.RaiseNavigated("MainRegion", new StubViewModel());
+            Assert.IsType<TestView>(host.Content);
+
+            // A whitespace-only name trims to empty: the host clears
+            // what it shows and matches no region's events, instead of
+            // throwing. (The service itself rejects such names; the
+            // host's mirror simply never matches.)
+            host.RegionName = "   ";
+            Assert.Equal("", host.RegionName);
+            Assert.Null(host.Content);
+
+            service.RaiseNavigated("MainRegion", new StubViewModel());
+            Assert.Null(host.Content);
+        });
+    }
+
+    [Fact]
     public void RegionNavigated_OtherRegion_Ignored()
     {
         StaHelper.Run(() =>
