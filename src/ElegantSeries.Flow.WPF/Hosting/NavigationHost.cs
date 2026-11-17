@@ -234,7 +234,7 @@ public class NavigationHost : ContentControl, IDisposable
         if (ViewLocator is null)
         {
             throw new InvalidOperationException(
-                $"NavigationHost (region '{_regionName}') cannot display views because {nameof(ViewLocator)} is not set. " +
+                $"NavigationHost for region '{_regionName}' cannot display a page because {nameof(ViewLocator)} is not set. " +
                 $"Assign an {nameof(IViewLocator)} (for example via services.AddElegantSeriesFlowViews()) before navigating.");
         }
 

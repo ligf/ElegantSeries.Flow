@@ -1,3 +1,4 @@
+using System.Windows.Controls;
 using ElegantSeries.Flow.WPF.Views;
 namespace ElegantSeries.Flow.WPF.Tests.Windows;
 
@@ -44,6 +45,59 @@ public sealed class BaseViewTests
             Assert.Same(vm2, view.Changes[2].Old);
             Assert.Null(view.Changes[2].New);
 
+            Assert.Null(view.ViewModel);
+        });
+    }
+
+    [Fact]
+    public void DataContextChange_ThroughIncompatibleType_ReportsNullTransitions()
+    {
+        StaHelper.Run(() =>
+        {
+            var view = new TestView();
+            var vm1 = new StubViewModel();
+            var vm2 = new StubViewModel();
+
+            view.DataContext = vm1;
+            view.DataContext = "not a view model"; // Typed value leaves: (vm1, null).
+            view.DataContext = 42;                 // Non-T to non-T: suppressed.
+            view.DataContext = vm2;                // Typed value arrives: (null, vm2).
+
+            Assert.Equal(3, view.Changes.Count);
+
+            Assert.Null(view.Changes[0].Old);
+            Assert.Same(vm1, view.Changes[0].New);
+
+            Assert.Same(vm1, view.Changes[1].Old);
+            Assert.Null(view.Changes[1].New);
+
+            Assert.Null(view.Changes[2].Old);
+            Assert.Same(vm2, view.Changes[2].New);
+        });
+    }
+
+    [Fact]
+    public void DataContextChange_InheritedFromParent_InvokesHook()
+    {
+        StaHelper.Run(() =>
+        {
+            var parent = new StackPanel();
+            var view = new TestView();
+            parent.Children.Add(view);
+            var vm = new StubViewModel();
+
+            parent.DataContext = vm;
+
+            Assert.Single(view.Changes);
+            Assert.Null(view.Changes[0].Old);
+            Assert.Same(vm, view.Changes[0].New);
+            Assert.Same(vm, view.ViewModel);
+
+            parent.DataContext = null;
+
+            Assert.Equal(2, view.Changes.Count);
+            Assert.Same(vm, view.Changes[1].Old);
+            Assert.Null(view.Changes[1].New);
             Assert.Null(view.ViewModel);
         });
     }
