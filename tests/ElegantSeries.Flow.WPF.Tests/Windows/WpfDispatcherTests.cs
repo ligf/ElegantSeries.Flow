@@ -109,9 +109,13 @@ public sealed class WpfDispatcherTests
             var wpfDispatcher = Dispatcher.CurrentDispatcher;
             var dispatcher = new WpfDispatcher(wpfDispatcher);
 
-            // Finish shutting the dispatcher down: InvokeShutdown only
-            // begins the shutdown; running the loop lets it complete.
-            wpfDispatcher.InvokeShutdown();
+            // Finish shutting the dispatcher down, the way an
+            // application does: the shutdown request is queued into
+            // the running loop, and Run returns once it completes.
+            // (Calling InvokeShutdown before any loop runs and then
+            // starting one throws: PushFrame refuses a dispatcher
+            // whose shutdown has already begun.)
+            wpfDispatcher.BeginInvoke(() => wpfDispatcher.InvokeShutdown(), DispatcherPriority.Send);
             Dispatcher.Run();
             Assert.True(wpfDispatcher.HasShutdownFinished);
 
