@@ -100,4 +100,33 @@ public sealed class WpfDispatcherTests
             Assert.True(ran);
         });
     }
+
+    [Fact]
+    public void Post_AfterDispatcherShutdownFinished_SilentlyDropsTheAction()
+    {
+        StaHelper.Run(() =>
+        {
+            var wpfDispatcher = Dispatcher.CurrentDispatcher;
+            var dispatcher = new WpfDispatcher(wpfDispatcher);
+
+            // Finish shutting the dispatcher down, the way an
+            // application does: the shutdown request is queued into
+            // the running loop, and Run returns once it completes.
+            // (Calling InvokeShutdown before any loop runs and then
+            // starting one throws: PushFrame refuses a dispatcher
+            // whose shutdown has already begun.)
+            wpfDispatcher.BeginInvoke(() => wpfDispatcher.InvokeShutdown(), DispatcherPriority.Send);
+            Dispatcher.Run();
+            Assert.True(wpfDispatcher.HasShutdownFinished);
+
+            // Characterization: BeginInvoke on a shut-down dispatcher
+            // does not throw — the returned operation is already
+            // Aborted, and because Post discards it, the delegate is
+            // dropped silently. Inside a host, a view switch posted
+            // after dispatcher shutdown is lost with no error report.
+            bool ran = false;
+            dispatcher.Post(() => ran = true);
+            Assert.False(ran);
+        });
+    }
 }
