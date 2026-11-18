@@ -1723,9 +1723,11 @@ public class ViewForGeneratorTests
         // A function pointer inside the type argument is written out in
         // full by the generated code too: the private nested type in its
         // signature is unnameable there. (The explicit attribute form
-        // never reaches this check — a function pointer is not a named
-        // type, so FLOWGEN006 reports it instead; inference through
-        // BaseView<T> is the reachable path.) The pointer violation now
+        // reaches this check the same way — its argument is the
+        // constructed named type DetailViewModel<delegate*<…>>, and the
+        // recursion into the pointer signature reports FLOWGEN017
+        // there too; FLOWGEN006 fires only when an attribute argument
+        // is not a named type at all.) The pointer violation now
         // co-reports on the same mapping; this test pins the
         // accessibility one.
         var sources = AttributeStub + AvaloniaControlsStub + NavigationViewModelStub + AvaloniaLocatorStub + AvaloniaBaseViewStub + """

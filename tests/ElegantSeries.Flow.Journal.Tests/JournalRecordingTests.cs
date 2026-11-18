@@ -537,6 +537,27 @@ public class JournalRecordingTests
         }
     }
 
+    /// <summary>
+    /// Polls the store for a short window and returns as soon as the
+    /// entry count grows beyond <paramref name="count"/> — or, when it
+    /// never does, the entries present at the end of the window. For
+    /// "nothing more is recorded" assertions: unlike a fixed delay, a
+    /// violation surfaces the moment the extra entry lands instead of
+    /// only when the window expires.
+    /// </summary>
+    internal static async Task<IReadOnlyList<JournalEntry>> WaitForNoEntriesBeyondAsync(
+        INavigationJournalStore store, int count)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(300);
+        while (true)
+        {
+            var entries = await store.ReadEntriesAsync();
+            if (entries.Count > count || DateTime.UtcNow > deadline)
+                return entries;
+            await Task.Delay(20);
+        }
+    }
+
     internal static async Task<IReadOnlyList<JournalEntry>> WaitForKindAsync(
         INavigationJournalStore store, JournalEntryKind kind)
     {

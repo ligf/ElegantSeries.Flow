@@ -9,6 +9,8 @@ namespace ElegantSeries.Flow.WPF.Tests.Windows;
 /// </summary>
 internal static class StaHelper
 {
+    private static readonly TimeSpan ThreadTimeout = TimeSpan.FromSeconds(60);
+
     public static void Run(Action action)
     {
         Exception? error = null;
@@ -24,8 +26,15 @@ internal static class StaHelper
             }
         });
         thread.SetApartmentState(ApartmentState.STA);
+        // Background, so a wedged test cannot hold the test host open;
+        // the bounded join below fails that one test instead.
+        thread.IsBackground = true;
         thread.Start();
-        thread.Join();
+        if (!thread.Join(ThreadTimeout))
+        {
+            throw new TimeoutException(
+                $"The STA test thread did not finish within {ThreadTimeout.TotalSeconds:F0} seconds.");
+        }
 
         if (error is not null)
         {
