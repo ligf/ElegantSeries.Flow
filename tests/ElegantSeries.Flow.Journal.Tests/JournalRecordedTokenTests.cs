@@ -35,8 +35,7 @@ public sealed class JournalRecordedTokenTests
         // The landing's lagged announcement arrives: the token absorbs
         // it — no duplicate entry for the recorded landing.
         fake.RaiseRegionNavigated("MainRegion", vm);
-        await Task.Delay(300);
-        Assert.Single(await store.ReadEntriesAsync());
+        Assert.Single(await JournalRecordingTests.WaitForNoEntriesBeyondAsync(store, 1));
 
         // The same instance lands again, bypassing the decorator: the
         // token is spent, so this announcement synthesizes an entry.

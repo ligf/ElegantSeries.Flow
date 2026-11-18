@@ -1137,6 +1137,11 @@ public sealed class ViewForGenerator : IIncrementalGenerator
     /// </remarks>
     private static INamedTypeSymbol? FindBaseViewModel(Compilation compilation, INamedTypeSymbol viewType)
     {
+        // Both platform locators are resolved once, up front: the base
+        // chain walk below consults them per candidate and they cannot
+        // change while it runs.
+        var avaloniaLocator = compilation.GetTypeByMetadataName(AvaloniaLocatorMetadataName);
+        var wpfLocator = compilation.GetTypeByMetadataName(WpfLocatorMetadataName);
         for (var current = viewType.BaseType; current is not null; current = current.BaseType)
         {
             var original = current.OriginalDefinition;
@@ -1157,7 +1162,7 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                 continue;
             }
 
-            var locator = compilation.GetTypeByMetadataName(locatorMetadataName);
+            var locator = locatorMetadataName == AvaloniaLocatorMetadataName ? avaloniaLocator : wpfLocator;
             if (locator is not null)
             {
                 if (!SymbolEqualityComparer.Default.Equals(original.ContainingAssembly, locator.ContainingAssembly))
@@ -1175,10 +1180,8 @@ public sealed class ViewForGenerator : IIncrementalGenerator
                 // be inferred from. When neither locator resolves,
                 // generation is suppressed downstream (FLOWGEN014 /
                 // FLOWGEN002) and the name match is kept as before.
-                var otherLocatorMetadataName = locatorMetadataName == AvaloniaLocatorMetadataName
-                    ? WpfLocatorMetadataName
-                    : AvaloniaLocatorMetadataName;
-                if (compilation.GetTypeByMetadataName(otherLocatorMetadataName) is not null)
+                var otherLocator = locatorMetadataName == AvaloniaLocatorMetadataName ? wpfLocator : avaloniaLocator;
+                if (otherLocator is not null)
                 {
                     continue;
                 }

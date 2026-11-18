@@ -38,8 +38,7 @@ public class JournalSubscriptionRobustnessTests
         // recording tap: nothing is appended, now or later.
         inner.RaiseViewModelReleased("MainRegion", new FakeViewModel());
         inner.RaiseRegionCacheCleared("MainRegion");
-        await Task.Delay(300);
-        Assert.Empty(await store.ReadEntriesAsync());
+        Assert.Empty(await JournalRecordingTests.WaitForNoEntriesBeyondAsync(store, 0));
 
         // A successor decorator over the same service and store
         // records each event exactly once — no zombie tap doubling
@@ -49,8 +48,7 @@ public class JournalSubscriptionRobustnessTests
         inner.RaiseRegionCacheCleared("MainRegion");
         var entries = await JournalRecordingTests.WaitForEntriesAsync(store, 1);
         Assert.Single(entries);
-        await Task.Delay(300);
-        Assert.Single(await store.ReadEntriesAsync());
+        Assert.Single(await JournalRecordingTests.WaitForNoEntriesBeyondAsync(store, 1));
     }
 
     [Fact]

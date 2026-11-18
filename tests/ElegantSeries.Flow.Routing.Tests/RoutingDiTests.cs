@@ -127,4 +127,25 @@ public sealed class RoutingDiTests
         Assert.IsType<Router>(provider.GetRequiredService<IRouter>());
     }
 
+    [Fact]
+    public void Registration_PreRegisteredRouterOnly_StillRegistersTheTable()
+    {
+        // The mirror image of the table-only case: a caller-registered
+        // router on its own is only half of what this method registers,
+        // so the call is not a no-op — the table built from configure
+        // still lands through TryAdd, and the caller's router stays.
+        var services = new ServiceCollection();
+        services.AddElegantSeriesFlow();
+        var stub = new StubRouter();
+        services.AddSingleton<IRouter>(stub);
+        services.AddElegantSeriesFlowRouting(Configure);
+
+        Assert.Single(services, d => d.ServiceType == typeof(IRouter));
+        Assert.Single(services, d => d.ServiceType == typeof(RouteTable));
+
+        using var provider = services.BuildServiceProvider();
+        Assert.Same(stub, provider.GetRequiredService<IRouter>());
+        Assert.NotNull(provider.GetRequiredService<RouteTable>());
+    }
+
 }
