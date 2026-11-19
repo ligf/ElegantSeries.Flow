@@ -10,9 +10,13 @@ namespace ElegantSeries.Flow.Routing;
 /// Without this attribute, the generator emits the <c>ViewForRegistrations</c>
 /// class into <c>ElegantSeries.Flow.Generated.&lt;sanitized assembly
 /// name&gt;</c> (with a fixed <c>Unknown</c> segment in place of the assembly
-/// name when the assembly has no name). Sanitization maps every character
-/// that is invalid in an identifier
-/// to <c>_</c>, so two assemblies whose names differ only in such characters
+/// name when the assembly has no name). Sanitization keeps the assembly
+/// name's dots as segment separators and, within each segment, maps every
+/// character that is not a letter, a digit or <c>_</c> to <c>_</c> (a segment
+/// that would start with a digit is prefixed with <c>_</c>, a segment equal
+/// to a reserved C# keyword gets a trailing <c>_</c>, and an empty segment
+/// becomes <c>_</c>), so two assemblies whose
+/// names differ only in such characters
 /// (for example <c>Contoso-UI</c> and <c>Contoso_UI</c>) derive the same
 /// namespace, and an application referencing both cannot tell their
 /// registrations apart. Setting this attribute on one of them resolves the
