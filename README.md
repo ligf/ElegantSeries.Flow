@@ -40,6 +40,9 @@ dotnet add package ElegantSeries.Flow
 
 Requires **.NET 10** or later.
 
+Version-to-version changes, including breaking changes and their migrations,
+are recorded in [CHANGELOG.md](CHANGELOG.md).
+
 ## Quick start
 
 ### 1. Register the service
@@ -168,8 +171,11 @@ registering the same ViewModel twice throws at startup.
 
 One naming caveat: the generated namespace is
 `ElegantSeries.Flow.Generated.<assembly name>`, with the assembly name
-sanitized by replacing every character that is invalid in an identifier
-with `_`, so two assemblies whose names differ only in such characters
+sanitized per segment — dots are kept as segment separators, and within a
+segment every character that is not a letter, digit or `_` is replaced
+with `_` (a segment starting with a digit gets a `_` prefix, a segment
+equal to a reserved C# keyword gets a trailing `_`, and an empty segment
+becomes `_`) — so two assemblies whose names differ only in such characters
 (say `Contoso-UI` and `Contoso_UI`) derive the same namespace, and an app
 referencing both cannot tell their registrations apart. The generator detects this and
 reports FLOWGEN015 in the app instead of emitting an ambiguous aggregation;
